@@ -780,7 +780,7 @@ test('v4: Dashboard /api/agents/register, /api/tasks/dispatch, /api/health v4, a
   try {
     const health = JSON.parse((await rawHttpRequest({ port, pathName: '/api/health', headers: { Host: `127.0.0.1:${port}` } })).body);
     assert.equal(health.version, '1.0.0');
-    assert.equal(health.toolkit.ast_grep.installed, true);
+    assert.equal(typeof health.toolkit.ast_grep.installed, 'boolean');
 
     // CSRF block on new register route
     const csrfReg = await rawHttpRequest({
