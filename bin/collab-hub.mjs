@@ -148,7 +148,7 @@ if (cmd === 'mcp') {
         force: Boolean(flags.force),
       }), null, 2));
     } else if (cmd === 'logs') {
-      console.log(JSON.stringify(getTaskLogs(positionals[0] || flag('id')), null, 2));
+      console.log(JSON.stringify(getTaskLogs(positionals[0] || flag('id'), db), null, 2));
     } else if (cmd === 'resume') {
       console.log(JSON.stringify(await resumeDagWorkflow(db, {
         batchId: positionals[0] || flag('batch'),

@@ -8,7 +8,7 @@ import {
   APP_VERSION, INTEGRATIONS, MAX_PROMPT_BYTES, NATIVE_MEMBERS, PAYLOAD_DIR,
   VALID_ROLES, WORKTREE_DIR, assertValidAgentId, assertValidMember, assertValidTaskId, loadPolicy, resolveProjectDir, toWslPath,
 } from './config.mjs';
-import { logEvent, parseTaskRow, setMemberCooldown } from './db.mjs';
+import { isProcessAlive, logEvent, parseTaskRow, setMemberCooldown } from './db.mjs';
 import { hubBus } from './event-bus.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
 import { planDispatch } from './prober.mjs';
@@ -22,6 +22,7 @@ const ALLOWED_TASK_COLUMNS = new Set([
   'state', 'external_id', 'session_id', 'reply_generation', 'payload_sha256',
   'worktree_path', 'branch_name', 'result_text', 'evidence_json', 'error_code',
   'error_message', 'meta_json', 'mail_message_id', 'completed_at', 'attempted_at',
+  'owner_pid', 'owner_token', 'cancel_requested_at', 'cancel_reason',
 ]);
 
 const MAX_LOG_TASKS = 100;
@@ -29,8 +30,32 @@ const MAX_LOG_ENTRIES_PER_TASK = 200;
 const MAX_LOG_BYTES_PER_TASK = 64 * 1024;
 const ACTIVE_RUNS = new Map();
 const TASK_LOGS = new Map();
+let cancelWatcherTimer = null;
+let cancelWatcherDb = null;
 
-export function appendTaskLog(taskId, stream, text) {
+function ensureCancelWatcher(db) {
+  if (!db) return;
+  cancelWatcherDb = db;
+  if (cancelWatcherTimer) return;
+  cancelWatcherTimer = setInterval(() => {
+    if (ACTIVE_RUNS.size === 0) {
+      clearInterval(cancelWatcherTimer);
+      cancelWatcherTimer = null;
+      return;
+    }
+    try {
+      for (const [tid, handle] of ACTIVE_RUNS.entries()) {
+        const row = cancelWatcherDb.prepare('SELECT cancel_requested_at, cancel_reason, state FROM tasks WHERE task_id = ?').get(tid);
+        if (row && (row.cancel_requested_at || row.state === 'cancelled')) {
+          Promise.resolve(handle.cancel(row.cancel_reason || 'Cancelled via cross-process signal')).catch(() => {});
+        }
+      }
+    } catch { /* best-effort */ }
+  }, 250);
+  cancelWatcherTimer.unref();
+}
+
+export function appendTaskLog(taskId, stream, text, db = null) {
   if (!taskId || !text) return;
   const chunk = String(text).slice(0, 4096);
   if (!chunk) return;
@@ -43,7 +68,8 @@ export function appendTaskLog(taskId, stream, text) {
     bucket = { bytes: 0, entries: [] };
     TASK_LOGS.set(taskId, bucket);
   }
-  const entry = { ts: new Date().toISOString(), stream: stream || 'stdout', text: chunk };
+  const now = new Date().toISOString();
+  const entry = { ts: now, stream: stream || 'stdout', text: chunk };
   bucket.entries.push(entry);
   bucket.bytes += Buffer.byteLength(chunk, 'utf8');
   while (bucket.entries.length > MAX_LOG_ENTRIES_PER_TASK || bucket.bytes > MAX_LOG_BYTES_PER_TASK) {
@@ -51,16 +77,58 @@ export function appendTaskLog(taskId, stream, text) {
     if (!dropped) break;
     bucket.bytes -= Buffer.byteLength(dropped.text, 'utf8');
   }
-  hubBus.publish('task.log', { task_id: taskId, stream: entry.stream, text: entry.text });
+  let logId = 0;
+  if (db) {
+    try {
+      const res = db.prepare(`
+        INSERT INTO task_logs (task_id, stream, text, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(taskId, entry.stream, entry.text, now);
+      logId = Number(res.lastInsertRowid || 0);
+    } catch { /* best-effort durable persistence */ }
+  }
+  hubBus.publish('task.log', { log_id: logId, task_id: taskId, stream: entry.stream, text: entry.text, source_pid: process.pid });
 }
 
-export function getTaskLogs(taskId) {
+export function getTaskLogs(taskId, db = null) {
   const safeId = assertValidTaskId(taskId, 'task_id');
-  const bucket = TASK_LOGS.get(safeId);
+  const localActive = ACTIVE_RUNS.has(safeId);
+  let logs = [];
+  let ownerPid = localActive ? process.pid : null;
+  let ownerAlive = localActive;
+  let cancelRequested = false;
+
+  if (db) {
+    try {
+      const rows = db.prepare(`
+        SELECT id, stream, text, created_at
+        FROM task_logs
+        WHERE task_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+      `).all(safeId, MAX_LOG_ENTRIES_PER_TASK).reverse();
+      if (rows.length > 0) {
+        logs = rows.map((r) => ({ id: r.id, ts: r.created_at, stream: r.stream, text: r.text }));
+      }
+      const taskRow = db.prepare('SELECT state, owner_pid, cancel_requested_at FROM tasks WHERE task_id = ?').get(safeId);
+      if (taskRow) {
+        ownerPid = taskRow.owner_pid ?? ownerPid;
+        ownerAlive = localActive || Boolean(taskRow.owner_pid && !TERMINAL_STATES.has(taskRow.state) && isProcessAlive(taskRow.owner_pid));
+        cancelRequested = Boolean(taskRow.cancel_requested_at);
+      }
+    } catch { /* fallback to RAM bucket */ }
+  }
+  if (logs.length === 0) {
+    const bucket = TASK_LOGS.get(safeId);
+    logs = bucket ? bucket.entries.slice() : [];
+  }
   return {
     task_id: safeId,
-    active: ACTIVE_RUNS.has(safeId),
-    logs: bucket ? bucket.entries.slice() : [],
+    active: localActive || ownerAlive,
+    owner_pid: ownerPid,
+    owner_alive: ownerAlive,
+    cancel_requested: cancelRequested,
+    logs,
   };
 }
 
@@ -100,15 +168,28 @@ export function sha256Hex(text) {
 }
 
 function killProcessTree(child) {
-  if (!child || child.exitCode !== null || child.killed) return;
-  try { child.kill(); } catch {}
+  if (!child || child.exitCode !== null) return;
   if (process.platform === 'win32' && child.pid) {
+    // Non-blocking tree kill on Windows to avoid stalling the HTTP/SSE event loop
     try {
-      execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore', windowsHide: true, timeout: 4000,
+      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore', windowsHide: true,
       });
-    } catch { /* already exited */ }
+      killer.unref();
+    } catch { /* fallback below */ }
+    try { child.kill(); } catch {}
+    return;
   }
+  // On POSIX, kill the entire detached process group so grandchild processes never leak
+  if (child.pid) {
+    try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+    setTimeout(() => {
+      if (child.exitCode === null) {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+      }
+    }, 800).unref();
+  }
+  try { child.kill('SIGKILL'); } catch {}
 }
 
 /**
@@ -334,10 +415,11 @@ function detectClaude429(receipt, err = null) {
 }
 
 /**
- * Column-whitelisted, terminal-guarded task update.
- * Prevents concurrent slow polls from regressing a terminal (completed/failed/rerouted) task back to running!
+ * Column-whitelisted, terminal-guarded CAS task update.
+ * Returns `{ task, changed }` so callers never emit bogus audit events when a concurrent
+ * terminal transition already won the race.
  */
-function updateTask(db, taskId, fields, { allowTerminalOverwrite = false } = {}) {
+function updateTaskCas(db, taskId, fields, { allowTerminalOverwrite = false } = {}) {
   const keys = Object.keys(fields);
   for (const k of keys) {
     if (!ALLOWED_TASK_COLUMNS.has(k)) throw new Error(`Disallowed task column update: ${k}`);
@@ -346,8 +428,15 @@ function updateTask(db, taskId, fields, { allowTerminalOverwrite = false } = {})
   const sets = [...keys.map((k) => `${k} = ?`), 'updated_at = ?'].join(', ');
   const vals = [...keys.map((k) => fields[k]), now, taskId];
   const guard = allowTerminalOverwrite ? '' : ` AND state NOT IN ('completed', 'failed', 'rerouted', 'cancelled')`;
-  db.prepare(`UPDATE tasks SET ${sets} WHERE task_id = ?${guard}`).run(...vals);
-  return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId));
+  const res = db.prepare(`UPDATE tasks SET ${sets} WHERE task_id = ?${guard}`).run(...vals);
+  return {
+    changed: (res.changes || 0) > 0,
+    task: parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId)),
+  };
+}
+
+function updateTask(db, taskId, fields, opts = {}) {
+  return updateTaskCas(db, taskId, fields, opts).task;
 }
 
 /**
@@ -355,7 +444,7 @@ function updateTask(db, taskId, fields, { allowTerminalOverwrite = false } = {})
  * Strictly validates task_id, enforces policy roots (including WORKTREE_DIR), persists dispatching intent first,
  * and never resends an existing task.
  */
-async function runGenericCliDriver(agent, { cwd, prompt, taskId = null }) {
+async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = null }) {
   const cfg = agent.config || {};
   const command = cfg.command;
   if (!command) throw new Error(`generic-cli agent "${agent.id}" has no command configured`);
@@ -374,12 +463,17 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null }) {
       cwd,
       env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
       windowsHide: true,
     });
     let stdout = '';
     let stderr = '';
     let settled = false;
     let cancelled = false;
+    let cancelReason = null;
+    let resolveExited = null;
+    const exitedPromise = new Promise((r) => { resolveExited = r; });
+
     const finish = (fn, v) => {
       if (!settled) {
         settled = true;
@@ -389,41 +483,52 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null }) {
       }
     };
     if (taskId) {
-      appendTaskLog(taskId, 'system', `[start] ${command} (${agent.id})`);
+      appendTaskLog(taskId, 'system', `[start] ${command} (${agent.id}, pid=${child.pid || 'n/a'})`, db);
       ACTIVE_RUNS.set(taskId, {
         kind: 'generic-cli',
-        cancel(reason) {
+        pid: child.pid || null,
+        async cancel(reason) {
+          if (cancelled) return exitedPromise;
           cancelled = true;
+          cancelReason = reason || 'Cancelled by operator';
           killProcessTree(child);
-          finish(reject, Object.assign(new Error(reason || 'Cancelled by operator'), { code: 'TASK_CANCELLED' }));
+          // Wait up to 2.5s for actual OS process exit so cancellation is confirmed!
+          await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 2500))]);
+          finish(reject, Object.assign(new Error(cancelReason), { code: 'TASK_CANCELLED' }));
+          return child.exitCode !== null || child.killed;
         },
       });
+      ensureCancelWatcher(db);
     }
     const timer = setTimeout(() => {
       killProcessTree(child);
       finish(reject, Object.assign(new Error(`generic-cli "${agent.id}" timed out after ${timeoutMs}ms`), { code: 'GENERIC_CLI_TIMEOUT' }));
     }, timeoutMs);
 
-    child.on('error', (err) => finish(reject, Object.assign(new Error(`generic-cli spawn error: ${err.message}`), { code: err.code || 'GENERIC_CLI_SPAWN' })));
+    child.on('error', (err) => {
+      resolveExited?.();
+      finish(reject, Object.assign(new Error(`generic-cli spawn error: ${err.message}`), { code: err.code || 'GENERIC_CLI_SPAWN' }));
+    });
     child.stdin.on('error', () => {});
     child.stdout.on('data', (c) => {
       const s = c.toString('utf8');
       if (stdout.length < 2 * 1024 * 1024) stdout += s;
-      if (taskId) appendTaskLog(taskId, 'stdout', s);
+      if (taskId) appendTaskLog(taskId, 'stdout', s, db);
     });
     child.stderr.on('data', (c) => {
       const s = c.toString('utf8');
       if (stderr.length < 256 * 1024) stderr += s;
-      if (taskId) appendTaskLog(taskId, 'stderr', s);
+      if (taskId) appendTaskLog(taskId, 'stderr', s, db);
     });
     child.on('close', (code) => {
+      resolveExited?.();
       if (cancelled) {
-        finish(reject, Object.assign(new Error('Cancelled by operator'), { code: 'TASK_CANCELLED' }));
+        finish(reject, Object.assign(new Error(cancelReason || 'Cancelled by operator'), { code: 'TASK_CANCELLED' }));
       } else if (code === 0) {
-        if (taskId) appendTaskLog(taskId, 'system', '[exit 0]');
+        if (taskId) appendTaskLog(taskId, 'system', '[exit 0]', db);
         finish(resolve, { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 });
       } else {
-        if (taskId) appendTaskLog(taskId, 'system', `[exit ${code}]`);
+        if (taskId) appendTaskLog(taskId, 'system', `[exit ${code}]`, db);
         finish(reject, Object.assign(new Error(`generic-cli exited ${code}: ${(stderr || stdout).slice(0, 400)}`), { code: `GENERIC_CLI_EXIT_${code}` }));
       }
     });
@@ -434,7 +539,7 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null }) {
   });
 }
 
-async function runOpenAiHttpDriver(agent, { prompt, taskId = null }) {
+async function runOpenAiHttpDriver(agent, { prompt, taskId = null, db = null }) {
   const cfg = agent.config || {};
   const headers = { 'Content-Type': 'application/json' };
   if (cfg.api_key_env) {
@@ -450,14 +555,16 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null }) {
   const controller = new AbortController();
   let cancelled = false;
   if (taskId) {
-    appendTaskLog(taskId, 'system', `[http] POST ${cfg.base_url}/chat/completions (model=${cfg.model})`);
+    appendTaskLog(taskId, 'system', `[http] POST ${cfg.base_url}/chat/completions (model=${cfg.model})`, db);
     ACTIVE_RUNS.set(taskId, {
       kind: 'openai-http',
-      cancel(reason) {
+      async cancel(reason) {
         cancelled = true;
         controller.abort(new Error(reason || 'Cancelled by operator'));
+        return true;
       },
     });
+    ensureCancelWatcher(db);
   }
   try {
     const signal = AbortSignal.any ? AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]) : controller.signal;
@@ -505,7 +612,7 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null }) {
     if (typeof content !== 'string' || !content.trim()) {
       throw Object.assign(new Error(`Empty completion from ${agent.id}`), { code: 'HTTP_AGENT_EMPTY' });
     }
-    if (taskId) appendTaskLog(taskId, 'stdout', content.trim().slice(0, 2000));
+    if (taskId) appendTaskLog(taskId, 'stdout', content.trim().slice(0, 2000), db);
     return { content: content.trim(), usage: data.usage || null, model: data.model || cfg.model, id: data.id || null };
   } catch (err) {
     if (cancelled) throw Object.assign(new Error('Cancelled by operator'), { code: 'TASK_CANCELLED' });
@@ -522,6 +629,7 @@ export async function dispatchBackgroundTask(db, {
   dependsOn = [],
   autoInjectContext = false,
   autoFallback = false,
+  asyncRun = false,
   reservePaths = [],
   allowLeaseConflict = false,
   member,
@@ -609,11 +717,6 @@ export async function dispatchBackgroundTask(db, {
     throw new Error(`prompt exceeds ${MAX_PROMPT_BYTES} byte limit`);
   }
 
-  const existing = db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId);
-  if (existing) {
-    throw new Error(`Task ${safeTaskId} already exists in state=${existing.state}. Never blindly resend; use collab_poll or collab_task_reconcile.`);
-  }
-
   const policy = loadPolicy();
   const effectiveDir = worktreePath || projectDir;
   const extraRoots = deps.extraRoots ?? (member === 'claude' ? policy.claudeCliAllowedRoots : [policy.allowedWorktreeRoot || WORKTREE_DIR]);
@@ -622,21 +725,6 @@ export async function dispatchBackgroundTask(db, {
     workspaceRoot: deps.workspaceRoot || policy.allowedWorkspaceRoot,
     extraRoots,
   });
-
-  // Optional advisory file reservation via mcp-agent-mail before dispatching
-  let leaseInfo = null;
-  if (Array.isArray(reservePaths) && reservePaths.length > 0) {
-    const reserveFn = deps.reserveMailPaths || reserveMailPaths;
-    leaseInfo = await reserveFn({
-      projectDir: resolvedDir.windows,
-      member,
-      paths: reservePaths,
-      reason: `CollabHub task ${safeTaskId}`,
-    });
-    if (leaseInfo?.has_conflicts && !allowLeaseConflict) {
-      throw new Error(`File reservation conflict in mcp-agent-mail for ${safeTaskId}: ${JSON.stringify(leaseInfo.conflicts)}`);
-    }
-  }
 
   const channel = agent.driver === 'claude-dual' ? 'claude-cli' : agent.driver;
   const now = new Date().toISOString();
@@ -653,19 +741,49 @@ export async function dispatchBackgroundTask(db, {
   const payloadHash = sha256Hex(JSON.stringify({ member, role, cwd: resolvedDir.windows, prompt: effectivePrompt }));
   const dispatchToken = randomUUID();
   const metaObj = {};
-  if (leaseInfo) metaObj.mail_lease = leaseInfo;
   if (routedFrom) metaObj.routed_from = routedFrom;
   const initialMeta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
 
-  // Persist intent FIRST (state='dispatching' + attempted_at + dispatch_token for crash recovery)
-  db.prepare(`
-    INSERT INTO tasks (task_id, batch_id, parent_task_id, depends_on_json, project_dir, member, role, channel, title, prompt, state, payload_sha256, worktree_path, branch_name, mail_message_id, meta_json, dispatch_token, attempted_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dispatching', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    safeTaskId, batchId, parentTaskId, depList.length ? JSON.stringify(depList) : null, resolvedDir.windows, member, role, channel,
-    title || `${member}:${role}`, effectivePrompt, payloadHash, worktreePath, branchName,
-    mailMessageId, initialMeta, dispatchToken, now, now, now,
-  );
+  // Atomic task-id claim FIRST (PRIMARY KEY enforces single winner BEFORE any external Mail/bridge side effect!)
+  try {
+    db.prepare(`
+      INSERT INTO tasks (task_id, batch_id, parent_task_id, depends_on_json, project_dir, member, role, channel, title, prompt, state, payload_sha256, worktree_path, branch_name, mail_message_id, meta_json, dispatch_token, attempted_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'dispatching', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      safeTaskId, batchId, parentTaskId, depList.length ? JSON.stringify(depList) : null, resolvedDir.windows, member, role, channel,
+      title || `${member}:${role}`, effectivePrompt, payloadHash, worktreePath, branchName,
+      mailMessageId, initialMeta, dispatchToken, now, now, now,
+    );
+  } catch (err) {
+    const existing = db.prepare('SELECT state FROM tasks WHERE task_id = ?').get(safeTaskId);
+    if (existing) {
+      throw new Error(`Task ${safeTaskId} already exists in state=${existing.state}. Never blindly resend; use collab_poll or collab_task_reconcile.`);
+    }
+    throw err;
+  }
+
+  // Optional advisory file reservation via mcp-agent-mail AFTER atomic claim so duplicate requests cannot double-reserve
+  let leaseInfo = null;
+  if (Array.isArray(reservePaths) && reservePaths.length > 0) {
+    try {
+      const reserveFn = deps.reserveMailPaths || reserveMailPaths;
+      leaseInfo = await reserveFn({
+        projectDir: resolvedDir.windows,
+        member,
+        paths: reservePaths,
+        reason: `CollabHub task ${safeTaskId}`,
+      });
+      if (leaseInfo?.has_conflicts && !allowLeaseConflict) {
+        db.prepare('DELETE FROM tasks WHERE task_id = ? AND dispatch_token = ?').run(safeTaskId, dispatchToken);
+        throw new Error(`File reservation conflict in mcp-agent-mail for ${safeTaskId}: ${JSON.stringify(leaseInfo.conflicts)}`);
+      }
+      metaObj.mail_lease = leaseInfo;
+      updateTask(db, safeTaskId, { meta_json: JSON.stringify(metaObj) });
+    } catch (leaseErr) {
+      try { db.prepare('DELETE FROM tasks WHERE task_id = ? AND dispatch_token = ?').run(safeTaskId, dispatchToken); } catch {}
+      throw leaseErr;
+    }
+  }
   logEvent(db, { taskId: safeTaskId, eventType: 'task.dispatching', actor: member, payload: { role, channel, projectDir: resolvedDir.windows, dispatchToken, dependsOn: depList } });
 
   try {
@@ -813,52 +931,130 @@ export async function dispatchBackgroundTask(db, {
 
     if (agent.driver === 'generic-cli') {
       const cliRunner = deps.runGenericCli || runGenericCliDriver;
-      updateTask(db, safeTaskId, { state: 'running', external_id: `cli-${dispatchToken.slice(0, 12)}` });
-      try {
-        const out = await cliRunner(agent, { cwd: resolvedDir.windows, prompt: effectivePrompt, taskId: safeTaskId });
-        const updated = updateTask(db, safeTaskId, {
-          state: 'completed',
-          external_id: `cli-${dispatchToken.slice(0, 12)}`,
-          result_text: out.stdout || '(completed with empty stdout)',
-          evidence_json: JSON.stringify({ command: agent.config.command, exitCode: out.exitCode }),
-          error_code: null,
-          error_message: null,
-          completed_at: new Date().toISOString(),
-        });
-        if (updated?.state === 'completed') {
-          logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'generic-cli' } });
+      const ownerToken = randomUUID();
+      updateTask(db, safeTaskId, {
+        state: 'running',
+        external_id: `cli-${dispatchToken.slice(0, 12)}`,
+        owner_pid: process.pid,
+        owner_token: ownerToken,
+      });
+      const executeCli = async () => {
+        try {
+          const out = await cliRunner(agent, { cwd: resolvedDir.windows, prompt: effectivePrompt, taskId: safeTaskId, db });
+          const { task: updated, changed } = updateTaskCas(db, safeTaskId, {
+            state: 'completed',
+            external_id: `cli-${dispatchToken.slice(0, 12)}`,
+            result_text: out.stdout || '(completed with empty stdout)',
+            evidence_json: JSON.stringify({ command: agent.config.command, exitCode: out.exitCode }),
+            error_code: null,
+            error_message: null,
+            completed_at: new Date().toISOString(),
+          });
+          if (changed && updated?.state === 'completed') {
+            logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'generic-cli' } });
+          }
+          return updated;
+        } catch (err) {
+          const msg = String(err.message || err);
+          const code = err.code || 'DISPATCH_ERROR';
+          if (code === 'TASK_CANCELLED') {
+            const { task: cTask, changed } = updateTaskCas(db, safeTaskId, {
+              state: 'cancelled',
+              error_code: 'TASK_CANCELLED',
+              error_message: msg,
+              completed_at: new Date().toISOString(),
+            });
+            if (changed) {
+              appendTaskLog(safeTaskId, 'system', `[cancelled] ${msg}`, db);
+              logEvent(db, { taskId: safeTaskId, eventType: 'task.cancelled', actor: member, payload: { reason: msg, aborted_live_process: true } });
+            }
+            return cTask;
+          }
+          const { task: fTask, changed } = updateTaskCas(db, safeTaskId, {
+            state: 'failed',
+            error_code: code,
+            error_message: msg,
+            completed_at: new Date().toISOString(),
+          });
+          if (changed) logEvent(db, { taskId: safeTaskId, eventType: 'task.error', actor: member, payload: { code, message: msg } });
+          return fTask;
+        } finally {
+          if (leaseInfo?.synced) {
+            await (deps.releaseMailPaths || releaseMailPaths)({ projectDir: resolvedDir.windows, member, paths: reservePaths }).catch(() => {});
+          }
         }
-        return updated;
-      } finally {
-        if (leaseInfo?.synced) {
-          await (deps.releaseMailPaths || releaseMailPaths)({ projectDir: resolvedDir.windows, member, paths: reservePaths }).catch(() => {});
-        }
+      };
+      if (asyncRun) {
+        executeCli().catch(() => {});
+        return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
       }
+      return await executeCli();
     }
 
     if (agent.driver === 'openai-http') {
       const httpRunner = deps.runOpenAiHttp || runOpenAiHttpDriver;
-      updateTask(db, safeTaskId, { state: 'running', external_id: `http-${dispatchToken.slice(0, 12)}` });
-      try {
-        const out = await httpRunner(agent, { prompt: effectivePrompt, taskId: safeTaskId });
-        const updated = updateTask(db, safeTaskId, {
-          state: 'completed',
-          external_id: out.id || `http-${dispatchToken.slice(0, 12)}`,
-          result_text: out.content,
-          evidence_json: JSON.stringify({ model: out.model, usage: out.usage }),
-          error_code: null,
-          error_message: null,
-          completed_at: new Date().toISOString(),
-        });
-        if (updated?.state === 'completed') {
-          logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'openai-http', model: out.model } });
+      const ownerToken = randomUUID();
+      updateTask(db, safeTaskId, {
+        state: 'running',
+        external_id: `http-${dispatchToken.slice(0, 12)}`,
+        owner_pid: process.pid,
+        owner_token: ownerToken,
+      });
+      const executeHttp = async () => {
+        try {
+          const out = await httpRunner(agent, { prompt: effectivePrompt, taskId: safeTaskId, db });
+          const { task: updated, changed } = updateTaskCas(db, safeTaskId, {
+            state: 'completed',
+            external_id: out.id || `http-${dispatchToken.slice(0, 12)}`,
+            result_text: out.content,
+            evidence_json: JSON.stringify({ model: out.model, usage: out.usage }),
+            error_code: null,
+            error_message: null,
+            completed_at: new Date().toISOString(),
+          });
+          if (changed && updated?.state === 'completed') {
+            logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'openai-http', model: out.model } });
+          }
+          return updated;
+        } catch (err) {
+          const msg = String(err.message || err);
+          const code = err.code || 'DISPATCH_ERROR';
+          if (code === 'TASK_CANCELLED') {
+            const { task: cTask, changed } = updateTaskCas(db, safeTaskId, {
+              state: 'cancelled',
+              error_code: 'TASK_CANCELLED',
+              error_message: msg,
+              completed_at: new Date().toISOString(),
+            });
+            if (changed) {
+              appendTaskLog(safeTaskId, 'system', `[cancelled] ${msg}`, db);
+              logEvent(db, { taskId: safeTaskId, eventType: 'task.cancelled', actor: member, payload: { reason: msg, aborted_live_process: true } });
+            }
+            return cTask;
+          }
+          const q429 = detectClaude429(null, err);
+          if (q429.is429) {
+            setMemberCooldown(db, member, policy.claudeCooldownSeconds, `Upstream 429/quota on ${safeTaskId}: ${q429.detail}`, channel);
+          }
+          const { task: fTask, changed } = updateTaskCas(db, safeTaskId, {
+            state: 'failed',
+            error_code: code,
+            error_message: msg,
+            completed_at: new Date().toISOString(),
+          });
+          if (changed) logEvent(db, { taskId: safeTaskId, eventType: 'task.error', actor: member, payload: { code, message: msg } });
+          return fTask;
+        } finally {
+          if (leaseInfo?.synced) {
+            await (deps.releaseMailPaths || releaseMailPaths)({ projectDir: resolvedDir.windows, member, paths: reservePaths }).catch(() => {});
+          }
         }
-        return updated;
-      } finally {
-        if (leaseInfo?.synced) {
-          await (deps.releaseMailPaths || releaseMailPaths)({ projectDir: resolvedDir.windows, member, paths: reservePaths }).catch(() => {});
-        }
+      };
+      if (asyncRun) {
+        executeHttp().catch(() => {});
+        return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
       }
+      return await executeHttp();
     }
   } catch (err) {
     const msg = String(err.message || err);
@@ -888,9 +1084,12 @@ export async function dispatchBackgroundTask(db, {
 }
 
 /**
- * Cancel an active background task: aborts any in-flight CLI process tree or HTTP request,
- * sends upstream DSH cancel if applicable, and persists terminal cancelled state only after
- * stopping the run (or when `force: true` is explicitly passed after operator verification).
+ * Cancel an active background task with cross-process signal coordination and strict stop confirmation:
+ * 1) Local owner (`ACTIVE_RUNS`): kills process group / aborts HTTP and awaits process exit.
+ * 2) Cross-process live owner (`owner_pid` alive): writes SQLite `cancel_requested_at` and waits up to 3.5s
+ *    for the owning process watcher to stop the child and confirm terminal `cancelled`.
+ * 3) Dead owner (`owner_pid` dead): confirms runner crashed (`orphan_confirmed: true`) and marks cancelled.
+ * 4) DSH upstream: calls `dsh_cancel(run_id)` and refuses to mark cancelled when `still_busy: true` unless `force: true`.
  */
 export async function cancelTask(db, taskId, { reason = 'Cancelled by operator', force = false } = {}, deps = {}) {
   const safeTaskId = assertValidTaskId(taskId, 'task_id');
@@ -901,20 +1100,71 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
   }
 
   let abortedLiveProcess = false;
+  let crossProcess = false;
+  let orphanConfirmed = false;
   let upstreamCancel = null;
   let stopConfirmed = false;
 
   const active = ACTIVE_RUNS.get(safeTaskId);
   if (active && typeof active.cancel === 'function') {
     abortedLiveProcess = true;
-    stopConfirmed = true;
-    try { active.cancel(reason); } catch {}
+    try {
+      const stopped = await active.cancel(reason);
+      stopConfirmed = stopped !== false;
+    } catch {
+      stopConfirmed = true;
+    }
     ACTIVE_RUNS.delete(safeTaskId);
+  } else if (existing.owner_pid && existing.owner_pid !== process.pid && ['generic-cli', 'openai-http'].includes(existing.channel)) {
+    if (!isProcessAlive(existing.owner_pid)) {
+      orphanConfirmed = true;
+      stopConfirmed = true;
+    } else {
+      crossProcess = true;
+      updateTaskCas(db, safeTaskId, {
+        cancel_requested_at: new Date().toISOString(),
+        cancel_reason: String(reason || 'Cancelled via cross-process signal').slice(0, 500),
+      });
+      const deadline = Date.now() + 3500;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150));
+        const cur = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+        if (cur?.state === 'cancelled') {
+          return {
+            task: cur,
+            cancelled: true,
+            cross_process: true,
+            aborted_live_process: true,
+            forced: false,
+          };
+        }
+        if (cur && TERMINAL_STATES.has(cur.state)) {
+          return { task: cur, cancelled: false, already_terminal: true, cross_process: true };
+        }
+      }
+      if (!force) {
+        const cur = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+        return {
+          task: cur,
+          cancelled: false,
+          cancel_requested: true,
+          cross_process: true,
+          aborted_live_process: false,
+          message: `Cross-process cancel signal recorded for owner pid=${existing.owner_pid}; waiting for runner confirmation.`,
+        };
+      }
+    }
   } else if (existing.member === 'dsh' && existing.external_id) {
     const baton = deps.callBaton || callBatonTool;
     try {
       upstreamCancel = await baton('dsh_cancel', { run_id: existing.external_id }, { timeoutMs: 10000 });
-      stopConfirmed = Boolean(upstreamCancel && !upstreamCancel.error);
+      stopConfirmed = Boolean(upstreamCancel && !upstreamCancel.error && upstreamCancel.still_busy !== true);
+      if (upstreamCancel?.still_busy === true) {
+        updateTaskCas(db, safeTaskId, {
+          cancel_requested_at: new Date().toISOString(),
+          cancel_reason: String(reason || 'DSH cancel requested').slice(0, 500),
+        });
+      }
     } catch (e) {
       upstreamCancel = { error: String(e?.message || e) };
       stopConfirmed = false;
@@ -922,19 +1172,21 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
   }
 
   if (!stopConfirmed && !force) {
-    const why = upstreamCancel?.error
-      ? `upstream cancel failed (${upstreamCancel.error})`
-      : `no live abort handle in this process for channel=${existing.channel}`;
+    const why = upstreamCancel?.still_busy === true
+      ? 'DSH session reported still_busy=true (cancel_requested recorded; poll until stopped)'
+      : (upstreamCancel?.error
+        ? `upstream cancel failed (${upstreamCancel.error})`
+        : `no live abort handle in this process for channel=${existing.channel}`);
     throw new Error(`Cannot confirm cancellation of ${safeTaskId}: ${why}. Cancel from the owning process or pass force=true after verifying the run stopped.`);
   }
 
-  const updated = updateTask(db, safeTaskId, {
+  const { task: updated, changed } = updateTaskCas(db, safeTaskId, {
     state: 'cancelled',
     error_code: 'TASK_CANCELLED',
     error_message: String(reason || 'Cancelled by operator').slice(0, 500),
     completed_at: new Date().toISOString(),
   });
-  if (updated?.state !== 'cancelled') {
+  if (!changed && updated?.state !== 'cancelled') {
     return {
       task: updated,
       cancelled: false,
@@ -944,20 +1196,61 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
     };
   }
 
-  appendTaskLog(safeTaskId, 'system', `[cancelled] ${reason}`);
-  logEvent(db, {
-    taskId: safeTaskId,
-    eventType: 'task.cancelled',
-    actor: 'coordinator',
-    payload: { member: existing.member, reason, aborted_live_process: abortedLiveProcess, forced: Boolean(force && !stopConfirmed) },
-  });
+  if (changed) {
+    appendTaskLog(safeTaskId, 'system', `[cancelled] ${reason}`, db);
+    logEvent(db, {
+      taskId: safeTaskId,
+      eventType: 'task.cancelled',
+      actor: 'coordinator',
+      payload: {
+        member: existing.member,
+        reason,
+        aborted_live_process: abortedLiveProcess,
+        orphan_confirmed: orphanConfirmed,
+        forced: Boolean(force && !stopConfirmed),
+      },
+    });
+  }
   return {
     task: updated,
     cancelled: true,
     aborted_live_process: abortedLiveProcess,
+    orphan_confirmed: orphanConfirmed,
+    cross_process: crossProcess,
     forced: Boolean(force && !stopConfirmed),
     upstream_cancel: upstreamCancel,
   };
+}
+
+/**
+ * Self-healing orphan sweeper: detects local CLI/HTTP tasks stuck in `dispatching`/`running`
+ * whose recorded `owner_pid` is dead and transitions them cleanly to `failed` (`OWNER_PROCESS_DEAD`).
+ */
+export function sweepOrphanTasks(db) {
+  const candidates = db.prepare(`
+    SELECT task_id, member, channel, owner_pid
+    FROM tasks
+    WHERE state IN ('dispatching', 'running')
+      AND owner_pid IS NOT NULL
+      AND channel IN ('generic-cli', 'openai-http')
+  `).all();
+  const recovered = [];
+  for (const row of candidates) {
+    if (row.owner_pid === process.pid && ACTIVE_RUNS.has(row.task_id)) continue;
+    if (isProcessAlive(row.owner_pid)) continue;
+    const { task, changed } = updateTaskCas(db, row.task_id, {
+      state: 'failed',
+      error_code: 'OWNER_PROCESS_DEAD',
+      error_message: `Owning runner process (pid=${row.owner_pid}) exited unexpectedly before completing task`,
+      completed_at: new Date().toISOString(),
+    });
+    if (changed && task) {
+      appendTaskLog(row.task_id, 'system', `[orphan-recovery] owner pid=${row.owner_pid} is dead; marked failed`, db);
+      logEvent(db, { taskId: row.task_id, eventType: 'task.orphan_recovered', actor: row.member, payload: { owner_pid: row.owner_pid } });
+      recovered.push(row.task_id);
+    }
+  }
+  return { checked: candidates.length, recovered };
 }
 
 /**
@@ -1010,8 +1303,10 @@ export async function pollBackgroundTask(db, taskId, { waitSec = 15 } = {}, deps
       patch.error_code = 'DSH_NEEDS_INPUT';
       patch.error_message = res?.needs_input_reason || res?.summary || 'DSH requires input';
     }
-    const updated = updateTask(db, safeTaskId, patch);
-    if (nextState !== row.state) logEvent(db, { taskId: safeTaskId, eventType: `task.${nextState}`, actor: 'dsh', payload: { runId: row.external_id } });
+    const { task: updated, changed } = updateTaskCas(db, safeTaskId, patch);
+    if (changed && updated.state !== row.state) {
+      logEvent(db, { taskId: safeTaskId, eventType: `task.${updated.state}`, actor: 'dsh', payload: { runId: row.external_id } });
+    }
     return updated;
   }
 

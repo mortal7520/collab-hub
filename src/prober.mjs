@@ -35,14 +35,15 @@ export async function probeDsh(runner = runQuiet) {
     return { member: 'dsh', channel: 'dsh-baton', state: 'dormant', detail: 'WSL DSH adapter not configured (optional integrations.json)' };
   }
   const py = [
-    'import json, os, stat, subprocess',
-    `r = subprocess.run(['systemctl', 'is-active', '${INTEGRATIONS.dshService}'], capture_output=True, text=True)`,
-    `p = '${INTEGRATIONS.dshSocket}'`,
+    'import json, os, stat, subprocess, sys',
+    'r = subprocess.run(["systemctl", "is-active", sys.argv[1]], capture_output=True, text=True)',
+    'p = sys.argv[2]',
     'sock = os.path.exists(p) and stat.S_ISSOCK(os.stat(p).st_mode)',
     'print(json.dumps({"service": (r.stdout or "").strip() or "unknown", "sock": sock}))',
   ].join('; ');
   const res = await runner('wsl.exe', [
     '-d', INTEGRATIONS.wslDistro, '-u', INTEGRATIONS.wslUser, '--exec', 'python3', '-c', py,
+    INTEGRATIONS.dshService, INTEGRATIONS.dshSocket,
   ], 10000);
   if (!res.ok) {
     return { member: 'dsh', channel: 'dsh-baton', state: 'offline', detail: `WSL probe failed: ${res.stderr || res.code}` };

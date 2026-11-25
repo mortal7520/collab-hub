@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { assertValidTaskId } from './config.mjs';
 import { logEvent, parseTaskRow } from './db.mjs';
-import { dispatchBackgroundTask, pollBatchTasks } from './executors.mjs';
+import { canonicalGoJson, dispatchBackgroundTask, pollBatchTasks, sha256Hex } from './executors.mjs';
 import { writeMemoryNote } from './memory.mjs';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
@@ -110,16 +110,24 @@ export async function runDagWorkflow(db, {
     branchName: s.branchName,
   }));
 
-  db.prepare(`
-    INSERT OR REPLACE INTO workflow_plans (batch_id, name, project_dir, plan_json, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(safeBatchId, name, projectDir, JSON.stringify({ batch_id: safeBatchId, name, project_dir: projectDir, steps: planSteps }), new Date().toISOString());
+  const planDigest = sha256Hex(canonicalGoJson(planSteps));
+  const existingPlan = db.prepare('SELECT plan_sha256 FROM workflow_plans WHERE batch_id = ?').get(safeBatchId);
+  if (existingPlan) {
+    if (existingPlan.plan_sha256 && existingPlan.plan_sha256 !== planDigest) {
+      throw new Error(`Workflow batch_id "${safeBatchId}" already exists with a different immutable plan digest; choose a new batch_id.`);
+    }
+  } else {
+    db.prepare(`
+      INSERT INTO workflow_plans (batch_id, name, project_dir, plan_json, plan_sha256, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(safeBatchId, name, projectDir, JSON.stringify({ batch_id: safeBatchId, name, project_dir: projectDir, steps: planSteps }), planDigest, new Date().toISOString());
+  }
 
   logEvent(db, {
     taskId: null,
     eventType: 'workflow.plan',
     actor: 'collab-hub',
-    payload: { batch_id: safeBatchId, name, project_dir: projectDir, step_count: planSteps.length },
+    payload: { batch_id: safeBatchId, name, project_dir: projectDir, step_count: planSteps.length, plan_sha256: planDigest },
   });
 
   const dispatchedIds = new Set();

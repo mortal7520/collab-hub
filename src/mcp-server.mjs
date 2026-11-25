@@ -612,7 +612,7 @@ export async function handleToolCall(db, name, args = {}) {
       if (args.task_id) {
         const row = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(args.task_id));
         const events = row ? db.prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id DESC LIMIT 30').all(args.task_id) : [];
-        return { task: row, events, live_logs: row ? getTaskLogs(args.task_id) : null };
+        return { task: row, events, live_logs: row ? getTaskLogs(args.task_id, db) : null };
       }
       const clauses = [];
       const params = [];

@@ -217,8 +217,12 @@ export async function probeCustomAgent(agent) {
   if (agent.driver === 'generic-cli') {
     const cmd = agent.config?.command;
     if (!cmd) return { member: agent.id, channel: 'generic-cli', state: 'offline', detail: 'Missing command' };
+    const childEnv = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME };
+    for (const key of (agent.config?.env_allow || [])) {
+      if (process.env[key] !== undefined) childEnv[key] = process.env[key];
+    }
     try {
-      await execFileAsync(cmd, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      await execFileAsync(cmd, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true, env: childEnv });
       return { member: agent.id, channel: 'generic-cli', state: 'online', detail: `CLI executable ready (${cmd})` };
     } catch (err) {
       if (err.code === 'ENOENT') {

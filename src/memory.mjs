@@ -40,7 +40,8 @@ export function writeMemoryNote(db, {
     '',
   ].join('\n');
 
-  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  // SQLite is authoritative: commit inside short transaction first, then atomically export Markdown
+  // (never hold SQLite write lock across disk I/O or leave unindexed files on rollback).
   db.exec('BEGIN IMMEDIATE;');
   try {
     db.prepare(`
@@ -54,14 +55,19 @@ export function writeMemoryNote(db, {
         content = excluded.content,
         updated_at = excluded.updated_at
     `).run(safeProject, safeSlug, String(title).trim(), tagStr, String(author || 'coordinator'), filePath, String(content).trim(), now);
-
-    fs.writeFileSync(tmp, md, 'utf8');
-    fs.renameSync(tmp, filePath);
     db.exec('COMMIT;');
   } catch (err) {
     try { db.exec('ROLLBACK;'); } catch {}
-    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
     throw err;
+  }
+
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, md, 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+    console.error(`[collab-hub] memory markdown export warning (${filePath}): ${err.message}`);
   }
 
   logEvent(db, { eventType: 'memory.write', actor: author, payload: { project: safeProject, slug: safeSlug, title } });
@@ -95,10 +101,15 @@ export function searchMemoryNotes(db, { query, project = null, limit = 15 } = {}
   const scores = new Map();
   const rowsById = new Map();
 
-  // 1. FTS5 query
-  const ftsTokens = q.split(/\s+/).map((t) => t.replace(/["'*^()]/g, '')).filter(Boolean);
+  // 1. FTS5 query (sanitize operators & reserved keywords so URLs/colons/hyphens never break MATCH)
+  const ftsKeywords = new Set(['AND', 'OR', 'NOT', 'NEAR']);
+  const ftsTokens = q
+    .split(/[\s:/\\.,;!?()[\]{}"'`~*^+<>|=-]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && !ftsKeywords.has(t.toUpperCase()))
+    .slice(0, 8);
   if (ftsTokens.length > 0) {
-    const ftsExpr = ftsTokens.map((t) => `"${t}"*`).join(' OR ');
+    const ftsExpr = ftsTokens.map((t) => `"${t.replaceAll('"', '')}"*`).join(' OR ');
     try {
       const ftsSql = safeProject
         ? `SELECT m.*, bm25(memory_notes_fts) AS rank FROM memory_notes_fts f JOIN memory_notes m ON m.id = f.rowid WHERE memory_notes_fts MATCH ? AND m.project = ? ORDER BY rank LIMIT ?`

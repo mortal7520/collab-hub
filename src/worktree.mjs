@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { WORKTREE_DIR, assertValidAgentId, assertValidGitRef, assertValidTaskId, resolveProjectDir, toWslPath } from './config.mjs';
-import { isRegisteredAgent, logEvent } from './db.mjs';
+import { isProcessAlive, isRegisteredAgent, logEvent } from './db.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -32,8 +32,15 @@ function syncWorktreeIncludeFiles(repoTopLevel, wtPath) {
     if (!realRel || realRel.startsWith('..') || path.isAbsolute(realRel)) continue;
     const st = fs.statSync(realSrc);
     if (!st.isFile() || st.size > 5 * 1024 * 1024) continue;
-    const dst = path.resolve(wtPath, realRel);
+    const realWt = fs.realpathSync(wtPath);
+    const dst = path.resolve(realWt, realRel);
+    const dstRel = path.relative(realWt, dst);
+    if (!dstRel || dstRel.startsWith('..') || path.isAbsolute(dstRel)) continue;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    const realDstDir = fs.realpathSync(path.dirname(dst));
+    const dirRel = path.relative(realWt, realDstDir);
+    if (dirRel.startsWith('..') || path.isAbsolute(dirRel)) continue;
+    if (fs.existsSync(dst) && fs.lstatSync(dst).isSymbolicLink()) continue;
     fs.copyFileSync(realSrc, dst);
     copied.push(realRel.replaceAll('\\', '/'));
   }
@@ -84,22 +91,38 @@ function repoBucketName(topLevel) {
 function withRepoLock(repoDir, fn) {
   const commonDir = git(repoDir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   const lockPath = path.join(commonDir, 'collabhub-merge.lock');
-  let fd;
+  const acquire = () => {
+    const fd = fs.openSync(lockPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
   try {
-    fd = fs.openSync(lockPath, 'wx', 0o600);
-    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-    fs.closeSync(fd);
-    fd = undefined;
+    acquire();
   } catch (err) {
     if (err.code === 'EEXIST') {
-      throw new Error(`Repository merge lock held (${lockPath}). Wait for concurrent merge to finish or inspect stale lock.`);
+      // Stale lock recovery: if the recorded holder PID is demonstrably dead, reclaim safely
+      let staleReclaimed = false;
+      try {
+        const info = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+        if (info?.pid && !isProcessAlive(info.pid)) {
+          fs.unlinkSync(lockPath);
+          acquire();
+          staleReclaimed = true;
+        }
+      } catch { /* fall through to active lock error */ }
+      if (!staleReclaimed) {
+        throw new Error(`Repository merge lock held (${lockPath}). Wait for concurrent merge to finish or inspect stale lock.`);
+      }
+    } else {
+      throw err;
     }
-    throw err;
   }
   try {
     return fn();
   } finally {
-    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
     try { fs.unlinkSync(lockPath); } catch {}
   }
 }
@@ -113,6 +136,8 @@ export function createWorktree(db, {
   const resolved = resolveProjectDir(repoDir, { requireSubdir: true, workspaceRoot, extraRoots: [worktreeRoot] });
   const rawTop = git(resolved.windows, ['rev-parse', '--show-toplevel']);
   const topLevel = process.platform === 'win32' ? rawTop.replaceAll('/', '\\') : rawTop;
+  // Re-verify discovered Git root stays inside allowed workspace/worktree roots (prevents parent-repo escape)
+  resolveProjectDir(topLevel, { requireSubdir: true, workspaceRoot, extraRoots: [worktreeRoot] });
   const bucket = repoBucketName(topLevel);
 
   const existing = db.prepare('SELECT * FROM worktrees WHERE task_id = ?').get(safeTask);
@@ -309,10 +334,11 @@ export function mergeWorktree(db, { taskId, confirmed = false, cleanup = true, r
       throw new Error('Main repository has uncommitted changes. Keep main clean before merging a worktree branch.');
     }
 
-    const mergeOutput = git(row.repo_dir, ['merge', '--no-ff', branchName, '-m', `Merge collab worktree ${row.task_id} (${row.member})`]);
+    // Merge the exact reviewed/verified commit SHA (eliminates TOCTOU against mutable branch refs)
+    const mergeOutput = git(row.repo_dir, ['merge', '--no-ff', wtHead, '-m', `Merge collab worktree ${row.task_id} (${row.member})`]);
     const now = new Date().toISOString();
     db.prepare(`UPDATE worktrees SET state = 'merged', updated_at = ? WHERE task_id = ?`).run(now, safeTask);
-    logEvent(db, { taskId: safeTask, eventType: 'worktree.merged', actor: row.member, payload: { branch: branchName } });
+    logEvent(db, { taskId: safeTask, eventType: 'worktree.merged', actor: row.member, payload: { branch: branchName, head_sha: wtHead } });
 
     let cleaned = false;
     let cleanupWarning = null;

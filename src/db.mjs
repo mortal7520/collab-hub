@@ -10,10 +10,27 @@ export function openHubDb(dbPath = DB_PATH) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA temp_store = MEMORY;');
+  db.exec('PRAGMA cache_size = -16000;');
   db.exec('PRAGMA busy_timeout = 8000;');
   db.exec('PRAGMA foreign_keys = ON;');
   initSchema(db);
   return db;
+}
+
+/**
+ * Cross-platform PID liveness probe (treats EPERM as alive, ESRCH as dead).
+ */
+export function isProcessAlive(pid) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -59,6 +76,9 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_tasks_member ON tasks(member);
     CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tasks_poll ON tasks(state, channel, updated_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_tasks_batch_created ON tasks(batch_id, created_at ASC);
 
     CREATE TABLE IF NOT EXISTS member_status (
       member TEXT PRIMARY KEY,
@@ -108,12 +128,23 @@ function initSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+    CREATE INDEX IF NOT EXISTS idx_events_type_id ON events(event_type, id DESC);
+
+    CREATE TABLE IF NOT EXISTS task_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      stream TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_logs_task_id ON task_logs(task_id, id ASC);
 
     CREATE TABLE IF NOT EXISTS workflow_plans (
       batch_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       project_dir TEXT NOT NULL,
       plan_json TEXT NOT NULL,
+      plan_sha256 TEXT,
       created_at TEXT NOT NULL
     );
   `);
@@ -123,11 +154,16 @@ function initSchema(db) {
   ensureColumn(db, 'tasks', 'dispatch_token', 'TEXT');
   ensureColumn(db, 'tasks', 'attempted_at', 'TEXT');
   ensureColumn(db, 'tasks', 'depends_on_json', 'TEXT');
+  ensureColumn(db, 'tasks', 'owner_pid', 'INTEGER');
+  ensureColumn(db, 'tasks', 'owner_token', 'TEXT');
+  ensureColumn(db, 'tasks', 'cancel_requested_at', 'TEXT');
+  ensureColumn(db, 'tasks', 'cancel_reason', 'TEXT');
   ensureColumn(db, 'member_status', 'cooldown_channel', 'TEXT');
   ensureColumn(db, 'worktrees', 'reviewed_head_sha', 'TEXT');
   ensureColumn(db, 'worktrees', 'verified_head_sha', 'TEXT');
   ensureColumn(db, 'worktrees', 'verify_status', 'TEXT');
   ensureColumn(db, 'worktrees', 'verify_summary', 'TEXT');
+  ensureColumn(db, 'workflow_plans', 'plan_sha256', 'TEXT');
 
   // Enable FTS5 virtual table for memory_notes
   try {
@@ -162,19 +198,44 @@ function initSchema(db) {
 }
 
 /**
+ * Bounded retention budget for append-only `events` and `task_logs` tables so long-running hubs
+ * never bloat SQLite unboundedly.
+ */
+export function pruneRetentionTables(db, { maxEvents = 10000, maxLogs = 20000 } = {}) {
+  let prunedEvents = 0;
+  let prunedLogs = 0;
+  try {
+    const evCut = db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?').get(maxEvents);
+    if (evCut?.id) {
+      prunedEvents = db.prepare('DELETE FROM events WHERE id <= ?').run(evCut.id).changes || 0;
+    }
+  } catch { /* best-effort */ }
+  try {
+    const logCut = db.prepare('SELECT id FROM task_logs ORDER BY id DESC LIMIT 1 OFFSET ?').get(maxLogs);
+    if (logCut?.id) {
+      prunedLogs = db.prepare('DELETE FROM task_logs WHERE id <= ?').run(logCut.id).changes || 0;
+    }
+  } catch { /* best-effort */ }
+  return { pruned_events: prunedEvents, pruned_logs: prunedLogs };
+}
+
+/**
  * Best-effort audit logging: never throws into a caller after an external dispatch succeeded.
- * Publishes real-time event onto hubBus for SSE subscribers.
+ * Publishes real-time event onto hubBus for SSE subscribers (carrying event_id for cross-process dedupe).
  */
 export function logEvent(db, { taskId = null, eventType, actor = 'collab-hub', payload = null }) {
   try {
     const now = new Date().toISOString();
-    db.prepare(`
+    const res = db.prepare(`
       INSERT INTO events (task_id, event_type, actor, payload_json, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(taskId, eventType, actor, payload ? JSON.stringify(payload) : null, now);
-    hubBus.publish(eventType, { task_id: taskId, actor, payload, created_at: now });
+    const eventId = Number(res.lastInsertRowid || 0);
+    hubBus.publish(eventType, { id: eventId, task_id: taskId, actor, payload, created_at: now, source_pid: process.pid });
+    return eventId;
   } catch (err) {
     console.error(`[collab-hub] best-effort logEvent failed (${eventType}): ${err.message}`);
+    return 0;
   }
 }
 
@@ -338,6 +399,10 @@ export function parseTaskRow(row) {
     mail_message_id: row.mail_message_id ?? null,
     dispatch_token: row.dispatch_token ?? null,
     attempted_at: row.attempted_at ?? null,
+    owner_pid: row.owner_pid ?? null,
+    owner_token: row.owner_token ?? null,
+    cancel_requested_at: row.cancel_requested_at ?? null,
+    cancel_reason: row.cancel_reason ?? null,
     result_text: row.result_text,
     evidence,
     error_code: row.error_code,

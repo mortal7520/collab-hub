@@ -7,13 +7,13 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { APP_VERSION, assertValidGitRef, assertValidTaskId, resolveProjectDir, toWslPath } from '../src/config.mjs';
-import { clearMemberCooldown, getMemberStatuses, openHubDb, setMemberCooldown, upsertMemberStatus } from '../src/db.mjs';
+import { clearMemberCooldown, getMemberStatuses, isProcessAlive, openHubDb, pruneRetentionTables, setMemberCooldown, upsertMemberStatus } from '../src/db.mjs';
 import { createDashboardServer } from '../src/dashboard.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
 import {
   callBatonTool, cancelTask, canonicalGoJson, dispatchBackgroundTask, getTaskLogs,
-  pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff, uuidv5Url,
+  pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff, sweepOrphanTasks, uuidv5Url,
 } from '../src/executors.mjs';
 import { hubBus } from '../src/event-bus.mjs';
 import { createSseParser, parseSseEvents } from '../src/mail-mcp-proxy.mjs';
@@ -1512,7 +1512,147 @@ test('v1.2: Dashboard /api/tasks/logs, /api/tasks/cancel, /api/workflows/resume 
     const s2Row = env.db.prepare('SELECT prompt FROM tasks WHERE task_id = ?').get('b-partial_s2');
     assert.equal(s2Row.prompt, 'RAW-S2', 'autoInjectContext=false must be preserved on resume');
   } finally {
-    server.close();
+    await server.shutdown();
+    env.cleanup();
+  }
+});
+
+test('v1.3: durable SQLite task_logs, dead-owner orphan recovery, DSH still_busy cancel refusal & immutable workflow_plans', async () => {
+  const env = makeTempEnv();
+  try {
+    // 1. Durable SQLite task_logs survive across processes (queried via getTaskLogs(id, db))
+    registerAgent(env.db, {
+      agentId: 'dur-cli', name: 'Durable CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'console.log("DURABLE-SQLITE-LOG-42")'], timeout_s: 20 },
+    });
+    const done = await dispatchBackgroundTask(env.db, {
+      taskId: 'v13-dur-1', member: 'dur-cli', role: 'implementer', projectDir: env.proj, title: 'Durable log', prompt: 'go',
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.equal(done.state, 'completed');
+    const dbLogs = getTaskLogs('v13-dur-1', env.db);
+    assert.ok(dbLogs.logs.some((l) => l.text.includes('DURABLE-SQLITE-LOG-42')));
+
+    // 2. Dead-owner orphan sweeper detects dead owner_pid and transitions to failed(OWNER_PROCESS_DEAD)
+    const now = new Date().toISOString();
+    const deadPid = 999999;
+    assert.equal(isProcessAlive(deadPid), false);
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, owner_pid, created_at, updated_at)
+      VALUES ('v13-orphan-1', ?, 'dur-cli', 'implementer', 'generic-cli', 'Orphan', 'p', 'running', ?, ?, ?)
+    `).run(env.proj, deadPid, now, now);
+    const swept = sweepOrphanTasks(env.db);
+    assert.ok(swept.recovered.includes('v13-orphan-1'));
+    const orphanRow = env.db.prepare('SELECT state, error_code FROM tasks WHERE task_id = ?').get('v13-orphan-1');
+    assert.equal(orphanRow.state, 'failed');
+    assert.equal(orphanRow.error_code, 'OWNER_PROCESS_DEAD');
+
+    // 3. DSH cancel returning still_busy=true MUST NOT mark cancelled (records cancel_requested_at instead)
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, external_id, created_at, updated_at)
+      VALUES ('v13-dsh-busy', ?, 'dsh', 'implementer', 'dsh-baton', 'Busy DSH', 'p', 'running', 'hrun-busy', ?, ?)
+    `).run(env.proj, now, now);
+    await assert.rejects(() => cancelTask(env.db, 'v13-dsh-busy', { reason: 'Stop' }, {
+      callBaton: async () => ({ ok: true, still_busy: true }),
+    }), /still_busy=true/i);
+    const busyRow = env.db.prepare('SELECT state, cancel_requested_at FROM tasks WHERE task_id = ?').get('v13-dsh-busy');
+    assert.equal(busyRow.state, 'running');
+    assert.ok(busyRow.cancel_requested_at);
+
+    // 4. Immutable workflow_plans rejects conflicting plan digest under same batch_id
+    await runDagWorkflow(env.db, {
+      name: 'immut-a', batchId: 'wf-immut', projectDir: env.proj,
+      steps: [{ id: 's1', member: 'dur-cli', role: 'implementer', prompt: 'PROMPT-ONE' }],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+    await assert.rejects(() => runDagWorkflow(env.db, {
+      name: 'immut-b', batchId: 'wf-immut', projectDir: env.proj,
+      steps: [{ id: 's1', member: 'dur-cli', role: 'implementer', prompt: 'PROMPT-TWO-MUTATED' }],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem }), /immutable plan digest/i);
+
+    // 5. FTS5 search handles URLs, colons, hyphens & boolean keywords cleanly without crashing
+    writeMemoryNote(env.db, {
+      project: 'demo', title: 'Loopback http://127.0.0.1:5290 error:429', content: 'Handle error:429 AND OR NOT cleanly.', memoryDir: env.mem,
+    });
+    const hits = searchMemoryNotes(env.db, { query: 'http://127.0.0.1:5290 error:429 NOT', project: 'demo' });
+    assert.ok(hits.length >= 1);
+
+    // 6. Retention pruning caps events/task_logs cleanly
+    const pruned = pruneRetentionTables(env.db, { maxEvents: 2, maxLogs: 1 });
+    assert.equal(typeof pruned.pruned_events, 'number');
+    assert.equal(typeof pruned.pruned_logs, 'number');
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v1.3: async HTTP dispatch (202 + task_id idempotency), cross-process SSE DB tail, graceful shutdown & stale lock recovery', async () => {
+  const env = makeTempEnv();
+  execFileSync('git', ['init', '-b', 'main'], { cwd: env.proj });
+  execFileSync('git', ['config', 'user.email', 'test@local'], { cwd: env.proj });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: env.proj });
+  fs.writeFileSync(path.join(env.proj, 'f.txt'), 'v1\n');
+  execFileSync('git', ['add', '.'], { cwd: env.proj });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: env.proj });
+
+  registerAgent(env.db, {
+    agentId: 'async-cli', name: 'Async CLI', driver: 'generic-cli', roles: ['implementer'],
+    config: { command: process.execPath, args: ['-e', 'console.log("ASYNC-OK"); setTimeout(() => process.exit(0), 120);'], timeout_s: 20 },
+  });
+
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
+
+  try {
+    // 1. Async dispatch returns 202 immediately with client-supplied task_id
+    const disp = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/dispatch', headers: hdrs,
+      body: JSON.stringify({ task_id: 'v13-async-1', async: true, member: 'async-cli', role: 'implementer', project_dir: env.proj, title: 'Async run', prompt: 'go' }),
+    });
+    assert.equal(disp.status, 202);
+    assert.equal(JSON.parse(disp.body).task.task_id, 'v13-async-1');
+
+    // 2. Duplicate client task_id is rejected atomically (400)
+    const dup = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/dispatch', headers: hdrs,
+      body: JSON.stringify({ task_id: 'v13-async-1', async: true, member: 'async-cli', role: 'implementer', project_dir: env.proj, title: 'Dup', prompt: 'go' }),
+    });
+    assert.equal(dup.status, 400);
+
+    // Wait for async child to finish cleanly
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const st = env.db.prepare('SELECT state FROM tasks WHERE task_id = ?').get('v13-async-1')?.state;
+      if (st === 'completed') break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.equal(env.db.prepare('SELECT state FROM tasks WHERE task_id = ?').get('v13-async-1')?.state, 'completed');
+
+    // 3. Stale worktree merge lock held by dead PID is safely auto-reclaimed
+    const wt = createWorktree(env.db, { repoDir: env.proj, taskId: 'wt-stale-lock', member: 'async-cli', worktreeRoot: env.wts, workspaceRoot: env.ws });
+    fs.writeFileSync(path.join(wt.worktree_path, 'f.txt'), 'v2\n');
+    execFileSync('git', ['add', '.'], { cwd: wt.worktree_path });
+    execFileSync('git', ['commit', '-m', 'v2'], { cwd: wt.worktree_path });
+    reviewWorktree(env.db, { taskId: 'wt-stale-lock' });
+    const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: env.proj, encoding: 'utf8' }).trim();
+    fs.writeFileSync(path.join(commonDir, 'collabhub-merge.lock'), JSON.stringify({ pid: 999999, at: new Date().toISOString() }));
+    const merged = mergeWorktree(env.db, { taskId: 'wt-stale-lock', confirmed: true, cleanup: true });
+    assert.equal(merged.merged, true);
+
+    // 4. Graceful shutdown closes active SSE subscribers immediately without hanging
+    const sseReq = http.request({ host: '127.0.0.1', port, path: '/api/events/stream', headers: { Host: `127.0.0.1:${port}` } });
+    await new Promise((resolve) => {
+      sseReq.on('response', (res) => { res.once('data', () => resolve()); });
+      sseReq.end();
+    });
+    const t0 = Date.now();
+    await server.shutdown();
+    assert.ok(Date.now() - t0 < 2000, 'server.shutdown() must close active SSE clients immediately');
+  } finally {
+    try { await server.shutdown(); } catch {}
     env.cleanup();
   }
 });

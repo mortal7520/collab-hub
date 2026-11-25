@@ -6,11 +6,11 @@ import {
   APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, DB_PATH,
   assertValidAgentId, assertValidTaskId, ensureRuntimeDirs,
 } from './config.mjs';
-import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, parseTaskRow, upsertMemberStatus } from './db.mjs';
+import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, parseTaskRow, pruneRetentionTables, upsertMemberStatus } from './db.mjs';
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { hubBus } from './event-bus.mjs';
-import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask } from './executors.mjs';
+import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
 import { runPlaybook } from './playbooks.mjs';
@@ -552,19 +552,78 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   let lastProbeAt = 0;
   let cachedCassStats = null;
   let cachedCassAt = 0;
-  const sseClients = new Set();
-
+  const sseClients = new Map(); // res -> { hb }
   const MAX_SSE_BACKPRESSURE_BYTES = 512 * 1024;
-  const onHubEvent = (evt) => {
-    const frame = `data: ${JSON.stringify(evt)}\n\n`;
-    for (const res of sseClients) {
+
+  // Cross-process durable SSE cursor: tails SQLite `events` and `task_logs` written by MCP/CLI processes
+  // while deduplicating events already broadcast locally via in-process hubBus.
+  let lastEventId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM events').get()?.m || 0);
+  let lastLogId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs').get()?.m || 0);
+  let dbTailTimer = null;
+
+  const broadcastSse = (evt, sseId = null) => {
+    const idLine = sseId ? `id: ${sseId}\n` : '';
+    const frame = `${idLine}data: ${JSON.stringify(evt)}\n\n`;
+    for (const [res, meta] of sseClients.entries()) {
       if (res.destroyed || res.writableEnded || res.writableLength > MAX_SSE_BACKPRESSURE_BYTES) {
+        clearInterval(meta.hb);
         sseClients.delete(res);
         try { res.destroy(); } catch {}
         continue;
       }
-      try { res.write(frame); } catch { sseClients.delete(res); }
+      try { res.write(frame); } catch {
+        clearInterval(meta.hb);
+        sseClients.delete(res);
+      }
     }
+  };
+
+  const startDbSseTail = () => {
+    if (dbTailTimer) return;
+    dbTailTimer = setInterval(() => {
+      if (sseClients.size === 0) {
+        clearInterval(dbTailTimer);
+        dbTailTimer = null;
+        return;
+      }
+      try {
+        const newEvents = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(lastEventId);
+        for (const ev of newEvents) {
+          lastEventId = Math.max(lastEventId, ev.id);
+          let payload = null;
+          try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
+          broadcastSse({
+            id: ev.id,
+            type: ev.event_type,
+            task_id: ev.task_id,
+            actor: ev.actor,
+            payload,
+            created_at: ev.created_at,
+            at: ev.created_at,
+          }, `ev-${ev.id}`);
+        }
+        const newLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 80').all(lastLogId);
+        for (const lg of newLogs) {
+          lastLogId = Math.max(lastLogId, lg.id);
+          broadcastSse({
+            log_id: lg.id,
+            type: 'task.log',
+            task_id: lg.task_id,
+            stream: lg.stream,
+            text: lg.text,
+            at: lg.created_at,
+          }, `log-${lg.id}`);
+        }
+      } catch { /* best-effort */ }
+    }, 400);
+    dbTailTimer.unref();
+  };
+
+  const onHubEvent = (evt) => {
+    if (evt.id && evt.id > lastEventId) lastEventId = evt.id;
+    if (evt.log_id && evt.log_id > lastLogId) lastLogId = evt.log_id;
+    const sseId = evt.id ? `ev-${evt.id}` : (evt.log_id ? `log-${evt.log_id}` : null);
+    broadcastSse(evt, sseId);
   };
   hubBus.on('hub-event', onHubEvent);
 
@@ -668,9 +727,24 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
           Connection: 'keep-alive',
         });
         res.write(`data: ${JSON.stringify({ type: 'connected', at: new Date().toISOString() })}\n\n`);
-        sseClients.add(res);
+        // Replay missed durable events on reconnect if client sent Last-Event-ID: ev-<N>
+        const lastHdr = String(req.headers['last-event-id'] || '');
+        const evMatch = /^ev-(\d+)$/.exec(lastHdr);
+        if (evMatch) {
+          const sinceId = Number(evMatch[1]);
+          try {
+            const missed = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(sinceId);
+            for (const ev of missed) {
+              let payload = null;
+              try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
+              res.write(`id: ev-${ev.id}\ndata: ${JSON.stringify({ id: ev.id, type: ev.event_type, task_id: ev.task_id, actor: ev.actor, payload, created_at: ev.created_at, at: ev.created_at })}\n\n`);
+            }
+          } catch { /* best-effort replay */ }
+        }
         const hb = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 25000);
         hb.unref();
+        sseClients.set(res, { hb });
+        startDbSseTail();
         req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
         return;
       }
@@ -762,7 +836,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const rawId = url.searchParams.get('task_id') || '';
         if (!rawId) { sendJson(res, 400, { error: 'task_id is required' }); return; }
         try {
-          sendJson(res, 200, getTaskLogs(rawId));
+          sendJson(res, 200, getTaskLogs(rawId, db));
         } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
         return;
       }
@@ -772,7 +846,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const task = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeId));
         if (!task) { sendJson(res, 404, { error: 'Task not found' }); return; }
         const events = db.prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id DESC LIMIT 40').all(safeId);
-        sendJson(res, 200, { task, events, live_logs: getTaskLogs(safeId) });
+        sendJson(res, 200, { task, events, live_logs: getTaskLogs(safeId, db) });
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/tasks/cancel') {
@@ -789,7 +863,9 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
       if (req.method === 'POST' && url.pathname === '/api/tasks/dispatch') {
         const parsed = await readBoundedJson(req);
         try {
+          const isAsync = parsed.async === true;
           const task = await dispatchBackgroundTask(db, {
+            taskId: parsed.task_id || null,
             member: parsed.member,
             role: parsed.role || 'researcher',
             projectDir: parsed.project_dir,
@@ -797,9 +873,10 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
             prompt: parsed.prompt,
             batchId: parsed.batch_id || null,
             autoFallback: Boolean(parsed.auto_fallback),
+            asyncRun: isAsync,
             waitSec: 0,
           }, dispatchDeps);
-          sendJson(res, 200, { task });
+          sendJson(res, isAsync ? 202 : 200, { task });
         } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
         return;
       }
@@ -1014,33 +1091,57 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
     }
   });
 
-  server.on('close', () => {
+  const cleanupSse = () => {
     hubBus.off('hub-event', onHubEvent);
-    for (const res of sseClients) { try { res.end(); } catch {} }
+    if (dbTailTimer) { clearInterval(dbTailTimer); dbTailTimer = null; }
+    for (const [res, meta] of sseClients.entries()) {
+      clearInterval(meta.hb);
+      try { res.end(); } catch {}
+    }
     sseClients.clear();
+  };
+
+  server.shutdown = () => new Promise((resolve) => {
+    cleanupSse();
+    server.close(() => resolve());
   });
+  server.on('close', cleanupSse);
 
   return server;
 }
 
 function startReadOnlyAutoPoller(db) {
   let busy = false;
+  let timer = null;
+  let stopped = false;
   const tick = async () => {
-    if (busy) return;
+    if (stopped || busy) return;
     busy = true;
+    let activeCount = 0;
     try {
+      sweepOrphanTasks(db);
       const running = db.prepare(`
         SELECT task_id FROM tasks
         WHERE state = 'running' AND channel IN ('dsh-baton', 'muse-tailnet', 'claude-cli')
         ORDER BY updated_at ASC LIMIT 6
       `).all();
+      activeCount = running.length;
       for (const r of running) {
         await pollBackgroundTask(db, r.task_id, { waitSec: 0 }).catch(() => {});
       }
     } catch { /* best-effort */ }
-    finally { busy = false; }
+    finally {
+      busy = false;
+      if (!stopped) {
+        const delayMs = activeCount > 0 ? 6000 : AUTO_POLL_INTERVAL_MS;
+        timer = setTimeout(tick, delayMs);
+        timer.unref();
+      }
+    }
   };
-  return setInterval(tick, AUTO_POLL_INTERVAL_MS).unref();
+  timer = setTimeout(tick, 6000);
+  timer.unref();
+  return { stop() { stopped = true; if (timer) clearTimeout(timer); } };
 }
 
 function startPeriodicCassRefresh() {
@@ -1056,11 +1157,24 @@ function startPeriodicCassRefresh() {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   ensureRuntimeDirs();
   const db = openHubDb();
+  pruneRetentionTables(db);
+  sweepOrphanTasks(db);
   const server = createDashboardServer(db);
+  let poller = null;
+  let cassTimer = null;
+  const gracefulExit = async () => {
+    poller?.stop();
+    if (cassTimer) clearInterval(cassTimer);
+    await server.shutdown();
+    try { db.close(); } catch {}
+    process.exit(0);
+  };
+  process.on('SIGINT', gracefulExit);
+  process.on('SIGTERM', gracefulExit);
   server.listen(DASHBOARD_PORT, DASHBOARD_HOST, () => {
     console.log(JSON.stringify({ event: 'dashboard.listening', version: APP_VERSION, url: `http://${DASHBOARD_HOST}:${DASHBOARD_PORT}`, pid: process.pid }));
     probeAllMembers(db).catch(() => {});
-    startReadOnlyAutoPoller(db);
-    startPeriodicCassRefresh();
+    poller = startReadOnlyAutoPoller(db);
+    cassTimer = startPeriodicCassRefresh();
   });
 }
