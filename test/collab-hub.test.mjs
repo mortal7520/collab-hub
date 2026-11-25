@@ -30,7 +30,8 @@ import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../
 import { createWorktree, mergeWorktree, reviewWorktree, verifyWorktree } from '../src/worktree.mjs';
 
 function makeTempEnv() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'collab-hub-test-'));
+  const rawDir = fs.mkdtempSync(path.join(os.tmpdir(), 'collab-hub-test-'));
+  const dir = (fs.realpathSync.native || fs.realpathSync)(rawDir);
   const ws = path.join(dir, 'workspace');
   const proj = path.join(ws, 'demo-proj');
   const mem = path.join(dir, 'memory');
