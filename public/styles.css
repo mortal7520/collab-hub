@@ -878,11 +878,12 @@ button.palette-item.active:hover { background: var(--accent-soft); }
 .dag-node-box-failed, .dag-node-box-cancelled { stroke: var(--red); stroke-width: 2; }
 .dag-node-box-stalled, .dag-node-box-uncertain, .dag-node-box-needs_input { stroke: var(--amber); stroke-width: 2; }
 
-.dag-live-ring { fill: none; stroke: var(--accent); stroke-width: 2; stroke-opacity: 0.85; animation: ringPulse 1.5s ease-out infinite; }
+.dag-live-ring { fill: none; stroke: var(--accent); stroke-width: 2.5; opacity: 0.9; animation: ringPulse 1.5s ease-in-out infinite; }
+/* Opacity-only pulse: animating stroke-width forced a repaint of the whole SVG
+ * on every frame (0.98 MB/s of layout churn); opacity is compositor-friendly. */
 @keyframes ringPulse {
-  0% { stroke-opacity: 0.85; stroke-width: 2; }
-  70% { stroke-opacity: 0.06; stroke-width: 7; }
-  100% { stroke-opacity: 0.85; stroke-width: 2; }
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.22; }
 }
 
 .dag-live-badge { font-family: inherit; font-size: 9.5px; font-weight: 650; fill: var(--muted); }
@@ -914,6 +915,19 @@ button.palette-item.active:hover { background: var(--accent-soft); }
 .log-head h3 { margin: 0; }
 .log-spacer { flex: 1; }
 .log-pill { font-variant-numeric: tabular-nums; }
+.log-follow { font-variant-numeric: tabular-nums; }
+.log-follow.active { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.log-truncated {
+  /* The console stays dark in both themes, so the notice uses a fixed amber. */
+  margin: 0 0 5px; padding: 2px 0 5px;
+  color: #fbbf24; font-size: 10px; letter-spacing: 0.01em;
+  border-bottom: 1px dashed color-mix(in srgb, #fbbf24 32%, transparent);
+}
+.pill.cancel-req { letter-spacing: 0.01em; }
+.btn.armed {
+  outline: 2px solid color-mix(in srgb, var(--amber) 65%, transparent);
+  outline-offset: 1px;
+}
 .live-log {
   background: #06070a;
   color: #d6dae2;

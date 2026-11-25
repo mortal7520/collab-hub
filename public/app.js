@@ -1,4 +1,4 @@
-/* CollabHub v1.2 — app shell controller (zero dependencies, bilingual EN / ZH).
+/* CollabHub v1.3 — app shell controller (zero dependencies, bilingual EN / ZH).
  *
  * Scaffolding contract:
  *   - No inline <script>/<style> is ever generated; CSP stays `script-src 'self'`.
@@ -93,9 +93,9 @@ function initials(name) {
 /* I18N-TABLE-BEGIN — every CJK literal in this file lives inside this block. */
 const I18N = {
   en: {
-    'app.title': 'CollabHub v1.2 · Local-First Multi-Agent Workbench',
-    'app.titleDemo': 'CollabHub v1.2 · Demo Preview',
-    'app.titleStatic': 'CollabHub v1.2 · Static Demo · GitHub Pages',
+    'app.title': 'CollabHub v1.3 · Local-First Multi-Agent Workbench',
+    'app.titleDemo': 'CollabHub v1.3 · Demo Preview',
+    'app.titleStatic': 'CollabHub v1.3 · Static Demo · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': 'Switch language / 切换语言',
@@ -111,7 +111,7 @@ const I18N = {
     'common.copyFail': 'Copy failed: the browser denied clipboard access.',
     'common.dismiss': 'Dismiss',
 
-    'brand.foot': 'CollabHub v1.2',
+    'brand.foot': 'CollabHub v1.3',
     'brand.deps': '0 npm deps',
     'brand.upgrade': 'Upgraded from CollabHub v1.1 · Static demo ready',
 
@@ -324,6 +324,8 @@ const I18N = {
     'dag.simulate': '▶ Simulate Live DAG',
     'dag.simulateAgain': '▶ Simulate again',
     'dag.simRunning': 'Simulating…',
+    'dag.simStop': '■ Stop simulation',
+    'dag.stepLimit': 'A DAG can hold at most {max} steps.',
     'dag.legend.deps': 'depends_on',
     'dag.edgesHint': 'root',
     'dag.liveDuration': '{d}',
@@ -551,6 +553,7 @@ const I18N = {
     'dispatch.submit': 'Dispatch now',
     'dispatch.auto': '✨ auto (route by live state + historical success)',
     'dispatch.done': 'Task dispatched.',
+    'dispatch.asyncQueued': 'Dispatched async (HTTP 202) · streaming live logs…',
     'dispatch.demo': 'Demo preview is read-only: dispatch is disabled.',
 
     'role.researcher': 'researcher (research)',
@@ -625,7 +628,7 @@ const I18N = {
     'drawer.pollFail': 'Poll failed: {error}',
     'drawer.openFail': 'Failed to open the task: {error}',
     'drawer.missing': 'Task not found.',
-    'drawer.reconcileNote': 'Updated from the CollabHub v1.2 workbench',
+    'drawer.reconcileNote': 'Updated from the CollabHub v1.3 workbench',
 
     'log.title': 'Live Output',
     'log.live': 'streaming',
@@ -638,6 +641,8 @@ const I18N = {
     'log.demo': 'demo fixture',
     'log.fetchFail': 'Live output unavailable: {error}',
     'log.truncated': '… earlier lines trimmed …',
+    'log.follow': '⤓ Follow',
+    'log.followTitle': 'Auto-scroll follows the newest output',
 
     'cancel.label': 'Cancel',
     'cancel.confirm': 'Cancel task {id}?',
@@ -647,6 +652,13 @@ const I18N = {
     'cancel.demo': 'Demo preview is read-only: no task was cancelled.',
     'cancel.fail': 'Cancel failed: {error}',
     'cancel.alreadyTerminal': 'This task already reached a terminal state.',
+    'cancel.requested': 'Cancel requested · waiting for owner pid {pid} to confirm.',
+    'cancel.requestedPill': 'cancel requested · owner pid {pid}',
+    'cancel.notConfirmed': 'Cancellation was not confirmed.',
+    'cancel.force': 'Force Cancel',
+    'cancel.forceConfirm': 'Confirm Force Cancel',
+    'cancel.forceHint': 'Click Force Cancel again within 5s to force-mark this task as cancelled.',
+    'cancel.forceDone': 'Task force-marked as cancelled.',
     'drawer.demoNote': 'Demo preview · read-only fixture data, no live backend is attached.',
     'cancel.event': 'Task {id} was cancelled by {member}.',
 
@@ -654,6 +666,7 @@ const I18N = {
     'resume.pending': 'Resuming…',
     'resume.done': 'Batch {batch} resumed · skipped {skipped} completed, retried {retried}.',
     'resume.none': 'Nothing to resume in batch {batch}.',
+    'resume.blocked': 'Resume blocked · {n} uncertain steps need review before retrying.',
     'resume.demo': 'Demo preview is read-only: the batch was not resumed.',
     'resume.fail': 'Resume failed: {error}',
     'resume.noBatch': 'Select a live batch first.',
@@ -772,9 +785,9 @@ const I18N = {
   },
 
   zh: {
-    'app.title': 'CollabHub v1.2 · 本地优先多 Agent 工作台',
-    'app.titleDemo': 'CollabHub v1.2 · 演示预览',
-    'app.titleStatic': 'CollabHub v1.2 · 静态演示 · GitHub Pages',
+    'app.title': 'CollabHub v1.3 · 本地优先多 Agent 工作台',
+    'app.titleDemo': 'CollabHub v1.3 · 演示预览',
+    'app.titleStatic': 'CollabHub v1.3 · 静态演示 · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': '切换语言 / Switch language',
@@ -790,7 +803,7 @@ const I18N = {
     'common.copyFail': '复制失败：浏览器未授予剪贴板权限。',
     'common.dismiss': '关闭提示',
 
-    'brand.foot': 'CollabHub v1.2',
+    'brand.foot': 'CollabHub v1.3',
     'brand.deps': '0 个 npm 依赖',
     'brand.upgrade': '自 CollabHub v1.1 升级 · 支持纯静态 Demo',
 
@@ -1003,6 +1016,8 @@ const I18N = {
     'dag.simulate': '▶ 模拟 DAG 实时运行',
     'dag.simulateAgain': '▶ 再次模拟',
     'dag.simRunning': '模拟运行中…',
+    'dag.simStop': '■ 停止模拟',
+    'dag.stepLimit': '单个 DAG 最多支持 {max} 个步骤。',
     'dag.legend.deps': 'depends_on',
     'dag.edgesHint': '起始',
     'dag.liveDuration': '{d}',
@@ -1230,6 +1245,7 @@ const I18N = {
     'dispatch.submit': '立即派发',
     'dispatch.auto': '✨ auto（按在线状态 + 历史成功率自动路由）',
     'dispatch.done': '任务已派发。',
+    'dispatch.asyncQueued': '已异步派发（HTTP 202）· 正在流式接收日志…',
     'dispatch.demo': '演示预览为只读模式，派发已禁用。',
 
     'role.researcher': 'researcher（调研）',
@@ -1304,7 +1320,7 @@ const I18N = {
     'drawer.pollFail': '轮询失败：{error}',
     'drawer.openFail': '打开任务失败：{error}',
     'drawer.missing': '任务不存在。',
-    'drawer.reconcileNote': '由 CollabHub v1.2 工作台更新',
+    'drawer.reconcileNote': '由 CollabHub v1.3 工作台更新',
 
     'log.title': '实时日志',
     'log.live': '流式输出',
@@ -1317,6 +1333,8 @@ const I18N = {
     'log.demo': '演示数据',
     'log.fetchFail': '实时日志不可用：{error}',
     'log.truncated': '… 较早的行已裁剪 …',
+    'log.follow': '⤓ 跟随',
+    'log.followTitle': '自动滚动跟随最新输出',
 
     'cancel.label': '中止',
     'cancel.confirm': '确认中止任务 {id}？',
@@ -1326,6 +1344,13 @@ const I18N = {
     'cancel.demo': '演示预览为只读模式，未真正中止任何任务。',
     'cancel.fail': '中止失败：{error}',
     'cancel.alreadyTerminal': '该任务已进入终态，无需中止。',
+    'cancel.requested': '已请求中止 · 等待 owner pid {pid} 确认。',
+    'cancel.requestedPill': '已请求中止 · pid {pid}',
+    'cancel.notConfirmed': '中止未被确认。',
+    'cancel.force': '强制标记中止',
+    'cancel.forceConfirm': '确认强制中止',
+    'cancel.forceHint': '5 秒内再次点击「强制标记中止」即强制将该任务标记为已中止。',
+    'cancel.forceDone': '任务已强制标记为已中止。',
     'drawer.demoNote': '演示预览 · 只读样本数据，未连接真实后台。',
     'cancel.event': '任务 {id} 已被 {member} 中止。',
 
@@ -1333,6 +1358,7 @@ const I18N = {
     'resume.pending': '续跑中…',
     'resume.done': '批次 {batch} 已续跑 · 跳过 {skipped} 个已完成，重试 {retried} 个。',
     'resume.none': '批次 {batch} 没有可续跑的步骤。',
+    'resume.blocked': '续跑被阻塞 · {n} 个不确定步骤需先复核。',
     'resume.demo': '演示预览为只读模式，未真正续跑批次。',
     'resume.fail': '续跑失败：{error}',
     'resume.noBatch': '请先选择一个实时批次。',
@@ -1511,8 +1537,15 @@ const state = {
   dagBatchTouched: false,
   dagTemplates: [],
   overviewProbe: null,
+  overviewSig: null,
+  overviewLoading: false,
+  overviewQueued: false,
+  overviewSeq: 0,
+  agentFilterSig: null,
+  forceArmed: null,
+  pollEvery: 0,
   drawer: { kind: null, key: null },
-  taskLog: { taskId: null, entries: [], active: false, follow: true, live: false },
+  taskLog: emptyTaskLog(),
   sim: { running: false, batchId: null, steps: new Map(), plan: new Map(), logs: new Map(), timer: null, startedAt: 0, tasks: [], seq: 0 },
   discovered: [],
   lastToolkitCopy: '',
@@ -1521,9 +1554,18 @@ const state = {
   health: null,
   doctor: null,
   palette: { items: [], index: 0 },
-  flags: { eventsLoaded: false, doctorLoaded: false, healthLoaded: false },
-  timers: { reload: null, dag: null, poll: null, sse: null },
+  flags: { eventsLoaded: false, doctorLoaded: false, healthLoaded: false, sseConnected: false },
+  timers: { reload: null, dag: null, poll: null, sse: null, filter: null },
 };
+
+/* Single factory so every drawer mount starts from a clean, dedupe-ready log state. */
+function emptyTaskLog(overrides = {}) {
+  return {
+    taskId: null, entries: [], seen: new Set(), active: false, follow: true,
+    live: false, terminal: false, ownerPid: null, cancelRequested: false,
+    truncated: false, ...overrides,
+  };
+}
 
 const VIEWS = {
   overview: { titleKey: 'nav.overview', subKey: 'view.overview.sub' },
@@ -1543,6 +1585,7 @@ const KANBAN_COLUMNS = [
 
 const ACTIVE_STATES = ['running', 'dispatched', 'dispatching'];
 const TERMINAL_STATES = ['completed', 'failed', 'rerouted', 'cancelled'];
+const MAX_DAG_STEPS = 16; /* mirrors the backend workflow step limit */
 
 const AGENT_DRIVERS = ['dsh-baton', 'muse-tailnet', 'claude-dual', 'generic-cli', 'openai-http'];
 const TOOLKIT_ITEMS = [
@@ -1641,7 +1684,7 @@ async function apiGet(url) {
   return data;
 }
 
-async function apiPost(url, payload) {
+async function apiPostRaw(url, payload) {
   if (state.demo) {
     toast(t('toast.demoReadonly'), 'warn');
     throw new Error('Demo mode is read-only');
@@ -1653,7 +1696,11 @@ async function apiPost(url, payload) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  return { status: res.status, data };
+}
+
+async function apiPost(url, payload) {
+  return (await apiPostRaw(url, payload)).data;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2232,11 +2279,16 @@ function renderBanner(tasks) {
 function renderAgentFilter() {
   const sel = $('#filterAgent');
   if (!sel) return;
+  /* Rebuilding the <select> collapses an open dropdown; only touch it when the
+   * agent identities (or the active language) actually changed. */
+  const sig = `${LANG}|${state.members.map((m) => `${m.member}:${m.name || ''}`).join('|')}`;
+  if (state.agentFilterSig === sig) return;
+  state.agentFilterSig = sig;
   const prev = sel.value;
   sel.innerHTML = `<option value="">${esc(t('tasks.filterAgentAll'))}</option>` + state.members.map((m) => (
     `<option value="${esc(m.member)}">${esc(m.name || m.member)}</option>`
   )).join('');
-  sel.value = prev;
+  if (prev && state.members.some((m) => m.member === prev)) sel.value = prev;
 }
 
 function renderRoster() {
@@ -2384,14 +2436,49 @@ function applyDemoFixture(fixture) {
   renderMail(fixture.mail_hub);
 }
 
+/* Content signature of every panel renderAll() paints. `generated_at` is
+ * deliberately excluded: the server stamps a fresh ISO string on each poll, so
+ * hashing it would force a full DOM rebuild every 15s for unchanged data. */
+function overviewSignature() {
+  const tasks = state.tasks.map((task) => `${task.task_id}:${task.state}:${task.updated_at || ''}`).join(',');
+  const members = state.members.map((m) => `${m.member}:${m.state || ''}:${m.in_cooldown || m.cli_in_cooldown ? 1 : 0}:${m.builtin ? 1 : 0}`).join(',');
+  const worktrees = state.worktrees.map((w) => `${w.task_id}:${w.state || ''}:${w.verify_status || ''}:${w.updated_at || ''}`).join(',');
+  const batches = state.batches.map((b) => `${b.batch_id}:${b.total ?? ''}:${JSON.stringify(b.counts || {})}:${b.all_terminal ? 1 : 0}`).join(',');
+  return [
+    LANG,
+    tasks,
+    members,
+    worktrees,
+    batches,
+    String(state.notes.length),
+    state.mail?.ok ? '1' : '0',
+    JSON.stringify(state.metrics || {}),
+    JSON.stringify(state.telemetry || {}),
+    JSON.stringify(state.toolkit || {}),
+  ].join('|');
+}
+
+/* Returns true only when a rebuild actually happened. */
+function renderOverviewIfDirty() {
+  const sig = overviewSignature();
+  if (sig === state.overviewSig) return false;
+  state.overviewSig = sig;
+  renderAll();
+  return true;
+}
+
 async function loadOverview({ quiet = false } = {}) {
-  if (state.static) {
-    applyDemoFixture(buildDemoFixture());
-    renderAll();
-    setLastUpdated(new Date().toISOString());
-    return;
-  }
+  /* In-flight guard: a slow poll must never race a user-triggered refresh. */
+  if (state.overviewLoading) { state.overviewQueued = true; return; }
+  state.overviewLoading = true;
+  const seq = ++state.overviewSeq;
   try {
+    if (state.static) {
+      applyDemoFixture(buildDemoFixture());
+      setLastUpdated(new Date().toISOString());
+      if (seq === state.overviewSeq) renderOverviewIfDirty();
+      return;
+    }
     let data;
     if (state.demo && state.overviewProbe) {
       data = state.overviewProbe;
@@ -2399,8 +2486,10 @@ async function loadOverview({ quiet = false } = {}) {
     } else {
       data = await apiGet(state.demo ? '/api/overview?demo=1' : '/api/overview');
     }
+    /* Monotonic sequence: never let an out-of-order response overwrite newer state. */
+    if (seq !== state.overviewSeq) return;
     applyOverviewData(data);
-    renderAll();
+    renderOverviewIfDirty();
     if (state.view === 'ops' && state.flags.eventsLoaded) loadEvents({ quiet: true });
   } catch (err) {
     if (state.demo) {
@@ -2410,6 +2499,12 @@ async function loadOverview({ quiet = false } = {}) {
     if (!quiet) toast(t('toast.loadFail', { error: err.message }), 'error');
     const el = $('#updatedAt');
     if (el) el.textContent = t('topbar.syncFailed');
+  } finally {
+    state.overviewLoading = false;
+    if (state.overviewQueued) {
+      state.overviewQueued = false;
+      loadOverview({ quiet: true });
+    }
   }
 }
 
@@ -2436,7 +2531,9 @@ function renderTasks() {
   const rows = filteredTasks();
   const count = $('#taskCount');
   if (count) count.textContent = t('tasks.count', { shown: rows.length, total: state.tasks.length });
-  const body = $('#tasksBody');
+  /* Render ONLY the active view: the hidden pane used to be rebuilt on every
+   * poll, doubling DOM work for content nobody could see. */
+  const body = state.taskView === 'table' ? $('#tasksBody') : null;
   if (body) {
     body.innerHTML = rows.length ? rows.map((task) => {
       const receipt = [task.external_id ? `id:${String(task.external_id).slice(0, 16)}` : '', task.reply_generation ? `gen:${task.reply_generation}` : ''].filter(Boolean).join(' ');
@@ -2454,7 +2551,7 @@ function renderTasks() {
     }).join('') : `<tr><td colspan="5" class="table-empty">${esc(t('tasks.empty'))}</td></tr>`;
   }
 
-  const kanban = $('#tasksKanbanWrap');
+  const kanban = state.taskView === 'kanban' ? $('#tasksKanbanWrap') : null;
   if (kanban) {
     kanban.innerHTML = KANBAN_COLUMNS.map((col) => {
       const items = rows.filter((task) => col.match(task.state));
@@ -2490,6 +2587,8 @@ function setTaskView(mode) {
   if (kanban) kanban.hidden = state.taskView !== 'kanban';
   $('#btnViewTable')?.classList.toggle('active', state.taskView === 'table');
   $('#btnViewKanban')?.classList.toggle('active', state.taskView === 'kanban');
+  /* Paint the newly selected view immediately instead of waiting for a poll. */
+  renderTasks();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2765,9 +2864,35 @@ function liveInfo(task) {
   return { state: task.state, task_id: task.task_id, duration };
 }
 
+/* Exact batch task_id → DAG step id. Task ids are `${batchId}_${stepId}` and a
+ * resume retry appends `_r<n>`, so `_r2` retries must still bind to the step
+ * node they retry (title substring matching used to bind the wrong node). */
+function stepOf(task, batchId = state.dagBatch) {
+  return String(task?.task_id ?? '')
+    .replace(`${batchId}_`, '')
+    .replace(/_r\d+$/, '');
+}
+
+function attemptOf(task) {
+  const match = /_r(\d+)$/.exec(String(task?.task_id ?? ''));
+  return match ? Number(match[1]) : 0;
+}
+
+/* Newest attempt wins: higher retry ordinal first, then the freshest timestamp. */
+function isNewerAttempt(candidate, current) {
+  if (!current) return true;
+  const a = attemptOf(candidate);
+  const b = attemptOf(current);
+  if (a !== b) return a > b;
+  const at = new Date(candidate.updated_at || candidate.attempted_at || candidate.created_at || 0).getTime() || 0;
+  const bt = new Date(current.updated_at || current.attempted_at || current.created_at || 0).getTime() || 0;
+  return at >= bt;
+}
+
 /* Bind the selected batch's tasks onto DAG step ids.
- * Preferred signals: task.step_id / task.meta.step_id, then id/title matching,
- * then positional order when the batch has exactly one task per step. */
+ * Preferred signals: task.step_id / task.meta.step_id, then the exact
+ * `${batchId}_${stepId}` (retry-aware) task_id contract, then positional order
+ * when the batch has exactly one task per step. */
 function liveStepMap() {
   const map = new Map();
   const batchId = state.dagBatch;
@@ -2778,23 +2903,19 @@ function liveStepMap() {
   }
   const tasks = state.tasks.filter((task) => task.batch_id === batchId);
   if (!tasks.length) return map;
-  const used = new Set();
   const steps = state.dagSteps || [];
+
+  const byStep = new Map();
+  for (const task of tasks) {
+    const explicit = task.step_id || task.meta?.step_id || task.meta?.dag_step || null;
+    const nodeId = explicit || stepOf(task, batchId);
+    if (!nodeId) continue;
+    if (isNewerAttempt(task, byStep.get(nodeId))) byStep.set(nodeId, task);
+  }
+
   for (const node of steps) {
-    let hit = tasks.find((task) => !used.has(task.task_id) && (
-      task.step_id === node.id
-      || task.meta?.step_id === node.id
-      || task.meta?.dag_step === node.id
-      || task.id === node.id
-    ));
-    if (!hit) {
-      hit = tasks.find((task) => !used.has(task.task_id) && task.title
-        && (task.title === node.id || task.title.startsWith(`${node.id} `) || task.title.includes(node.id)));
-    }
-    if (hit) {
-      used.add(hit.task_id);
-      map.set(node.id, liveInfo(hit));
-    }
+    const hit = byStep.get(node.id);
+    if (hit) map.set(node.id, liveInfo(hit));
   }
   if (!map.size && tasks.length === steps.length && steps.length > 0) {
     const ordered = tasks.slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
@@ -2947,6 +3068,10 @@ function renderDagCanvas() {
 
 function addDagStep() {
   syncDagFromDom();
+  if (state.dagSteps.length >= MAX_DAG_STEPS) {
+    toast(t('dag.stepLimit', { max: MAX_DAG_STEPS }), 'warn');
+    return;
+  }
   state.dagSteps.push({ id: `step_${state.dagSteps.length + 1}`, member: 'auto', role: 'researcher', depends_on: [], prompt: '' });
   renderDagSteps();
   renderDagCanvas();
@@ -3100,9 +3225,10 @@ function renderDagBatchSelect() {
   if (simBtn) {
     simBtn.hidden = !state.demo;
     simBtn.textContent = state.sim.running
-      ? t('dag.simRunning')
+      ? t('dag.simStop')
       : (state.sim.batchId ? t('dag.simulateAgain') : t('dag.simulate'));
-    simBtn.disabled = Boolean(state.sim.running);
+    simBtn.disabled = false; /* running is a Stop toggle, not a disabled state */
+    simBtn.classList.toggle('danger', state.sim.running);
   }
 }
 
@@ -3147,9 +3273,15 @@ async function resumeBatch() {
     const res = await apiPost('/api/workflows/resume', { batch_id: batchId, wait_sec: 0 });
     const skipped = Array.isArray(res.skipped_completed) ? res.skipped_completed.length : 0;
     const retried = Array.isArray(res.retried_steps) ? res.retried_steps.length : 0;
-    toast(skipped || retried
-      ? t('resume.done', { batch: batchId, skipped, retried })
-      : t('resume.none', { batch: batchId }), 'success');
+    const blocked = Array.isArray(res.blocked_uncertain) ? res.blocked_uncertain.length : 0;
+    if (blocked) {
+      /* Uncertain/stalled steps block a clean resume: surface the backend reason. */
+      toast(res.message || t('resume.blocked', { n: blocked }), 'warn', 7000);
+    } else {
+      toast(skipped || retried
+        ? t('resume.done', { batch: batchId, skipped, retried })
+        : t('resume.none', { batch: batchId }), 'success');
+    }
     await loadOverview({ quiet: true });
     renderDagBatchSelect();
     renderDagCanvas();
@@ -3266,11 +3398,17 @@ function simTick() {
   if (!state.sim.running) return;
   const elapsed = Date.now() - state.sim.startedAt;
   let allDone = true;
+  /* The tick fires at ~7 Hz. Rebuilding the SVG/task DOM on a tick that changed
+   * nothing burned ~1 MB/s of layout work for a static picture; only a real
+   * state transition is allowed to touch the DOM now. */
+  let stateChanged = false;
+  let logsAdded = false;
   for (const step of state.sim.plan.values()) {
     const nextState = elapsed < step.start ? 'dispatched' : (elapsed < step.end ? 'running' : 'completed');
     if (elapsed < step.end) allDone = false;
     if (nextState !== step.state) {
       step.state = nextState;
+      stateChanged = true;
       const task = state.sim.tasks.find((item) => item.task_id === step.taskId);
       if (task) {
         task.state = nextState === 'dispatched' ? 'dispatched' : nextState;
@@ -3287,6 +3425,7 @@ function simTick() {
       const entry = step.logs[step.emitted];
       logs.push({ ts: new Date(state.sim.startedAt + entry.at).toISOString(), stream: entry.stream, text: entry.text });
       step.emitted += 1;
+      logsAdded = true;
     }
     state.sim.logs.set(step.taskId, logs);
     state.sim.steps.set(step.id, {
@@ -3296,13 +3435,15 @@ function simTick() {
     });
   }
 
-  renderDagCanvas();
-  renderTasks();
-  const batch = simBatchSummary();
-  state.batches = [batch, ...state.batches.filter((b) => b.batch_id !== batch.batch_id)];
-  renderBatches();
-  renderDagBatchSelect();
-  if (state.taskLog.taskId) {
+  if (stateChanged) {
+    renderDagCanvas();
+    renderTasks();
+    const batch = simBatchSummary();
+    state.batches = [batch, ...state.batches.filter((b) => b.batch_id !== batch.batch_id)];
+    renderBatches();
+    renderDagBatchSelect();
+  }
+  if (logsAdded && state.taskLog.taskId) {
     const simLogs = state.sim.logs.get(state.taskLog.taskId);
     if (simLogs && simLogs.length > state.taskLog.entries.length) {
       appendTaskLog(state.taskLog.taskId, simLogs.slice(state.taskLog.entries.length));
@@ -3851,10 +3992,11 @@ function openDrawer(html, { kind = null, key = null } = {}) {
 function closeDrawer() {
   const bg = $('#drawerBg');
   if (!bg) return;
+  resetForceArm();
   bg.classList.remove('open');
   bg.setAttribute('aria-hidden', 'true');
   state.drawer = { kind: null, key: null };
-  state.taskLog = { taskId: null, entries: [], active: false, follow: true, live: false };
+  state.taskLog = emptyTaskLog();
 }
 
 /* ------------------------------------------------------------------ */
@@ -3873,37 +4015,94 @@ function demoTaskDetail(task) {
   };
 }
 
+const LOG_LIMIT = 200; /* client render cap — mirrors the backend MAX_LOG_ENTRIES_PER_TASK */
+
 function normalizeLogEntry(entry) {
   const raw = entry || {};
   return {
+    id: raw.id ?? null,
     ts: raw.ts || raw.at || new Date().toISOString(),
     stream: ['stdout', 'stderr', 'system'].includes(raw.stream) ? raw.stream : 'stdout',
     text: String(raw.text ?? ''),
   };
 }
 
+/* Backend log rows carry a durable `id`; SSE chunks do not, so those are keyed
+ * by timestamp+text. Either way a concurrent chunk is never lost or doubled. */
+function logEntryKey(entry) {
+  return entry.id != null ? `id:${entry.id}` : `${entry.ts}\u0000${entry.text}`;
+}
+
 function updateLogPill() {
   const pill = $('#logPill');
   if (!pill) return;
-  const active = state.taskLog.active || state.taskLog.live;
+  pill.classList.add('log-pill');
+  const active = !state.taskLog.terminal && (state.taskLog.active || state.taskLog.live);
   pill.textContent = active ? t('log.live') : t('log.done');
   pill.classList.toggle('ok', active);
   pill.classList.toggle('subtle', !active);
   pill.classList.toggle('warn', false);
 }
 
+function updateFollowButton() {
+  const btn = $('#logFollow');
+  if (!btn) return;
+  btn.classList.toggle('active', state.taskLog.follow);
+  btn.setAttribute('aria-pressed', state.taskLog.follow ? 'true' : 'false');
+  btn.title = state.taskLog.follow ? t('log.followOn') : t('log.followOff');
+}
+
+function toggleFollow() {
+  state.taskLog.follow = !state.taskLog.follow;
+  updateFollowButton();
+  const box = $('#liveLog');
+  if (state.taskLog.follow && box) box.scrollTop = box.scrollHeight;
+  toast(state.taskLog.follow ? t('log.followOn') : t('log.followOff'), 'info', 1600);
+}
+
+function ensureLogEmpty(box) {
+  if (!box) return;
+  if (box.querySelector('.log-line')) { box.querySelector('.log-empty')?.remove(); return; }
+  if (!box.querySelector('.log-empty')) {
+    const empty = document.createElement('div');
+    empty.className = 'log-empty';
+    empty.textContent = t('log.empty');
+    box.append(empty);
+  }
+}
+
+function renderLogTruncated() {
+  const box = $('#liveLog');
+  if (!box) return;
+  const existing = box.querySelector('#logTruncated');
+  if (!state.taskLog.truncated) { existing?.remove(); return; }
+  if (existing) return;
+  const note = document.createElement('div');
+  note.className = 'log-truncated';
+  note.id = 'logTruncated';
+  note.textContent = t('log.truncated');
+  box.prepend(note);
+}
+
+/* Append-only, dedupe-first log sink. Never clears the console on mount. */
 function appendTaskLog(taskId, entries) {
   if (!taskId || !Array.isArray(entries) || !entries.length) return;
   if (state.taskLog.taskId !== taskId) return;
   const box = $('#liveLog');
   if (!box) return;
-  const MAX = 900;
+  const follow = state.taskLog.follow;
+  const prevTop = box.scrollTop;
   const frag = document.createDocumentFragment();
+  let added = 0;
   for (const raw of entries) {
     const entry = normalizeLogEntry(raw);
+    const key = logEntryKey(entry);
+    if (state.taskLog.seen.has(key)) continue;
+    state.taskLog.seen.add(key);
     state.taskLog.entries.push(entry);
     const row = document.createElement('div');
     row.className = `log-line log-${entry.stream}`;
+    if (entry.id != null) row.dataset.logId = String(entry.id);
     const time = document.createElement('span');
     time.className = 'log-ts';
     time.textContent = fmtTimeShort(entry.ts);
@@ -3912,55 +4111,79 @@ function appendTaskLog(taskId, entries) {
     text.textContent = entry.text;
     row.append(time, text);
     frag.append(row);
+    added += 1;
+  }
+  if (!added) {
+    renderLogTruncated();
+    if (follow) box.scrollTop = box.scrollHeight;
+    return;
   }
   box.append(frag);
-  while (state.taskLog.entries.length > MAX) state.taskLog.entries.shift();
-  while (box.childElementCount > MAX) box.firstElementChild?.remove();
-  if (state.taskLog.follow) box.scrollTop = box.scrollHeight;
-  if (!box.childElementCount) {
-    const empty = document.createElement('div');
-    empty.className = 'log-empty';
-    empty.textContent = t('log.empty');
-    box.append(empty);
-  } else {
-    box.querySelector('.log-empty')?.remove();
+  ensureLogEmpty(box);
+
+  /* Cap both the state array and the DOM at 200 rows, and remember that the
+   * head of the stream is gone so the truncated banner can be shown. */
+  let removedHeight = 0;
+  while (state.taskLog.entries.length > LOG_LIMIT) {
+    const gone = state.taskLog.entries.shift();
+    state.taskLog.seen.delete(logEntryKey(gone));
+    const row = box.querySelector('.log-line');
+    if (row) {
+      removedHeight += row.offsetHeight || 0;
+      row.remove();
+    }
+    state.taskLog.truncated = true;
+  }
+  renderLogTruncated();
+  ensureLogEmpty(box);
+  if (follow) {
+    box.scrollTop = box.scrollHeight;
+  } else if (removedHeight > 0) {
+    /* !follow: keep the reader anchored on the same content even though rows
+     * were trimmed above the viewport. */
+    box.scrollTop = Math.max(0, prevTop - removedHeight);
   }
   updateLogPill();
 }
 
-async function mountTaskLogs(taskId) {
-  state.taskLog = { taskId, entries: [], active: false, follow: true, live: Boolean(state.demo) };
+async function mountTaskLogs(taskId, liveLogs = null, { terminal = false } = {}) {
+  state.taskLog = emptyTaskLog({ taskId, live: Boolean(state.demo), follow: true, terminal });
   const box = $('#liveLog');
   if (!box) return;
-  box.textContent = '';
   updateLogPill();
+  updateFollowButton();
 
   if (state.demo) {
     const task = state.tasks.find((item) => item.task_id === taskId);
+    state.taskLog.terminal = TERMINAL_STATES.includes(task?.state);
     state.taskLog.active = ACTIVE_STATES.includes(task?.state);
     appendTaskLog(taskId, demoTaskLogs(task));
+    ensureLogEmpty(box);
     updateLogPill();
     return;
   }
   try {
-    const data = await apiGet(`/api/tasks/logs?task_id=${encodeURIComponent(taskId)}`);
+    /* GET /api/tasks/:id already ships `live_logs`; reuse it instead of firing a
+     * second /api/tasks/logs round-trip on every drawer open. */
+    const data = (liveLogs && Array.isArray(liveLogs.logs))
+      ? liveLogs
+      : await apiGet(`/api/tasks/logs?task_id=${encodeURIComponent(taskId)}`);
     if (state.taskLog.taskId !== taskId) return;
     state.taskLog.active = Boolean(data.active);
+    state.taskLog.ownerPid = data.owner_pid ?? null;
+    state.taskLog.cancelRequested = Boolean(data.cancel_requested);
     const entries = Array.isArray(data.logs) ? data.logs : [];
-    const logsBox = $('#liveLog');
-    if (logsBox) logsBox.textContent = '';
-    if (entries.length) appendTaskLog(taskId, entries);
-    else {
-      const empty = document.createElement('div');
-      empty.className = 'log-empty';
-      empty.textContent = t('log.empty');
-      logsBox?.append(empty);
-    }
+    if (entries.length > LOG_LIMIT) state.taskLog.truncated = true;
+    const initial = entries.slice(-LOG_LIMIT);
+    if (initial.length) appendTaskLog(taskId, initial);
+    ensureLogEmpty(box);
+    renderLogTruncated();
     updateLogPill();
+    updateFollowButton();
   } catch (err) {
+    if (state.taskLog.taskId !== taskId) return;
     const logsBox = $('#liveLog');
-    if (logsBox && state.taskLog.taskId === taskId) {
-      logsBox.textContent = '';
+    if (logsBox && !logsBox.querySelector('.log-line')) {
       const warn = document.createElement('div');
       warn.className = 'log-empty';
       warn.textContent = t('log.fetchFail', { error: err.message });
@@ -3988,10 +4211,18 @@ function renderTaskDrawer(task, data) {
   const live = ACTIVE_STATES.includes(task.state);
   const terminal = TERMINAL_STATES.includes(task.state);
   const canPoll = !terminal && task.channel !== 'desktop-native';
+  const liveLogs = data.live_logs || null;
+  /* A terminal task keeps its historical cancel_requested_at; only surface the amber
+   * "cancel requested" state while the task is still live. */
+  const cancelRequested = !terminal && (Boolean(task.cancel_requested_at) || Boolean(liveLogs?.cancel_requested));
+  const ownerPid = liveLogs?.owner_pid ?? task.owner_pid ?? '—';
   const demoNote = state.demo ? `<div class="meta demo-note">${esc(t('drawer.demoNote'))}</div>` : '';
   const actions = [];
   if (live) {
     actions.push(`<button type="button" class="btn danger" data-cancel-task="${esc(task.task_id)}">${esc(t('cancel.label'))}</button>`);
+    if (cancelRequested) {
+      actions.push(`<button type="button" class="btn warn sm" data-force-cancel-task="${esc(task.task_id)}">${esc(t('cancel.force'))}</button>`);
+    }
   }
   if (!state.demo && !terminal) {
     if (canPoll) actions.push(`<button type="button" class="btn primary sm" data-poll-task="${esc(task.task_id)}">${esc(t('drawer.poll'))}</button>`);
@@ -4003,7 +4234,7 @@ function renderTaskDrawer(task, data) {
     <div class="drawer-head">
       <div>
         <div class="drawer-title">${esc(task.title)}</div>
-        <div class="drawer-meta"><span>${esc(t('drawer.task'))} <code>${esc(task.task_id)}</code></span><span>${esc(t('drawer.agent'))} <code>${esc(task.member)}</code> (${esc(task.channel)})</span><span>${badge(task.state)}</span></div>
+        <div class="drawer-meta"><span>${esc(t('drawer.task'))} <code>${esc(task.task_id)}</code></span><span>${esc(t('drawer.agent'))} <code>${esc(task.member)}</code> (${esc(task.channel)})</span><span>${badge(task.state)}</span>${cancelRequested ? `<span class="pill warn cancel-req" id="cancelReqPill">${esc(t('cancel.requestedPill', { pid: ownerPid }))}</span>` : ''}</div>
       </div>
       <button type="button" class="icon-btn" data-close-drawer="1" aria-label="${esc(t('common.close'))}">×</button>
     </div>
@@ -4021,8 +4252,9 @@ function renderTaskDrawer(task, data) {
     <section class="drawer-section log-section">
       <div class="log-head">
         <h3>${esc(t('log.title'))}</h3>
-        <span class="pill subtle" id="logPill">${esc(t('log.live'))}</span>
+        <span class="pill subtle log-pill" id="logPill">${esc(t(live ? 'log.live' : 'log.done'))}</span>
         <span class="log-spacer"></span>
+        <button type="button" class="btn ghost sm${state.taskLog.follow ? ' active' : ''}" id="logFollow" data-toggle-follow="1" aria-pressed="${state.taskLog.follow ? 'true' : 'false'}" title="${esc(t('log.followTitle'))}">${esc(t('log.follow'))}</button>
         <button type="button" class="btn ghost sm" data-copy-logs="1">${esc(t('log.copy'))}</button>
       </div>
       <div class="live-log" id="liveLog" role="log" tabindex="0" aria-label="${esc(t('log.title'))}"></div>
@@ -4032,7 +4264,7 @@ function renderTaskDrawer(task, data) {
     ${task.error_message ? `<div class="drawer-section"><h3>${esc(t('drawer.error'))}</h3><pre class="mono-pre">${esc((task.error_code ? `[${task.error_code}] ` : '') + task.error_message)}</pre></div>` : ''}
     <div class="drawer-section"><h3>${esc(t('drawer.events', { n: events.length }))}</h3><pre class="mono-pre">${esc(events.map((e) => `${e.created_at} | ${e.event_type} | ${e.actor}${e.payload_json ? ` | ${e.payload_json}` : ''}`).join('\n') || t('drawer.noEvents'))}</pre></div>`,
   { kind: 'task', key: task.task_id });
-  mountTaskLogs(task.task_id);
+  mountTaskLogs(task.task_id, liveLogs, { terminal });
 }
 
 async function openTask(taskId) {
@@ -4079,22 +4311,69 @@ async function reconcileTask(taskId, nextState) {
   }
 }
 
-async function cancelTask(taskId, button) {
+function resetForceArm() {
+  const armed = state.forceArmed;
+  if (!armed) return;
+  clearTimeout(armed.timer);
+  if (armed.button?.isConnected) {
+    armed.button.textContent = t('cancel.force');
+    armed.button.classList.remove('armed');
+  }
+  state.forceArmed = null;
+}
+
+/* Two-step force cancel: the first click only arms the action for 5s; the
+ * second click inside that window is what sends force: true. */
+function requestForceCancel(taskId, button) {
+  const armed = state.forceArmed;
+  if (armed && armed.taskId === taskId && Date.now() < armed.until) {
+    clearTimeout(armed.timer);
+    state.forceArmed = null;
+    cancelTask(taskId, button, { force: true });
+    return;
+  }
+  resetForceArm();
+  if (!button) return;
+  const timer = setTimeout(() => {
+    if (state.forceArmed?.taskId === taskId) resetForceArm();
+  }, 5000);
+  state.forceArmed = { taskId, until: Date.now() + 5000, timer, button };
+  button.textContent = t('cancel.forceConfirm');
+  button.classList.add('armed');
+  toast(t('cancel.forceHint'), 'warn', 5200);
+}
+
+async function cancelTask(taskId, button, { force = false } = {}) {
   if (state.demo) { toast(t('cancel.demo'), 'warn'); return; }
   const task = state.tasks.find((item) => item.task_id === taskId);
-  if (task && TERMINAL_STATES.includes(task.state)) { toast(t('cancel.alreadyTerminal'), 'warn'); return; }
-  const original = button?.textContent || t('cancel.label');
+  if (!force && task && TERMINAL_STATES.includes(task.state)) { toast(t('cancel.alreadyTerminal'), 'warn'); return; }
+  const original = button?.textContent || t(force ? 'cancel.force' : 'cancel.label');
   if (button) { button.disabled = true; button.textContent = t('cancel.pending'); }
   try {
-    const res = await apiPost('/api/tasks/cancel', { task_id: taskId, reason: t('drawer.reconcileNote') });
-    const aborted = Boolean(res?.aborted_live_process);
-    toast(aborted ? t('cancel.doneAbort') : t('cancel.done'), 'success');
+    const res = await apiPost('/api/tasks/cancel', {
+      task_id: taskId,
+      reason: t('drawer.reconcileNote'),
+      ...(force ? { force: true } : {}),
+    });
+    const requested = Boolean(res?.cancel_requested);
+    const cancelled = res?.cancelled !== false;
+    if (!cancelled) {
+      /* already_terminal / unconfirmed cross-process abort: never paint green. */
+      toast(res?.message || (res?.already_terminal ? t('cancel.alreadyTerminal') : t('cancel.notConfirmed')), 'warn', 7000);
+    } else if (requested) {
+      toast(res?.message || t('cancel.requested', { pid: res?.task?.owner_pid ?? task?.owner_pid ?? '—' }), 'warn', 7000);
+    } else if (force || res?.forced) {
+      toast(t('cancel.forceDone'), 'success');
+    } else {
+      toast(res?.aborted_live_process ? t('cancel.doneAbort') : t('cancel.done'), 'success');
+    }
     await loadOverview({ quiet: true });
     if (state.drawer.kind === 'task' && state.drawer.key === taskId) await openTask(taskId);
     else renderAll();
   } catch (err) {
     toast(t('cancel.fail', { error: err.message }), 'error');
-    if (button) { button.disabled = false; button.textContent = original; }
+  } finally {
+    if (button?.isConnected) { button.disabled = false; button.textContent = original; }
   }
 }
 
@@ -4342,16 +4621,19 @@ async function submitDispatch() {
   const err = $('#dpErr');
   if (err) err.textContent = '';
   try {
-    const res = await apiPost('/api/tasks/dispatch', {
+    const { status, data: res } = await apiPostRaw('/api/tasks/dispatch', {
       member: $('#dpMember')?.value,
       role: $('#dpRole')?.value,
       project_dir: $('#dpDir')?.value.trim(),
       title: $('#dpTitle')?.value.trim(),
       prompt: $('#dpPrompt')?.value.trim(),
       auto_fallback: $('#dpFallback')?.checked,
+      /* async: the backend answers 202 immediately and streams output over SSE,
+       * so local CLI/HTTP runs return at once instead of blocking the UI. */
+      async: true,
     });
     closeModal('modalDispatchBg');
-    toast(t('dispatch.done'), 'success');
+    toast(status === 202 ? t('dispatch.asyncQueued') : t('dispatch.done'), 'success');
     await loadOverview({ quiet: true });
     if (res.task?.task_id) await openTask(res.task.task_id);
   } catch (e) {
@@ -4466,20 +4748,37 @@ function setSsePill(text, cls) {
 function scheduleOverviewReload() {
   clearTimeout(state.timers.reload);
   state.timers.reload = setTimeout(() => {
+    /* loadOverview() already refreshes /api/events on the ops view; fetching it
+     * here as well doubled the audit-stream traffic on every SSE burst. */
     loadOverview({ quiet: true });
-    if (state.view === 'ops') loadEvents({ quiet: true });
   }, 450);
 }
 
 function stopSse() {
   try { state.timers.sse?.close?.(); } catch { /* ignore */ }
   state.timers.sse = null;
+  state.flags.sseConnected = false;
+}
+
+const TASK_EVENT_STATES = ['created', 'dispatching', 'dispatched', 'running', 'completed', 'failed', 'cancelled', 'stalled', 'uncertain', 'needs_input', 'rerouted'];
+
+/* SSE task events encode their state in the event type (`task.completed`). */
+function stateFromEventType(type) {
+  const match = /^task\.([a-z_]+)$/.exec(String(type || ''));
+  return match && TASK_EVENT_STATES.includes(match[1]) ? match[1] : null;
 }
 
 function handleSseMessage(event) {
   let payload = null;
   try { payload = JSON.parse(event.data); } catch { scheduleOverviewReload(); return; }
   const type = payload?.type;
+  const eventState = stateFromEventType(type) || payload?.payload?.state || payload?.state || null;
+  if (eventState && payload.task_id && payload.task_id === state.taskLog.taskId) {
+    /* Flip the drawer pill the moment the task reaches a terminal state. */
+    state.taskLog.terminal = TERMINAL_STATES.includes(eventState);
+    state.taskLog.active = ACTIVE_STATES.includes(eventState);
+    updateLogPill();
+  }
   if (type === 'task.log') {
     if (payload.task_id && payload.task_id === state.taskLog.taskId) {
       appendTaskLog(payload.task_id, [{ ts: payload.at, stream: payload.stream, text: payload.text }]);
@@ -4500,23 +4799,54 @@ function connectSse() {
     setSsePill(state.static ? t('topbar.sseStatic') : t('topbar.sseDemo'), 'demo');
     return;
   }
+  if (state.timers.sse) return; /* already connected or reconnecting */
   try {
     const es = new EventSource('/api/events/stream');
     state.timers.sse = es;
-    es.onopen = () => setSsePill(t('topbar.sseLive'), 'ok');
+    es.onopen = () => {
+      state.flags.sseConnected = true;
+      setSsePill(t('topbar.sseLive'), 'ok');
+      restartPolling();
+    };
     es.onmessage = (event) => handleSseMessage(event);
-    es.onerror = () => setSsePill(t('topbar.ssePolling'), 'warn');
+    es.onerror = () => {
+      setSsePill(t('topbar.ssePolling'), 'warn');
+      if (state.flags.sseConnected) {
+        state.flags.sseConnected = false;
+        restartPolling();
+      }
+      /* EventSource.CLOSED means the browser gave up reconnecting: drop the
+       * dead handle so visibilitychange/pageshow can open a fresh stream. */
+      if (es.readyState === 2) stopSse();
+    };
   } catch {
+    state.flags.sseConnected = false;
     setSsePill(t('topbar.ssePolling'), 'warn');
+    restartPolling();
   }
 }
 
+const POLL_MS = { fast: 15000, sse: 30000 };
+
 function startPolling() {
   if (state.demo || state.static) return;
-  state.timers.poll = setInterval(() => {
-    loadOverview({ quiet: true });
-    if (state.view === 'ops') loadEvents({ quiet: true });
-  }, 15000);
+  /* With a live SSE stream the poll is only a safety net, so halve its rate. */
+  const every = state.flags.sseConnected ? POLL_MS.sse : POLL_MS.fast;
+  if (state.timers.poll && state.pollEvery === every) return;
+  stopPolling();
+  state.pollEvery = every;
+  state.timers.poll = setInterval(() => loadOverview({ quiet: true }), every);
+}
+
+function stopPolling() {
+  if (state.timers.poll) clearInterval(state.timers.poll);
+  state.timers.poll = null;
+  state.pollEvery = 0;
+}
+
+function restartPolling() {
+  if (state.demo || state.static) return;
+  startPolling();
 }
 
 /* ------------------------------------------------------------------ */
@@ -4609,17 +4939,20 @@ async function handleActionClick(event) {
     focusDagStep(state.dagSteps.findIndex((step) => step.id === nodeId));
     return;
   }
-  if (closest('[data-sim-dag]')) { startSimulation(); return; }
+  if (closest('[data-sim-dag]')) { if (state.sim.running) stopSimulation(); else startSimulation(); return; }
   if (closest('[data-resume-batch]')) { resumeBatch(); return; }
 
   const openTaskEl = closest('[data-open-task]');
   if (openTaskEl) { openTask(openTaskEl.getAttribute('data-open-task')); return; }
   const pollEl = closest('[data-poll-task]');
   if (pollEl) { pollTask(pollEl.getAttribute('data-poll-task'), pollEl); return; }
+  const forceEl = closest('[data-force-cancel-task]');
+  if (forceEl) { requestForceCancel(forceEl.getAttribute('data-force-cancel-task'), forceEl); return; }
   const cancelEl = closest('[data-cancel-task]');
   if (cancelEl) { cancelTask(cancelEl.getAttribute('data-cancel-task'), cancelEl); return; }
   const reconcileEl = closest('[data-reconcile-task]');
   if (reconcileEl) { reconcileTask(reconcileEl.getAttribute('data-reconcile-task'), reconcileEl.getAttribute('data-reconcile-state')); return; }
+  if (closest('[data-toggle-follow]')) { toggleFollow(); return; }
   if (closest('[data-copy-logs]')) { await copyTaskLogs(closest('[data-copy-logs]')); return; }
 
   const batchEl = closest('[data-open-batch]');
@@ -4682,7 +5015,10 @@ function bindStaticEvents() {
     if (state.mail.url) window.open(state.mail.url, '_blank', 'noopener');
   });
 
-  $('#filterText')?.addEventListener('input', renderTasks);
+  $('#filterText')?.addEventListener('input', () => {
+    clearTimeout(state.timers.filter);
+    state.timers.filter = setTimeout(renderTasks, 150);
+  });
   $('#filterAgent')?.addEventListener('change', renderTasks);
   $('#filterState')?.addEventListener('change', renderTasks);
   $('#btnResetFilters')?.addEventListener('click', () => {
@@ -4776,7 +5112,6 @@ function bindStaticEvents() {
     $$('#paletteList .palette-item').forEach((el, idx) => el.classList.toggle('active', idx === i));
   });
 
-  document.addEventListener('drawer-scroll', () => {}, { passive: true });
   document.addEventListener('scroll', (event) => {
     const box = event.target;
     if (!(box instanceof HTMLElement) || box.id !== 'liveLog') return;
@@ -4823,6 +5158,21 @@ function bindStaticEvents() {
 
   window.addEventListener('hashchange', () => setView(viewFromHash(), { silent: true }));
   window.addEventListener('resize', () => { if (window.innerWidth > 840) closeMobileNav(); });
+
+  /* bfcache hygiene: a tab parked in the back/forward cache must not keep a dead
+   * SSE slot open, and must reconnect cleanly when it comes back. */
+  window.addEventListener('pagehide', () => { stopSse(); stopPolling(); });
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted || state.demo || state.static) return;
+    connectSse();
+    startPolling();
+    loadOverview({ quiet: true });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || state.demo || state.static) return;
+    if (!state.timers.sse) connectSse();
+    startPolling();
+  });
 }
 
 /* ------------------------------------------------------------------ */
