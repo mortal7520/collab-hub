@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { listAgents } from './registry.mjs';
 
@@ -82,12 +83,15 @@ async function locateBinary(binName) {
 }
 
 function slugId(prefix, modelName) {
-  const clean = String(modelName || '')
+  const raw = String(modelName || '');
+  const clean = raw
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 24);
-  return `${prefix}-${clean || 'local'}`.slice(0, 32);
+    .replace(/^-+|-+$/g, '');
+  const base = `${prefix}-${clean || 'local'}`;
+  if (base.length <= 32) return base;
+  const h = createHash('sha1').update(raw).digest('hex').slice(0, 4);
+  return `${prefix}-${clean.slice(0, Math.max(1, 32 - prefix.length - 6))}-${h}`.slice(0, 32);
 }
 
 /**

@@ -23,14 +23,25 @@ function assertSafeGlobOrArg(value, label) {
   return value.trim();
 }
 
-export function getToolkitStatus() {
+let cachedToolkitStatus = null;
+let cachedToolkitAt = 0;
+const TOOLKIT_STATUS_TTL_MS = 5000;
+
+export function getToolkitStatus({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && cachedToolkitStatus && (now - cachedToolkitAt) < TOOLKIT_STATUS_TTL_MS) {
+    return cachedToolkitStatus;
+  }
   let provenance = null;
   try {
     if (fs.existsSync(TOOLKIT_PATHS.provenanceJson)) {
-      provenance = JSON.parse(fs.readFileSync(TOOLKIT_PATHS.provenanceJson, 'utf8'));
+      const st = fs.statSync(TOOLKIT_PATHS.provenanceJson);
+      if (st.isFile() && st.size <= 512 * 1024) {
+        provenance = JSON.parse(fs.readFileSync(TOOLKIT_PATHS.provenanceJson, 'utf8'));
+      }
     }
   } catch {}
-  return {
+  cachedToolkitStatus = {
     cass: { installed: fs.existsSync(TOOLKIT_PATHS.cassExe), path: TOOLKIT_PATHS.cassExe, purpose: '跨端历史会话检索 (Codex/Claude/Gemini)' },
     ast_grep: { installed: fs.existsSync(TOOLKIT_PATHS.astGrepExe), path: TOOLKIT_PATHS.astGrepExe, purpose: 'AST 语法树精准代码检索' },
     beads: { installed: fs.existsSync(TOOLKIT_PATHS.beadsExe), path: TOOLKIT_PATHS.beadsExe, purpose: 'Git 仓库级长期任务/史诗依赖图' },
@@ -38,6 +49,8 @@ export function getToolkitStatus() {
     markitdown: { installed: fs.existsSync(TOOLKIT_PATHS.markitdownExe), path: TOOLKIT_PATHS.markitdownExe, purpose: '本地 PDF/Word/Excel/PPT 转 Markdown' },
     provenance,
   };
+  cachedToolkitAt = now;
+  return cachedToolkitStatus;
 }
 
 /**
@@ -135,7 +148,8 @@ export async function packRepoRepomix({
   const allowedStyles = new Set(['markdown', 'xml', 'plain']);
   const safeStyle = allowedStyles.has(style) ? style : 'markdown';
 
-  const tmpOut = path.join(os.tmpdir(), `collabhub-repomix-${process.pid}-${Date.now()}.txt`);
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'collabhub-repomix-'));
+  const tmpOut = path.join(tmpDir, 'pack.txt');
   const args = [
     script,
     resolved.windows,
@@ -158,20 +172,34 @@ export async function packRepoRepomix({
     if (!fs.existsSync(tmpOut)) {
       throw new Error(`repomix finished without producing output (${stdout.slice(0, 300)})`);
     }
-    const content = fs.readFileSync(tmpOut, 'utf8');
-    const truncated = content.length > maxChars;
+    // Bounded read (never slurp a 150MB pack into V8 heap only to slice maxChars!)
+    const maxBytes = Math.min(2 * 1024 * 1024, Math.max(4096, Number(maxChars) || 48000) * 4);
+    const stat = fs.statSync(tmpOut);
+    const fd = fs.openSync(tmpOut, 'r');
+    let rawChunk = '';
+    try {
+      const readLen = Math.min(stat.size, maxBytes);
+      const buf = Buffer.allocUnsafe(readLen);
+      const bytesRead = fs.readSync(fd, buf, 0, readLen, 0);
+      rawChunk = buf.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+    const truncated = stat.size > maxBytes || rawChunk.length > maxChars;
+    const content = rawChunk.length > maxChars ? rawChunk.slice(0, maxChars) : rawChunk;
     return {
       ok: true,
       project_dir: resolved.windows,
       style: safeStyle,
       compressed: Boolean(compress),
+      total_bytes: stat.size,
       total_chars: content.length,
-      approx_tokens: Math.ceil(content.length / 4),
+      approx_tokens: Math.ceil(stat.size / 4),
       truncated,
-      content: truncated ? content.slice(0, maxChars) + '\n\n... [repomix output truncated]' : content,
+      content: truncated ? content + '\n\n... [repomix output truncated]' : content,
     };
   } finally {
-    try { fs.unlinkSync(tmpOut); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
 }
 
@@ -245,7 +273,9 @@ export async function runBeads({
     args = ['show', assertSafeGlobOrArg(issueId, 'issue_id'), '--json'];
   } else if (action === 'create') {
     if (!title || !String(title).trim()) throw new Error('title is required for beads create');
-    args = ['create', String(title).trim(), '--json'];
+    const safeTitle = String(title).trim();
+    if (/[\0\r\n]/.test(safeTitle)) throw new Error('title must not contain newlines or null bytes');
+    args = ['create', '--json', '--', safeTitle];
     if (description) args.push('-d', String(description).trim().slice(0, 4000));
     if (priority !== null && priority !== undefined) args.push('-p', String(Math.max(0, Math.min(4, Number(priority)))));
   } else if (action === 'close') {
@@ -253,13 +283,19 @@ export async function runBeads({
     if (status) args.push('--reason', String(status).slice(0, 300));
   }
 
-  const { stdout } = await execFileAsync(exe, args, {
-    cwd: resolved.windows,
-    encoding: 'utf8',
-    timeout: 30000,
-    windowsHide: true,
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  let stdout = '';
+  try {
+    ({ stdout } = await execFileAsync(exe, args, {
+      cwd: resolved.windows,
+      encoding: 'utf8',
+      timeout: 30000,
+      windowsHide: true,
+      maxBuffer: 4 * 1024 * 1024,
+    }));
+  } catch (err) {
+    const detail = String(err.stderr || err.message || 'unknown error').slice(0, 400);
+    throw new Error(`beads ${action} failed: ${detail}`);
+  }
   const trimmed = stdout.trim();
   try {
     return { ok: true, project_dir: resolved.windows, action, data: JSON.parse(trimmed) };

@@ -126,8 +126,8 @@ export function searchMemoryNotes(db, { query, project = null, limit = 15 } = {}
     }
   }
 
-  // 2. SQL-side LIKE query for exact & CJK substrings
-  const terms = q.split(/\s+/).filter(Boolean).slice(0, 6);
+  // 2. SQL-side LIKE query for exact & CJK substrings (capped term length avoids LIKE pattern complexity crash)
+  const terms = q.split(/\s+/).filter(Boolean).slice(0, 6).map((t) => t.slice(0, 64));
   const likeClauses = [];
   const params = [];
   if (safeProject) {

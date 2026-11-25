@@ -552,14 +552,29 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   let lastProbeAt = 0;
   let cachedCassStats = null;
   let cachedCassAt = 0;
+  let cachedDiscover = null;
+  let cachedDiscoverAt = 0;
+  let discoverInFlight = null;
+  const DISCOVER_TTL_MS = 30000;
   const sseClients = new Map(); // res -> { hb }
   const MAX_SSE_BACKPRESSURE_BYTES = 512 * 1024;
 
-  // Cross-process durable SSE cursor: tails SQLite `events` and `task_logs` written by MCP/CLI processes
-  // while deduplicating events already broadcast locally via in-process hubBus.
+  // Cross-process durable SSE cursor: tails SQLite `events` and `task_logs` written by MCP/CLI processes.
+  // Tracks locally emitted IDs separately so a local publish never advances past an uncommitted remote row!
   let lastEventId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM events').get()?.m || 0);
   let lastLogId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs').get()?.m || 0);
+  const localEventIds = new Set();
+  const localLogIds = new Set();
   let dbTailTimer = null;
+
+  const rememberLocalId = (set, id) => {
+    if (!id) return;
+    set.add(id);
+    if (set.size > 400) {
+      const oldest = set.values().next().value;
+      if (oldest !== undefined) set.delete(oldest);
+    }
+  };
 
   const broadcastSse = (evt, sseId = null) => {
     const idLine = sseId ? `id: ${sseId}\n` : '';
@@ -590,6 +605,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const newEvents = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(lastEventId);
         for (const ev of newEvents) {
           lastEventId = Math.max(lastEventId, ev.id);
+          if (localEventIds.delete(ev.id)) continue;
           let payload = null;
           try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
           broadcastSse({
@@ -605,6 +621,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const newLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 80').all(lastLogId);
         for (const lg of newLogs) {
           lastLogId = Math.max(lastLogId, lg.id);
+          if (localLogIds.delete(lg.id)) continue;
           broadcastSse({
             log_id: lg.id,
             type: 'task.log',
@@ -620,8 +637,8 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   };
 
   const onHubEvent = (evt) => {
-    if (evt.id && evt.id > lastEventId) lastEventId = evt.id;
-    if (evt.log_id && evt.log_id > lastLogId) lastLogId = evt.log_id;
+    if (evt.id) rememberLocalId(localEventIds, evt.id);
+    if (evt.log_id) rememberLocalId(localLogIds, evt.log_id);
     const sseId = evt.id ? `ev-${evt.id}` : (evt.log_id ? `log-${evt.log_id}` : null);
     broadcastSse(evt, sseId);
   };
@@ -727,19 +744,32 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
           Connection: 'keep-alive',
         });
         res.write(`data: ${JSON.stringify({ type: 'connected', at: new Date().toISOString() })}\n\n`);
-        // Replay missed durable events on reconnect if client sent Last-Event-ID: ev-<N>
+        // Replay missed durable events OR logs on reconnect if client sent Last-Event-ID: ev-<N> or log-<N>
         const lastHdr = String(req.headers['last-event-id'] || '');
-        const evMatch = /^ev-(\d+)$/.exec(lastHdr);
-        if (evMatch) {
-          const sinceId = Number(evMatch[1]);
+        const idMatch = /^(ev|log)-(\d+)$/.exec(lastHdr);
+        if (idMatch) {
+          const kind = idMatch[1];
+          const sinceId = Number(idMatch[2]);
           try {
-            const missed = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(sinceId);
-            for (const ev of missed) {
-              let payload = null;
-              try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
-              res.write(`id: ev-${ev.id}\ndata: ${JSON.stringify({ id: ev.id, type: ev.event_type, task_id: ev.task_id, actor: ev.actor, payload, created_at: ev.created_at, at: ev.created_at })}\n\n`);
+            if (kind === 'ev') {
+              const missed = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(sinceId);
+              for (const ev of missed) {
+                let payload = null;
+                try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
+                res.write(`id: ev-${ev.id}\ndata: ${JSON.stringify({ id: ev.id, type: ev.event_type, task_id: ev.task_id, actor: ev.actor, payload, created_at: ev.created_at, at: ev.created_at })}\n\n`);
+              }
+            } else {
+              const missedLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 80').all(sinceId);
+              for (const lg of missedLogs) {
+                res.write(`id: log-${lg.id}\ndata: ${JSON.stringify({ log_id: lg.id, type: 'task.log', task_id: lg.task_id, stream: lg.stream, text: lg.text, at: lg.created_at })}\n\n`);
+              }
             }
           } catch { /* best-effort replay */ }
+        }
+        // Reset tail cursors to current tip when first subscriber connects after idle so old history isn't spammed
+        if (sseClients.size === 0) {
+          lastEventId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM events').get()?.m || lastEventId);
+          lastLogId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs').get()?.m || lastLogId);
         }
         const hb = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 25000);
         hb.unref();
@@ -812,7 +842,18 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/agents/discover') {
-        sendJson(res, 200, await discoverLocalAgents(db, dispatchDeps));
+        const now = Date.now();
+        const force = url.searchParams.get('force') === '1';
+        if (!force && cachedDiscover && (now - cachedDiscoverAt) < DISCOVER_TTL_MS) {
+          sendJson(res, 200, { ...cachedDiscover, cached: true });
+          return;
+        }
+        if (!discoverInFlight) {
+          discoverInFlight = discoverLocalAgents(db, dispatchDeps)
+            .then((data) => { cachedDiscover = data; cachedDiscoverAt = Date.now(); return data; })
+            .finally(() => { discoverInFlight = null; });
+        }
+        sendJson(res, 200, await discoverInFlight);
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/agents/test') {
@@ -975,7 +1016,12 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const parsed = await readBoundedJson(req);
         try {
           const wtBefore = db.prepare('SELECT * FROM worktrees WHERE task_id = ?').get(parsed.task_id);
-          const merged = mergeWorktree(db, { taskId: parsed.task_id, confirmed: parsed.confirmed === true, cleanup: parsed.cleanup !== false });
+          const merged = mergeWorktree(db, {
+            taskId: parsed.task_id,
+            confirmed: parsed.confirmed === true,
+            cleanup: parsed.cleanup !== false,
+            requireVerified: Boolean(parsed.require_verified),
+          });
           if (wtBefore) await releaseMailPaths({ projectDir: wtBefore.repo_dir, member: wtBefore.member }).catch(() => {});
           sendJson(res, 200, merged);
         } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }

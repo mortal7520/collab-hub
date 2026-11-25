@@ -165,8 +165,9 @@ function initSchema(db) {
   ensureColumn(db, 'worktrees', 'verify_summary', 'TEXT');
   ensureColumn(db, 'workflow_plans', 'plan_sha256', 'TEXT');
 
-  // Enable FTS5 virtual table for memory_notes
+  // Enable FTS5 virtual table for memory_notes (with automatic rebuild if created over existing rows!)
   try {
+    const hadFts = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_notes_fts'").get());
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS memory_notes_fts USING fts5(
         project, slug, title, tags, content,
@@ -188,6 +189,9 @@ function initSchema(db) {
         VALUES (new.id, new.project, new.slug, new.title, new.tags, new.content);
       END;
     `);
+    if (!hadFts) {
+      db.exec("INSERT INTO memory_notes_fts(memory_notes_fts) VALUES('rebuild');");
+    }
   } catch {
     // Graceful fallback if FTS5 unavailable
   }

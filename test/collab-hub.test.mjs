@@ -23,7 +23,7 @@ import { TOOLS, handleToolCall } from '../src/mcp-server.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
 import { planDispatch, probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
-import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
+import { listAgents, probeCustomAgent, registerAgent, removeAgent } from '../src/registry.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import { convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep } from '../src/toolkit.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
@@ -1652,6 +1652,119 @@ test('v1.3: async HTTP dispatch (202 + task_id idempotency), cross-process SSE D
     await server.shutdown();
     assert.ok(Date.now() - t0 < 2000, 'server.shutdown() must close active SSE clients immediately');
   } finally {
+    try { await server.shutdown(); } catch {}
+    env.cleanup();
+  }
+});
+
+test('v1.3: FTS5 rebuild on existing rows, openai-http env/HTTPS guard, probe timeout offline, LIKE 50KB safety, slugId uniqueness & SSE log-N replay', async () => {
+  const env = makeTempEnv();
+  const dbPath = path.join(env.dir, 'fts-upgrade.db');
+  let upDb = null;
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+
+  try {
+    // 1. FTS5 rebuild when opening DB where memory_notes pre-existed without memory_notes_fts
+    upDb = openHubDb(dbPath);
+    upDb.exec('DROP TABLE IF EXISTS memory_notes_fts; DROP TRIGGER IF EXISTS memory_notes_ai; DROP TRIGGER IF EXISTS memory_notes_ad; DROP TRIGGER IF EXISTS memory_notes_au;');
+    const now = new Date().toISOString();
+    upDb.prepare(`
+      INSERT INTO memory_notes (project, slug, title, tags, author, file_path, content, updated_at)
+      VALUES ('legacy', 'pre-fts', 'PreFTS Alpha', '', 'codex', ?, 'RebuiltFTS5Token9988 survives upgrade', ?)
+    `).run(path.join(env.mem, 'legacy', 'pre-fts.md'), now);
+    upDb.close();
+    upDb = openHubDb(dbPath);
+    const rebuiltHits = searchMemoryNotes(upDb, { query: 'RebuiltFTS5Token9988', project: 'legacy' });
+    assert.equal(rebuiltHits.length, 1);
+    assert.equal(rebuiltHits[0].slug, 'pre-fts');
+    // Deleting the pre-existing row must NOT throw "database disk image is malformed"
+    upDb.prepare("DELETE FROM memory_notes WHERE slug = 'pre-fts'").run();
+
+    // 2. openai-http rejects non-loopback http:// and non-secret api_key_env names
+    assert.throws(() => registerAgent(env.db, {
+      agentId: 'insecure-http', name: 'Insecure', driver: 'openai-http',
+      config: { base_url: 'http://evil.example.com/v1', model: 'm' },
+    }), /must use https:\/\//i);
+
+    assert.throws(() => registerAgent(env.db, {
+      agentId: 'exfil-env', name: 'Exfil', driver: 'openai-http',
+      config: { base_url: 'https://api.example.com/v1', model: 'm', api_key_env: 'USERPROFILE' },
+    }), /must match \*_API_KEY, \*_KEY, or \*_TOKEN/i);
+
+    const safeRemote = registerAgent(env.db, {
+      agentId: 'safe-remote', name: 'Safe Remote', driver: 'openai-http',
+      config: { base_url: 'https://api.example.com/v1', model: 'm', api_key_env: 'DEEPSEEK_API_KEY' },
+    });
+    assert.equal(safeRemote.id, 'safe-remote');
+
+    // 3. probeCustomAgent timeout reports offline (not idle)
+    const hungAgent = registerAgent(env.db, {
+      agentId: 'hung-probe', name: 'Hung Probe', driver: 'generic-cli',
+      config: { command: process.execPath },
+    });
+    const probeRes = await probeCustomAgent(hungAgent, { timeoutMs: 250, probeArgs: ['-e', 'setTimeout(() => {}, 15000)'] });
+    assert.equal(probeRes.state, 'offline');
+
+    // 4. 50KB LIKE fallback query does not crash SQLite
+    writeMemoryNote(env.db, { project: 'demo', title: 'Short Note', content: 'normal body', memoryDir: env.mem });
+    const hugeQuery = '!!!' + 'a'.repeat(55000);
+    const hugeRes = searchMemoryNotes(env.db, { query: hugeQuery, project: 'demo' });
+    assert.ok(Array.isArray(hugeRes));
+
+    // 5. discoverLocalAgents produces distinct agent IDs for long model names sharing a 32-char prefix
+    const found = await discoverLocalAgents(env.db, {
+      probeLocalEndpoint: async (ep) => ep.id_prefix === 'ollama'
+        ? {
+          ...ep,
+          reachable: true,
+          models: [
+            'namespace/super-long-model-prefix-variant-alpha-70b-instruct',
+            'namespace/super-long-model-prefix-variant-beta-70b-instruct',
+          ],
+        }
+        : { ...ep, reachable: false, models: [] },
+      locateBinary: async () => null,
+      env: {},
+    });
+    assert.equal(found.local_models.length, 2);
+    assert.notEqual(
+      found.local_models[0].suggested_registration.agent_id,
+      found.local_models[1].suggested_registration.agent_id,
+    );
+
+    // 6. SSE Last-Event-ID: log-N replays missed task.log entries cleanly
+    const ins1 = env.db.prepare("INSERT INTO task_logs (task_id, stream, text, created_at) VALUES ('sse-log-t', 'stdout', 'BEFORE-RECONNECT', ?)").run(now);
+    const ins2 = env.db.prepare("INSERT INTO task_logs (task_id, stream, text, created_at) VALUES ('sse-log-t', 'stdout', 'AFTER-RECONNECT-MISS', ?)").run(now);
+    assert.ok(Number(ins2.lastInsertRowid) > Number(ins1.lastInsertRowid));
+    const replay = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1',
+        port,
+        path: '/api/events/stream',
+        headers: { Host: `127.0.0.1:${port}`, 'Last-Event-ID': `log-${Number(ins1.lastInsertRowid)}` },
+      }, (res) => {
+        let buf = '';
+        res.on('data', (c) => {
+          buf += c.toString('utf8');
+          if (buf.includes('AFTER-RECONNECT-MISS')) {
+            req.destroy();
+            resolve(buf);
+          }
+        });
+      });
+      req.on('error', (e) => { if (e.code !== 'ECONNRESET') reject(e); });
+      req.end();
+      setTimeout(() => { req.destroy(); reject(new Error('SSE log-N replay timed out')); }, 3000);
+    });
+    assert.match(replay, /AFTER-RECONNECT-MISS/);
+    assert.equal(replay.includes('BEFORE-RECONNECT'), false);
+  } finally {
+    if (upDb) try { upDb.close(); } catch {}
     try { await server.shutdown(); } catch {}
     env.cleanup();
   }

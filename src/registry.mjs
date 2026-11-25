@@ -112,16 +112,28 @@ function validateDriverConfig(driver, config) {
     if (typeof config.base_url !== 'string' || !/^https?:\/\/.+/.test(config.base_url.trim())) {
       throw new Error('openai-http driver requires valid http(s) config.base_url');
     }
+    let parsedUrl;
+    try { parsedUrl = new URL(config.base_url.trim()); } catch {
+      throw new Error('openai-http driver requires a parseable config.base_url');
+    }
+    const isLoopback = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(parsedUrl.hostname.toLowerCase());
+    if (parsedUrl.protocol !== 'https:' && !isLoopback) {
+      throw new Error('Security rule: remote openai-http config.base_url must use https:// (plain http:// is allowed only for loopback hosts).');
+    }
     if (typeof config.model !== 'string' || !config.model.trim()) {
       throw new Error('openai-http driver requires config.model');
     }
     if (config.api_key) {
       throw new Error('Security rule: never store plaintext api_key in hub.db! Pass config.api_key_env (an environment variable name) instead.');
     }
+    const keyEnv = typeof config.api_key_env === 'string' && config.api_key_env.trim() ? config.api_key_env.trim() : null;
+    if (keyEnv && !/^[A-Z][A-Z0-9_]*_(API_KEY|KEY|TOKEN)$/.test(keyEnv)) {
+      throw new Error('Security rule: config.api_key_env must match *_API_KEY, *_KEY, or *_TOKEN to prevent arbitrary environment exfiltration.');
+    }
     return {
       base_url: config.base_url.trim().replace(/\/+$/, ''),
       model: config.model.trim(),
-      api_key_env: typeof config.api_key_env === 'string' && config.api_key_env.trim() ? config.api_key_env.trim() : null,
+      api_key_env: keyEnv,
       system_prompt: typeof config.system_prompt === 'string' ? config.system_prompt.slice(0, 4000) : '',
       max_tokens: Math.max(128, Math.min(32768, Number(config.max_tokens) || 4096)),
       timeout_s: Math.max(10, Math.min(300, Number(config.timeout_s) || 90)),
@@ -213,7 +225,7 @@ export function removeAgent(db, agentId) {
 /**
  * Probe a custom registered agent (`generic-cli` binary availability or `openai-http` /models reachability).
  */
-export async function probeCustomAgent(agent) {
+export async function probeCustomAgent(agent, { timeoutMs = 5000, probeArgs = ['--version'] } = {}) {
   if (agent.driver === 'generic-cli') {
     const cmd = agent.config?.command;
     if (!cmd) return { member: agent.id, channel: 'generic-cli', state: 'offline', detail: 'Missing command' };
@@ -222,14 +234,20 @@ export async function probeCustomAgent(agent) {
       if (process.env[key] !== undefined) childEnv[key] = process.env[key];
     }
     try {
-      await execFileAsync(cmd, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true, env: childEnv });
+      await execFileAsync(cmd, probeArgs, { encoding: 'utf8', timeout: timeoutMs, windowsHide: true, env: childEnv });
       return { member: agent.id, channel: 'generic-cli', state: 'online', detail: `CLI executable ready (${cmd})` };
     } catch (err) {
       if (err.code === 'ENOENT') {
         return { member: agent.id, channel: 'generic-cli', state: 'offline', detail: `Executable not found: ${cmd}` };
       }
-      // Some CLIs exit non-zero on --version yet exist on disk
-      return { member: agent.id, channel: 'generic-cli', state: 'idle', detail: `CLI present (${cmd})` };
+      if (err.killed || err.signal) {
+        return { member: agent.id, channel: 'generic-cli', state: 'offline', detail: `CLI probe timed out (${cmd})` };
+      }
+      // Only a clean non-zero numeric exit code on --version indicates the CLI exists and ran
+      if (typeof err.code === 'number') {
+        return { member: agent.id, channel: 'generic-cli', state: 'idle', detail: `CLI present, exit ${err.code} (${cmd})` };
+      }
+      return { member: agent.id, channel: 'generic-cli', state: 'offline', detail: `CLI probe failed (${err.code || err.message})` };
     }
   }
   if (agent.driver === 'openai-http') {

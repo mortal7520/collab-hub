@@ -152,7 +152,7 @@ export async function probeAllMembers(db, { desktopObservations = null, runner =
     probeDsh(runner),
     probeMuse(runner),
     probeClaudeCliProcess(runner),
-    probeMailHub({ force: true }),
+    probeMailHub(),
   ]);
 
   upsertMemberStatus(db, dshRes);
@@ -232,12 +232,28 @@ export async function probeAllMembers(db, { desktopObservations = null, runner =
     }
   }
 
-  // Also live-probe any custom registered agents (generic-cli / openai-http)
+  // Also live-probe any custom registered agents (bounded concurrency=4 + Promise.allSettled + batched WAL transaction)
   const customAgents = listAgents(db).filter((a) => ['generic-cli', 'openai-http'].includes(a.driver));
   if (customAgents.length > 0) {
-    const customResults = await Promise.all(customAgents.map((a) => probeCustomAgent(a)));
-    for (const r of customResults) {
-      if (r) upsertMemberStatus(db, r);
+    const customResults = [];
+    const CONCURRENCY = 4;
+    for (let i = 0; i < customAgents.length; i += CONCURRENCY) {
+      const slice = customAgents.slice(i, i + CONCURRENCY);
+      const settled = await Promise.allSettled(slice.map((a) => probeCustomAgent(a)));
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) customResults.push(r.value);
+      }
+    }
+    if (customResults.length > 0) {
+      db.exec('BEGIN IMMEDIATE;');
+      try {
+        for (const r of customResults) {
+          try { upsertMemberStatus(db, r); } catch {}
+        }
+        db.exec('COMMIT;');
+      } catch {
+        try { db.exec('ROLLBACK;'); } catch {}
+      }
     }
   }
 
