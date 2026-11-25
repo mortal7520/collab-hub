@@ -7,7 +7,7 @@ import { createDashboardServer } from '../src/dashboard.mjs';
 import { openHubDb, parseTaskRow } from '../src/db.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
-import { dispatchBackgroundTask, pollBackgroundTask, pollBatchTasks } from '../src/executors.mjs';
+import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks } from '../src/executors.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
@@ -19,7 +19,7 @@ import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from '../src/toolkit.mjs';
-import { buildBatchMarkdownReport, runDagWorkflow } from '../src/workflows.mjs';
+import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
 import { verifyWorktree } from '../src/worktree.mjs';
 
 const [cmd, ...rawArgs] = process.argv.slice(2);
@@ -142,6 +142,16 @@ if (cmd === 'mcp') {
       console.log(JSON.stringify(await pollBackgroundTask(db, positionals[0] || flag('id'), { waitSec: Number(flag('wait', '10')) }), null, 2));
     } else if (cmd === 'poll-batch') {
       console.log(JSON.stringify(await pollBatchTasks(db, { batchId: positionals[0] || flag('batch'), waitSec: Number(flag('wait', '10')) }), null, 2));
+    } else if (cmd === 'cancel') {
+      console.log(JSON.stringify(await cancelTask(db, positionals[0] || flag('id'), { reason: flag('reason', 'Cancelled via CLI') }), null, 2));
+    } else if (cmd === 'logs') {
+      console.log(JSON.stringify(getTaskLogs(positionals[0] || flag('id')), null, 2));
+    } else if (cmd === 'resume') {
+      console.log(JSON.stringify(await resumeDagWorkflow(db, {
+        batchId: positionals[0] || flag('batch'),
+        waitSec: Number(flag('wait', '15')),
+        saveReportToMemory: !flags['no-memory'],
+      }), null, 2));
     } else if (cmd === 'verify-worktree') {
       console.log(JSON.stringify(await verifyWorktree(db, {
         taskId: positionals[0] || flag('id'),
@@ -236,7 +246,7 @@ if (cmd === 'mcp') {
         `CollabHub v${APP_VERSION} — Zero-Dependency Local-First Multi-Agent Workbench`,
         'Commands:',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
-        '  mcp                                          Start the 32-tool MCP stdio server',
+        '  mcp                                          Start the 34-tool MCP stdio server',
         '  init                                         Initialize runtime directories & SQLite ledger',
         '  probe | roster                               Live-probe all agents + Mail Hub + toolkit',
         '  doctor [--backup]                            8-point system health check (+ optional VACUUM INTO backup)',
@@ -251,6 +261,9 @@ if (cmd === 'mcp') {
         '  dispatch --member M|auto --dir D --prompt P  Dispatch background task [--fallback --role R --batch B]',
         '  poll <task_id> [--wait S]                    Poll task receipt without ever re-sending',
         '  poll-batch <batch_id> [--wait S]             Aggregate batch status',
+        '  cancel <task_id> [--reason R]                Cancel active task & abort local process/HTTP run',
+        '  logs <task_id>                               Inspect recent live streaming log chunks',
+        '  resume <batch_id> [--wait S]                 Resume failed/cancelled DAG workflow from checkpoint',
         '  verify-worktree <task_id> [--preset auto]    Run allowlisted test gate inside isolated worktree',
         '  workflow <spec.json> [--dir D --wait S]      Execute multi-stage DAG workflow',
         '  export-batch <batch_id> [--json]             Export Markdown synthesis report for a batch',
