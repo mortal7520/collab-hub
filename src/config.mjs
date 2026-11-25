@@ -240,11 +240,15 @@ export function resolveProjectDir(input, {
     const norm = path.resolve(p);
     return norm.length > 3 ? norm.replace(/[\\/]+$/, '') : norm;
   };
+  const nativeReal = (p) => {
+    try { return trimSep((fs.realpathSync.native || fs.realpathSync)(p)); } catch { return trimSep(p); }
+  };
   const primaryRoot = trimSep(workspaceRoot || policy.allowedWorkspaceRoot || WORKSPACE_ROOT);
-  const roots = [
+  const rawRoots = [
     primaryRoot,
     ...((extraRoots ?? [policy.allowedWorktreeRoot || WORKTREE_DIR]).filter(Boolean).map(trimSep)),
   ];
+  const roots = [...new Set([...rawRoots, ...rawRoots.map(nativeReal)])];
 
   let raw = input.trim();
   if (process.platform === 'win32') {
@@ -280,8 +284,8 @@ export function resolveProjectDir(input, {
     throw new Error(`Project directory does not exist: ${normalized}`);
   }
 
-  const canonical = fs.realpathSync(normalized);
-  const canonicalRoots = roots.filter((r) => fs.existsSync(r)).map((r) => fs.realpathSync(r));
+  const canonical = nativeReal(normalized);
+  const canonicalRoots = [...new Set(rawRoots.filter((r) => fs.existsSync(r)).map((r) => nativeReal(r)))];
   const canonicalMatch = canonicalRoots.find((r) => isInsideRoot(r, canonical));
   if (!canonicalMatch) {
     throw new Error(`Resolved symlink escapes allowed roots (${canonicalRoots.join(', ')}): ${canonical}`);
