@@ -12,7 +12,7 @@ import { isProcessAlive, logEvent, parseTaskRow, setMemberCooldown } from './db.
 import { hubBus } from './event-bus.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
 import { planDispatch } from './prober.mjs';
-import { getAgent } from './registry.mjs';
+import { getAgent, validateDriverConfig } from './registry.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,6 +28,39 @@ const ALLOWED_TASK_COLUMNS = new Set([
 const MAX_LOG_TASKS = 100;
 const MAX_LOG_ENTRIES_PER_TASK = 200;
 const MAX_LOG_BYTES_PER_TASK = 64 * 1024;
+const ACTIVE_DISPATCHES = new Set();
+
+function trackBackgroundPromise(promise) {
+  ACTIVE_DISPATCHES.add(promise);
+  promise.finally(() => { ACTIVE_DISPATCHES.delete(promise); }).catch(() => {});
+  return promise;
+}
+
+/**
+ * Bounded shutdown drain: waits up to `timeoutMs` for in-flight background dispatches/runs,
+ * and marks any still-active local runs as `uncertain` (`HUB_SHUTDOWN`) so no task is silently abandoned.
+ */
+export async function awaitActiveRuns(db = null, { timeoutMs = 3000 } = {}) {
+  const pending = [...ACTIVE_DISPATCHES];
+  if (pending.length > 0) {
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((r) => setTimeout(r, Math.max(200, Number(timeoutMs) || 3000))),
+    ]);
+  }
+  if (db && ACTIVE_RUNS.size > 0) {
+    for (const [taskId] of ACTIVE_RUNS.entries()) {
+      try {
+        updateTaskCas(db, taskId, {
+          state: 'uncertain',
+          error_code: 'HUB_SHUTDOWN',
+          error_message: 'Hub process exited while local run was still active; inspect before retrying.',
+        });
+      } catch {}
+    }
+  }
+  return { remaining_dispatches: ACTIVE_DISPATCHES.size, remaining_runs: ACTIVE_RUNS.size };
+}
 const ACTIVE_RUNS = new Map();
 const TASK_LOGS = new Map();
 let cancelWatcherTimer = null;
@@ -470,6 +503,7 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = nul
     let stderr = '';
     let settled = false;
     let cancelled = false;
+    let childClosed = false;
     let cancelReason = null;
     let resolveExited = null;
     const exitedPromise = new Promise((r) => { resolveExited = r; });
@@ -488,14 +522,17 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = nul
         kind: 'generic-cli',
         pid: child.pid || null,
         async cancel(reason) {
-          if (cancelled) return exitedPromise;
+          if (cancelled) return exitedPromise.then(() => childClosed);
           cancelled = true;
           cancelReason = reason || 'Cancelled by operator';
           killProcessTree(child);
-          // Wait up to 2.5s for actual OS process exit so cancellation is confirmed!
+          // Wait up to 2.5s for actual OS process exit/close so cancellation is truly confirmed!
           await Promise.race([exitedPromise, new Promise((r) => setTimeout(r, 2500))]);
-          finish(reject, Object.assign(new Error(cancelReason), { code: 'TASK_CANCELLED' }));
-          return child.exitCode !== null || child.killed;
+          const exited = childClosed || child.exitCode !== null || child.signalCode !== null;
+          if (exited) {
+            finish(reject, Object.assign(new Error(cancelReason), { code: 'TASK_CANCELLED' }));
+          }
+          return exited;
         },
       });
       ensureCancelWatcher(db);
@@ -506,6 +543,7 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = nul
     }, timeoutMs);
 
     child.on('error', (err) => {
+      childClosed = true;
       resolveExited?.();
       finish(reject, Object.assign(new Error(`generic-cli spawn error: ${err.message}`), { code: err.code || 'GENERIC_CLI_SPAWN' }));
     });
@@ -521,6 +559,7 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = nul
       if (taskId) appendTaskLog(taskId, 'stderr', s, db);
     });
     child.on('close', (code) => {
+      childClosed = true;
       resolveExited?.();
       if (cancelled) {
         finish(reject, Object.assign(new Error(cancelReason || 'Cancelled by operator'), { code: 'TASK_CANCELLED' }));
@@ -540,7 +579,7 @@ async function runGenericCliDriver(agent, { cwd, prompt, taskId = null, db = nul
 }
 
 async function runOpenAiHttpDriver(agent, { prompt, taskId = null, db = null }) {
-  const cfg = agent.config || {};
+  const cfg = validateDriverConfig('openai-http', agent.config || {});
   const headers = { 'Content-Type': 'application/json' };
   if (cfg.api_key_env) {
     const key = process.env[cfg.api_key_env];
@@ -554,6 +593,9 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null, db = null }) 
   const timeoutMs = Math.max(10, Math.min(300, Number(cfg.timeout_s) || 90)) * 1000;
   const controller = new AbortController();
   let cancelled = false;
+  let httpSettled = false;
+  let resolveSettled = null;
+  const settledPromise = new Promise((r) => { resolveSettled = r; });
   if (taskId) {
     appendTaskLog(taskId, 'system', `[http] POST ${cfg.base_url}/chat/completions (model=${cfg.model})`, db);
     ACTIVE_RUNS.set(taskId, {
@@ -561,7 +603,8 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null, db = null }) 
       async cancel(reason) {
         cancelled = true;
         controller.abort(new Error(reason || 'Cancelled by operator'));
-        return true;
+        await Promise.race([settledPromise, new Promise((r) => setTimeout(r, 1500))]);
+        return httpSettled;
       },
     });
     ensureCancelWatcher(db);
@@ -618,6 +661,8 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null, db = null }) 
     if (cancelled) throw Object.assign(new Error('Cancelled by operator'), { code: 'TASK_CANCELLED' });
     throw err;
   } finally {
+    httpSettled = true;
+    resolveSettled?.();
     if (taskId) ACTIVE_RUNS.delete(taskId);
   }
 }
@@ -778,14 +823,30 @@ export async function dispatchBackgroundTask(db, {
         throw new Error(`File reservation conflict in mcp-agent-mail for ${safeTaskId}: ${JSON.stringify(leaseInfo.conflicts)}`);
       }
       metaObj.mail_lease = leaseInfo;
-      updateTask(db, safeTaskId, { meta_json: JSON.stringify(metaObj) });
+      db.prepare('UPDATE tasks SET meta_json = ?, updated_at = ? WHERE task_id = ? AND dispatch_token = ? AND state = ?')
+        .run(JSON.stringify(metaObj), new Date().toISOString(), safeTaskId, dispatchToken, 'dispatching');
     } catch (leaseErr) {
       try { db.prepare('DELETE FROM tasks WHERE task_id = ? AND dispatch_token = ?').run(safeTaskId, dispatchToken); } catch {}
       throw leaseErr;
     }
   }
+
+  // Atomic dispatch-ownership verification right before calling ANY external bridge/agent:
+  // if the task was cancelled, failed, or reconciled while awaiting a Mail reservation, release lease & abort send!
+  const stillOwned = db.prepare(`
+    SELECT task_id FROM tasks
+    WHERE task_id = ? AND dispatch_token = ? AND state = 'dispatching'
+  `).get(safeTaskId, dispatchToken);
+  if (!stillOwned) {
+    if (leaseInfo?.synced && Array.isArray(reservePaths) && reservePaths.length > 0) {
+      try { await (deps.releaseMailPaths || releaseMailPaths)({ projectDir: resolvedDir.windows, member, paths: reservePaths }); } catch {}
+    }
+    return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+  }
+
   logEvent(db, { taskId: safeTaskId, eventType: 'task.dispatching', actor: member, payload: { role, channel, projectDir: resolvedDir.windows, dispatchToken, dependsOn: depList } });
 
+  const executeRemoteOrLocal = async () => {
   try {
     if (member === 'dsh') {
       const baton = deps.callBaton || callBatonTool;
@@ -985,7 +1046,7 @@ export async function dispatchBackgroundTask(db, {
         }
       };
       if (asyncRun) {
-        executeCli().catch(() => {});
+        trackBackgroundPromise(executeCli());
         return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
       }
       return await executeCli();
@@ -1051,7 +1112,7 @@ export async function dispatchBackgroundTask(db, {
         }
       };
       if (asyncRun) {
-        executeHttp().catch(() => {});
+        trackBackgroundPromise(executeHttp());
         return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
       }
       return await executeHttp();
@@ -1081,6 +1142,14 @@ export async function dispatchBackgroundTask(db, {
     logEvent(db, { taskId: safeTaskId, eventType: 'task.error', actor: member, payload: { code, message: msg } });
     return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
   }
+  };
+
+  // True non-blocking HTTP 202 asyncRun for remote bridges (dsh/muse/claude) too!
+  if (asyncRun && !['generic-cli', 'openai-http'].includes(agent.driver)) {
+    trackBackgroundPromise(executeRemoteOrLocal());
+    return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+  }
+  return await executeRemoteOrLocal();
 }
 
 /**
@@ -1110,14 +1179,48 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
     abortedLiveProcess = true;
     try {
       const stopped = await active.cancel(reason);
-      stopConfirmed = stopped !== false;
+      stopConfirmed = stopped === true;
     } catch {
-      stopConfirmed = true;
+      stopConfirmed = false;
     }
-    ACTIVE_RUNS.delete(safeTaskId);
+    if (stopConfirmed) {
+      ACTIVE_RUNS.delete(safeTaskId);
+    } else if (!force) {
+      const { task: uncTask } = updateTaskCas(db, safeTaskId, {
+        state: 'uncertain',
+        cancel_requested_at: new Date().toISOString(),
+        cancel_reason: String(reason || 'Cancel signal unconfirmed').slice(0, 500),
+        error_code: 'CANCEL_UNCONFIRMED',
+        error_message: 'Termination signal sent, but runner/process exit was not confirmed within timeout; inspect before retrying.',
+      });
+      return {
+        task: uncTask,
+        cancelled: false,
+        cancel_requested: true,
+        uncertain: true,
+        aborted_live_process: true,
+        message: 'Termination signal sent, but process exit was not confirmed; task marked uncertain to block blind retry.',
+      };
+    }
   } else if (existing.owner_pid && existing.owner_pid !== process.pid && ['generic-cli', 'openai-http'].includes(existing.channel)) {
     if (!isProcessAlive(existing.owner_pid)) {
       orphanConfirmed = true;
+      if (!force) {
+        const { task: uncTask } = updateTaskCas(db, safeTaskId, {
+          state: 'uncertain',
+          cancel_requested_at: new Date().toISOString(),
+          cancel_reason: String(reason || 'Owner process dead').slice(0, 500),
+          error_code: 'OWNER_PROCESS_DEAD',
+          error_message: `Owning process pid=${existing.owner_pid} exited unexpectedly; marked uncertain to prevent blind retry without inspection.`,
+        });
+        return {
+          task: uncTask,
+          cancelled: false,
+          uncertain: true,
+          orphan_confirmed: true,
+          message: `Owner pid=${existing.owner_pid} is dead; marked uncertain (inspect or pass force=true to mark cancelled).`,
+        };
+      }
       stopConfirmed = true;
     } else {
       crossProcess = true;
@@ -1158,8 +1261,8 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
     const baton = deps.callBaton || callBatonTool;
     try {
       upstreamCancel = await baton('dsh_cancel', { run_id: existing.external_id }, { timeoutMs: 10000 });
-      stopConfirmed = Boolean(upstreamCancel && !upstreamCancel.error && upstreamCancel.still_busy !== true);
-      if (upstreamCancel?.still_busy === true) {
+      stopConfirmed = Boolean(upstreamCancel && upstreamCancel.ok !== false && !upstreamCancel.error && upstreamCancel.still_busy !== true);
+      if (upstreamCancel?.still_busy === true || upstreamCancel?.ok === false) {
         updateTaskCas(db, safeTaskId, {
           cancel_requested_at: new Date().toISOString(),
           cancel_reason: String(reason || 'DSH cancel requested').slice(0, 500),
@@ -1174,9 +1277,11 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator',
   if (!stopConfirmed && !force) {
     const why = upstreamCancel?.still_busy === true
       ? 'DSH session reported still_busy=true (cancel_requested recorded; poll until stopped)'
-      : (upstreamCancel?.error
-        ? `upstream cancel failed (${upstreamCancel.error})`
-        : `no live abort handle in this process for channel=${existing.channel}`);
+      : (upstreamCancel?.ok === false
+        ? `DSH cancel returned ok=false (${upstreamCancel.reason || upstreamCancel.message || 'unconfirmed'})`
+        : (upstreamCancel?.error
+          ? `upstream cancel failed (${upstreamCancel.error})`
+          : `no live abort handle in this process for channel=${existing.channel}`));
     throw new Error(`Cannot confirm cancellation of ${safeTaskId}: ${why}. Cancel from the owning process or pass force=true after verifying the run stopped.`);
   }
 
@@ -1239,14 +1344,13 @@ export function sweepOrphanTasks(db) {
     if (row.owner_pid === process.pid && ACTIVE_RUNS.has(row.task_id)) continue;
     if (isProcessAlive(row.owner_pid)) continue;
     const { task, changed } = updateTaskCas(db, row.task_id, {
-      state: 'failed',
+      state: 'uncertain',
       error_code: 'OWNER_PROCESS_DEAD',
-      error_message: `Owning runner process (pid=${row.owner_pid}) exited unexpectedly before completing task`,
-      completed_at: new Date().toISOString(),
+      error_message: `Owning runner process (pid=${row.owner_pid}) exited unexpectedly; marked uncertain so workflow resume will not blindly resend.`,
     });
     if (changed && task) {
-      appendTaskLog(row.task_id, 'system', `[orphan-recovery] owner pid=${row.owner_pid} is dead; marked failed`, db);
-      logEvent(db, { taskId: row.task_id, eventType: 'task.orphan_recovered', actor: row.member, payload: { owner_pid: row.owner_pid } });
+      appendTaskLog(row.task_id, 'system', `[orphan-recovery] owner pid=${row.owner_pid} is dead; marked uncertain (inspect before retry)`, db);
+      logEvent(db, { taskId: row.task_id, eventType: 'task.orphan_recovered', actor: row.member, payload: { owner_pid: row.owner_pid, state: 'uncertain' } });
       recovered.push(row.task_id);
     }
   }

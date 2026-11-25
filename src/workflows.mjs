@@ -1,8 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { assertValidTaskId } from './config.mjs';
+import path from 'node:path';
+import { assertValidTaskId, resolveProjectDir } from './config.mjs';
 import { logEvent, parseTaskRow } from './db.mjs';
 import { canonicalGoJson, dispatchBackgroundTask, pollBatchTasks, sha256Hex } from './executors.mjs';
 import { writeMemoryNote } from './memory.mjs';
+
+function canonicalPlanProjectDir(projectDir, deps = {}) {
+  try {
+    return resolveProjectDir(projectDir, {
+      requireSubdir: false,
+      workspaceRoot: deps.workspaceRoot,
+      extraRoots: deps.extraRoots,
+    }).windows;
+  } catch {
+    return path.resolve(String(projectDir || '')).replace(/[\\/]+$/, '');
+  }
+}
+
+function computeWorkflowPlanDigest(canonicalDir, steps) {
+  return sha256Hex(canonicalGoJson({ project_dir: canonicalDir, steps }));
+}
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
 
@@ -110,24 +127,36 @@ export async function runDagWorkflow(db, {
     branchName: s.branchName,
   }));
 
-  const planDigest = sha256Hex(canonicalGoJson(planSteps));
-  const existingPlan = db.prepare('SELECT plan_sha256 FROM workflow_plans WHERE batch_id = ?').get(safeBatchId);
+  const canonicalProjectDir = canonicalPlanProjectDir(projectDir, deps);
+  const planDigest = computeWorkflowPlanDigest(canonicalProjectDir, planSteps);
+  const existingPlan = db.prepare('SELECT project_dir, plan_json, plan_sha256 FROM workflow_plans WHERE batch_id = ?').get(safeBatchId);
+  let effectiveProjectDir = canonicalProjectDir;
   if (existingPlan) {
-    if (existingPlan.plan_sha256 && existingPlan.plan_sha256 !== planDigest) {
+    let existingDigest = existingPlan.plan_sha256;
+    if (!existingDigest && existingPlan.plan_json) {
+      try {
+        const parsedOld = JSON.parse(existingPlan.plan_json);
+        const oldDir = canonicalPlanProjectDir(parsedOld.project_dir || existingPlan.project_dir, deps);
+        existingDigest = computeWorkflowPlanDigest(oldDir, parsedOld.steps || []);
+        db.prepare('UPDATE workflow_plans SET plan_sha256 = ? WHERE batch_id = ? AND plan_sha256 IS NULL').run(existingDigest, safeBatchId);
+      } catch { /* fall through */ }
+    }
+    if (!existingDigest || existingDigest !== planDigest) {
       throw new Error(`Workflow batch_id "${safeBatchId}" already exists with a different immutable plan digest; choose a new batch_id.`);
     }
+    effectiveProjectDir = existingPlan.project_dir || canonicalProjectDir;
   } else {
     db.prepare(`
       INSERT INTO workflow_plans (batch_id, name, project_dir, plan_json, plan_sha256, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(safeBatchId, name, projectDir, JSON.stringify({ batch_id: safeBatchId, name, project_dir: projectDir, steps: planSteps }), planDigest, new Date().toISOString());
+    `).run(safeBatchId, name, canonicalProjectDir, JSON.stringify({ batch_id: safeBatchId, name, project_dir: canonicalProjectDir, steps: planSteps }), planDigest, new Date().toISOString());
   }
 
   logEvent(db, {
     taskId: null,
     eventType: 'workflow.plan',
     actor: 'collab-hub',
-    payload: { batch_id: safeBatchId, name, project_dir: projectDir, step_count: planSteps.length, plan_sha256: planDigest },
+    payload: { batch_id: safeBatchId, name, project_dir: effectiveProjectDir, step_count: planSteps.length, plan_sha256: planDigest },
   });
 
   const dispatchedIds = new Set();
@@ -154,7 +183,7 @@ export async function runDagWorkflow(db, {
           reservePaths: s.reservePaths,
           member: s.member,
           role: s.role,
-          projectDir,
+          projectDir: effectiveProjectDir,
           title: s.title,
           prompt: s.prompt,
           worktreePath: s.worktreePath,

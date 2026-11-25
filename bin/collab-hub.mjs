@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import {
   APP_ROOT, APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT, ensureRuntimeDirs,
 } from '../src/config.mjs';
-import { createDashboardServer } from '../src/dashboard.mjs';
-import { openHubDb, parseTaskRow } from '../src/db.mjs';
+import { createDashboardServer, startReadOnlyAutoPoller } from '../src/dashboard.mjs';
+import { openHubDb, parseTaskRow, pruneRetentionTables } from '../src/db.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
-import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks } from '../src/executors.mjs';
+import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, sweepOrphanTasks } from '../src/executors.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
@@ -29,9 +29,20 @@ if (cmd === 'mcp') {
 } else if (cmd === 'start') {
   ensureRuntimeDirs();
   const db = openHubDb();
+  pruneRetentionTables(db);
+  sweepOrphanTasks(db);
   const portIdx = rawArgs.indexOf('--port');
   const port = portIdx >= 0 && rawArgs[portIdx + 1] ? Number(rawArgs[portIdx + 1]) : DASHBOARD_PORT;
   const server = createDashboardServer(db, { host: DASHBOARD_HOST, port });
+  let poller = null;
+  const gracefulExit = async () => {
+    poller?.stop();
+    await server.shutdown();
+    try { db.close(); } catch {}
+    process.exit(0);
+  };
+  process.on('SIGINT', gracefulExit);
+  process.on('SIGTERM', gracefulExit);
   server.listen(port, DASHBOARD_HOST, () => {
     console.log(JSON.stringify({
       event: 'dashboard.listening',
@@ -42,6 +53,7 @@ if (cmd === 'mcp') {
       pid: process.pid,
     }));
     probeAllMembers(db).catch(() => {});
+    poller = startReadOnlyAutoPoller(db);
   });
 } else {
   ensureRuntimeDirs();

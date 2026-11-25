@@ -91,10 +91,11 @@ function repoBucketName(topLevel) {
 function withRepoLock(repoDir, fn) {
   const commonDir = git(repoDir, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
   const lockPath = path.join(commonDir, 'collabhub-merge.lock');
+  const lockToken = `${process.pid}-${Date.now()}-${createHash('sha1').update(`${process.pid}:${Math.random()}:${Date.now()}`).digest('hex').slice(0, 12)}`;
   const acquire = () => {
     const fd = fs.openSync(lockPath, 'wx', 0o600);
     try {
-      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, token: lockToken, at: new Date().toISOString() }));
     } finally {
       fs.closeSync(fd);
     }
@@ -103,16 +104,19 @@ function withRepoLock(repoDir, fn) {
     acquire();
   } catch (err) {
     if (err.code === 'EEXIST') {
-      // Stale lock recovery: if the recorded holder PID is demonstrably dead, reclaim safely
+      // Atomic stale-lock handoff: rename the dead holder's file to a unique tomb before re-acquiring,
+      // so two concurrent racers can never unlink each other's freshly acquired lock!
       let staleReclaimed = false;
       try {
         const info = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
         if (info?.pid && !isProcessAlive(info.pid)) {
-          fs.unlinkSync(lockPath);
+          const tomb = `${lockPath}.stale.${process.pid}.${Date.now()}`;
+          fs.renameSync(lockPath, tomb);
+          try { fs.unlinkSync(tomb); } catch {}
           acquire();
           staleReclaimed = true;
         }
-      } catch { /* fall through to active lock error */ }
+      } catch { /* another racer won or lock is live */ }
       if (!staleReclaimed) {
         throw new Error(`Repository merge lock held (${lockPath}). Wait for concurrent merge to finish or inspect stale lock.`);
       }
@@ -123,7 +127,11 @@ function withRepoLock(repoDir, fn) {
   try {
     return fn();
   } finally {
-    try { fs.unlinkSync(lockPath); } catch {}
+    // Token-verified release: never unlink a lock owned by another process
+    try {
+      const cur = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      if (cur?.token === lockToken) fs.unlinkSync(lockPath);
+    } catch {}
   }
 }
 

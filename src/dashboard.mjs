@@ -10,7 +10,7 @@ import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, p
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { hubBus } from './event-bus.mjs';
-import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
+import { awaitActiveRuns, cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
 import { runPlaybook } from './playbooks.mjs';
@@ -602,7 +602,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         return;
       }
       try {
-        const newEvents = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(lastEventId);
+        const newEvents = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 200').all(lastEventId);
         for (const ev of newEvents) {
           lastEventId = Math.max(lastEventId, ev.id);
           if (localEventIds.delete(ev.id)) continue;
@@ -616,9 +616,9 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
             payload,
             created_at: ev.created_at,
             at: ev.created_at,
-          }, `ev-${ev.id}`);
+          }, `e${lastEventId}-l${lastLogId}`);
         }
-        const newLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 80').all(lastLogId);
+        const newLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 200').all(lastLogId);
         for (const lg of newLogs) {
           lastLogId = Math.max(lastLogId, lg.id);
           if (localLogIds.delete(lg.id)) continue;
@@ -629,7 +629,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
             stream: lg.stream,
             text: lg.text,
             at: lg.created_at,
-          }, `log-${lg.id}`);
+          }, `e${lastEventId}-l${lastLogId}`);
         }
       } catch { /* best-effort */ }
     }, 400);
@@ -637,9 +637,15 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   };
 
   const onHubEvent = (evt) => {
-    if (evt.id) rememberLocalId(localEventIds, evt.id);
-    if (evt.log_id) rememberLocalId(localLogIds, evt.log_id);
-    const sseId = evt.id ? `ev-${evt.id}` : (evt.log_id ? `log-${evt.log_id}` : null);
+    if (evt.id) {
+      rememberLocalId(localEventIds, evt.id);
+    }
+    if (evt.log_id) {
+      rememberLocalId(localLogIds, evt.log_id);
+    }
+    const curEv = Math.max(lastEventId, Number(evt.id || 0));
+    const curLog = Math.max(lastLogId, Number(evt.log_id || 0));
+    const sseId = (evt.id || evt.log_id) ? `e${curEv}-l${curLog}` : null;
     broadcastSse(evt, sseId);
   };
   hubBus.on('hub-event', onHubEvent);
@@ -744,32 +750,67 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
           Connection: 'keep-alive',
         });
         res.write(`data: ${JSON.stringify({ type: 'connected', at: new Date().toISOString() })}\n\n`);
-        // Replay missed durable events OR logs on reconnect if client sent Last-Event-ID: ev-<N> or log-<N>
-        const lastHdr = String(req.headers['last-event-id'] || '');
-        const idMatch = /^(ev|log)-(\d+)$/.exec(lastHdr);
-        if (idMatch) {
-          const kind = idMatch[1];
-          const sinceId = Number(idMatch[2]);
+        // Snapshot current DB tip synchronously so paginated catch-up & live handoff are 100% lossless!
+        const tipEventId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM events').get()?.m || 0);
+        const tipLogId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs').get()?.m || 0);
+        const lastHdr = String(req.headers['last-event-id'] || '').trim();
+        let sinceEv = null;
+        let sinceLog = null;
+        const dualMatch = /^e(\d+)-l(\d+)$/.exec(lastHdr);
+        const singleMatch = /^(ev|log)-(\d+)$/.exec(lastHdr);
+        if (dualMatch) {
+          sinceEv = Number(dualMatch[1]);
+          sinceLog = Number(dualMatch[2]);
+        } else if (singleMatch) {
+          if (singleMatch[1] === 'ev') {
+            sinceEv = Number(singleMatch[2]);
+            // Also replay logs created at/after the last seen event's timestamp so reconnect never drops logs
+            const evAnchor = db.prepare('SELECT created_at FROM events WHERE id = ?').get(sinceEv);
+            if (evAnchor?.created_at) {
+              sinceLog = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs WHERE created_at < ?').get(evAnchor.created_at)?.m || 0);
+            } else {
+              sinceLog = tipLogId;
+            }
+          } else {
+            sinceLog = Number(singleMatch[2]);
+            sinceEv = tipEventId;
+          }
+        }
+        if (sinceEv !== null || sinceLog !== null) {
+          const MAX_REPLAY_ROWS = 2000;
+          let replayed = 0;
+          let curEv = sinceEv ?? tipEventId;
+          let curLog = sinceLog ?? tipLogId;
           try {
-            if (kind === 'ev') {
-              const missed = db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id ASC LIMIT 50').all(sinceId);
-              for (const ev of missed) {
+            while (curEv < tipEventId && replayed < MAX_REPLAY_ROWS) {
+              const chunk = db.prepare('SELECT * FROM events WHERE id > ? AND id <= ? ORDER BY id ASC LIMIT 100').all(curEv, tipEventId);
+              if (!chunk.length) break;
+              for (const ev of chunk) {
+                curEv = ev.id;
+                replayed += 1;
                 let payload = null;
                 try { payload = ev.payload_json ? JSON.parse(ev.payload_json) : null; } catch {}
-                res.write(`id: ev-${ev.id}\ndata: ${JSON.stringify({ id: ev.id, type: ev.event_type, task_id: ev.task_id, actor: ev.actor, payload, created_at: ev.created_at, at: ev.created_at })}\n\n`);
+                res.write(`id: e${curEv}-l${curLog}\ndata: ${JSON.stringify({ id: ev.id, type: ev.event_type, task_id: ev.task_id, actor: ev.actor, payload, created_at: ev.created_at, at: ev.created_at })}\n\n`);
               }
-            } else {
-              const missedLogs = db.prepare('SELECT * FROM task_logs WHERE id > ? ORDER BY id ASC LIMIT 80').all(sinceId);
-              for (const lg of missedLogs) {
-                res.write(`id: log-${lg.id}\ndata: ${JSON.stringify({ log_id: lg.id, type: 'task.log', task_id: lg.task_id, stream: lg.stream, text: lg.text, at: lg.created_at })}\n\n`);
+            }
+            while (curLog < tipLogId && replayed < MAX_REPLAY_ROWS) {
+              const chunk = db.prepare('SELECT * FROM task_logs WHERE id > ? AND id <= ? ORDER BY id ASC LIMIT 100').all(curLog, tipLogId);
+              if (!chunk.length) break;
+              for (const lg of chunk) {
+                curLog = lg.id;
+                replayed += 1;
+                res.write(`id: e${curEv}-l${curLog}\ndata: ${JSON.stringify({ log_id: lg.id, type: 'task.log', task_id: lg.task_id, stream: lg.stream, text: lg.text, at: lg.created_at })}\n\n`);
               }
+            }
+            if (curEv < tipEventId || curLog < tipLogId) {
+              res.write(`id: e${tipEventId}-l${tipLogId}\ndata: ${JSON.stringify({ type: 'sync.reset', reason: 'replay_cap_exceeded', at: new Date().toISOString() })}\n\n`);
             }
           } catch { /* best-effort replay */ }
         }
-        // Reset tail cursors to current tip when first subscriber connects after idle so old history isn't spammed
+        // Align tail cursor to exact tip snapshot when first subscriber connects after idle
         if (sseClients.size === 0) {
-          lastEventId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM events').get()?.m || lastEventId);
-          lastLogId = Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM task_logs').get()?.m || lastLogId);
+          lastEventId = Math.max(lastEventId, tipEventId);
+          lastLogId = Math.max(lastLogId, tipLogId);
         }
         const hb = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 25000);
         hb.unref();
@@ -1147,16 +1188,17 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
     sseClients.clear();
   };
 
-  server.shutdown = () => new Promise((resolve) => {
+  server.shutdown = async ({ drainMs = 3000 } = {}) => {
     cleanupSse();
-    server.close(() => resolve());
-  });
+    await new Promise((resolve) => server.close(() => resolve()));
+    await awaitActiveRuns(db, { timeoutMs: drainMs });
+  };
   server.on('close', cleanupSse);
 
   return server;
 }
 
-function startReadOnlyAutoPoller(db) {
+export function startReadOnlyAutoPoller(db) {
   let busy = false;
   let timer = null;
   let stopped = false;

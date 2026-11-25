@@ -9,11 +9,11 @@ import { ensureAgentsTable, listAgents } from './registry.mjs';
 export function openHubDb(dbPath = DB_PATH) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA busy_timeout = 8000;');
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA synchronous = NORMAL;');
   db.exec('PRAGMA temp_store = MEMORY;');
   db.exec('PRAGMA cache_size = -16000;');
-  db.exec('PRAGMA busy_timeout = 8000;');
   db.exec('PRAGMA foreign_keys = ON;');
   initSchema(db);
   return db;
@@ -40,8 +40,13 @@ function ensureColumn(db, table, column, definition) {
   }
 }
 
+const SCHEMA_VERSION = 130;
+
 function initSchema(db) {
-  db.exec(`
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    const currentVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
+    db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       task_id TEXT PRIMARY KEY,
       batch_id TEXT,
@@ -165,7 +170,7 @@ function initSchema(db) {
   ensureColumn(db, 'worktrees', 'verify_summary', 'TEXT');
   ensureColumn(db, 'workflow_plans', 'plan_sha256', 'TEXT');
 
-  // Enable FTS5 virtual table for memory_notes (with automatic rebuild if created over existing rows!)
+  // Enable FTS5 virtual table for memory_notes (atomically rebuilt inside schema version migration)
   try {
     const hadFts = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_notes_fts'").get());
     db.exec(`
@@ -189,7 +194,7 @@ function initSchema(db) {
         VALUES (new.id, new.project, new.slug, new.title, new.tags, new.content);
       END;
     `);
-    if (!hadFts) {
+    if (!hadFts || currentVersion < SCHEMA_VERSION) {
       db.exec("INSERT INTO memory_notes_fts(memory_notes_fts) VALUES('rebuild');");
     }
   } catch {
@@ -199,6 +204,15 @@ function initSchema(db) {
   // Seed dynamic agents table + built-in prompt recipes
   ensureAgentsTable(db);
   ensureRecipesTable(db);
+
+  if (currentVersion < SCHEMA_VERSION) {
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  }
+  db.exec('COMMIT;');
+  } catch (err) {
+    try { db.exec('ROLLBACK;'); } catch {}
+    throw err;
+  }
 }
 
 /**

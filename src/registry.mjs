@@ -83,7 +83,25 @@ export function getAgent(db, agentId) {
   return parseAgentRow(db.prepare('SELECT * FROM agents WHERE agent_id = ?').get(safeId));
 }
 
-function validateDriverConfig(driver, config) {
+const PROVIDER_HOST_BINDINGS = {
+  OPENAI_API_KEY: ['api.openai.com'],
+  ANTHROPIC_API_KEY: ['api.anthropic.com'],
+  DEEPSEEK_API_KEY: ['api.deepseek.com'],
+  OPENROUTER_API_KEY: ['openrouter.ai'],
+  GROQ_API_KEY: ['api.groq.com'],
+  GEMINI_API_KEY: ['generativelanguage.googleapis.com'],
+  GOOGLE_API_KEY: ['generativelanguage.googleapis.com'],
+  XAI_API_KEY: ['api.x.ai'],
+  MISTRAL_API_KEY: ['api.mistral.ai'],
+};
+
+function parseAllowedHttpHosts() {
+  const raw = String(process.env.COLLAB_HUB_ALLOWED_HTTP_HOSTS || '').trim();
+  if (!raw) return null;
+  return new Set(raw.split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
+}
+
+export function validateDriverConfig(driver, config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     throw new Error('config must be a JSON object');
   }
@@ -129,6 +147,19 @@ function validateDriverConfig(driver, config) {
     const keyEnv = typeof config.api_key_env === 'string' && config.api_key_env.trim() ? config.api_key_env.trim() : null;
     if (keyEnv && !/^[A-Z][A-Z0-9_]*_(API_KEY|KEY|TOKEN)$/.test(keyEnv)) {
       throw new Error('Security rule: config.api_key_env must match *_API_KEY, *_KEY, or *_TOKEN to prevent arbitrary environment exfiltration.');
+    }
+    const hostLower = parsedUrl.hostname.toLowerCase();
+    if (!isLoopback) {
+      const allowedHosts = parseAllowedHttpHosts();
+      if (allowedHosts && !allowedHosts.has(hostLower)) {
+        throw new Error(`Security rule: remote host "${hostLower}" is not in COLLAB_HUB_ALLOWED_HTTP_HOSTS.`);
+      }
+      if (keyEnv) {
+        const boundHosts = PROVIDER_HOST_BINDINGS[keyEnv];
+        if (boundHosts && !boundHosts.includes(hostLower) && !(allowedHosts && allowedHosts.has(hostLower))) {
+          throw new Error(`Security rule: credential ${keyEnv} is bound to ${boundHosts.join(', ')} and cannot be sent to "${hostLower}".`);
+        }
+      }
     }
     return {
       base_url: config.base_url.trim().replace(/\/+$/, ''),
@@ -251,16 +282,22 @@ export async function probeCustomAgent(agent, { timeoutMs = 5000, probeArgs = ['
     }
   }
   if (agent.driver === 'openai-http') {
-    const base = agent.config?.base_url;
-    const keyEnv = agent.config?.api_key_env;
+    let safeCfg;
+    try {
+      safeCfg = validateDriverConfig('openai-http', agent.config || {});
+    } catch (err) {
+      return { member: agent.id, channel: 'openai-http', state: 'offline', detail: `Blocked by HTTP security policy: ${err.message}` };
+    }
+    const base = safeCfg.base_url;
+    const keyEnv = safeCfg.api_key_env;
     const headers = {};
     if (keyEnv && process.env[keyEnv]) headers.Authorization = `Bearer ${process.env[keyEnv]}`;
     try {
       const res = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(4000) });
       if (res.ok) {
-        return { member: agent.id, channel: 'openai-http', state: 'online', detail: `HTTP endpoint ready (${agent.config.model} @ ${base})` };
+        return { member: agent.id, channel: 'openai-http', state: 'online', detail: `HTTP endpoint ready (${safeCfg.model} @ ${base})` };
       }
-      return { member: agent.id, channel: 'openai-http', state: 'idle', detail: `Endpoint HTTP ${res.status} (${agent.config.model})` };
+      return { member: agent.id, channel: 'openai-http', state: 'idle', detail: `Endpoint HTTP ${res.status} (${safeCfg.model})` };
     } catch (err) {
       return { member: agent.id, channel: 'openai-http', state: 'offline', detail: `Endpoint unreachable: ${err.message}` };
     }

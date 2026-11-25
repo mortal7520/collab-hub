@@ -1543,7 +1543,7 @@ test('v1.3: durable SQLite task_logs, dead-owner orphan recovery, DSH still_busy
     const swept = sweepOrphanTasks(env.db);
     assert.ok(swept.recovered.includes('v13-orphan-1'));
     const orphanRow = env.db.prepare('SELECT state, error_code FROM tasks WHERE task_id = ?').get('v13-orphan-1');
-    assert.equal(orphanRow.state, 'failed');
+    assert.equal(orphanRow.state, 'uncertain');
     assert.equal(orphanRow.error_code, 'OWNER_PROCESS_DEAD');
 
     // 3. DSH cancel returning still_busy=true MUST NOT mark cancelled (records cancel_requested_at instead)
@@ -1696,9 +1696,15 @@ test('v1.3: FTS5 rebuild on existing rows, openai-http env/HTTPS guard, probe ti
       config: { base_url: 'https://api.example.com/v1', model: 'm', api_key_env: 'USERPROFILE' },
     }), /must match \*_API_KEY, \*_KEY, or \*_TOKEN/i);
 
+    // Bound provider credentials cannot be sent to arbitrary third-party HTTPS hosts
+    assert.throws(() => registerAgent(env.db, {
+      agentId: 'exfil-provider', name: 'Exfil Provider', driver: 'openai-http',
+      config: { base_url: 'https://evil.example.com/v1', model: 'm', api_key_env: 'DEEPSEEK_API_KEY' },
+    }), /is bound to api\.deepseek\.com/i);
+
     const safeRemote = registerAgent(env.db, {
       agentId: 'safe-remote', name: 'Safe Remote', driver: 'openai-http',
-      config: { base_url: 'https://api.example.com/v1', model: 'm', api_key_env: 'DEEPSEEK_API_KEY' },
+      config: { base_url: 'https://api.deepseek.com/v1', model: 'm', api_key_env: 'DEEPSEEK_API_KEY' },
     });
     assert.equal(safeRemote.id, 'safe-remote');
 
@@ -1766,6 +1772,121 @@ test('v1.3: FTS5 rebuild on existing rows, openai-http env/HTTPS guard, probe ti
   } finally {
     if (upDb) try { upDb.close(); } catch {}
     try { await server.shutdown(); } catch {}
+    env.cleanup();
+  }
+});
+
+test('v1.3: Codex P1 fixes — dispatch-token race guard, DSH ok:false cancel refusal, lossless SSE >55 replay, workflow project_dir digest & async DSH 202', async () => {
+  const env = makeTempEnv();
+  const subProj = path.join(env.proj, 'sub');
+  fs.mkdirSync(subProj, { recursive: true });
+  let slowDshResolve = null;
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: {
+      workspaceRoot: env.ws,
+      extraRoots: [env.wts],
+      memoryDir: env.mem,
+      callBaton: async () => new Promise((resolve) => {
+        slowDshResolve = () => resolve({ run_id: 'hrun-slow-async', session_id: 's-slow' });
+      }),
+    },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
+
+  try {
+    // 1. PRAGMA user_version migrated atomically to 130
+    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 130);
+
+    // 2. Dispatch-token race: if task is failed/cancelled while awaiting reserveMailPaths, external bridge MUST NOT be called!
+    let dshCalled = false;
+    let releasedPaths = null;
+    const raced = await dispatchBackgroundTask(env.db, {
+      taskId: 'v13-race-1', member: 'dsh', role: 'implementer', projectDir: env.proj,
+      prompt: 'should not send', reservePaths: ['src/x.mjs'],
+    }, {
+      workspaceRoot: env.ws, extraRoots: [env.wts],
+      reserveMailPaths: async () => {
+        env.db.prepare("UPDATE tasks SET state = 'failed', error_code = 'EXT_ABORT' WHERE task_id = 'v13-race-1'").run();
+        return { synced: true, has_conflicts: false };
+      },
+      releaseMailPaths: async (arg) => { releasedPaths = arg.paths; return { ok: true }; },
+      callBaton: async () => { dshCalled = true; return { run_id: 'hrun-should-never' }; },
+    });
+    assert.equal(dshCalled, false);
+    assert.deepEqual(releasedPaths, ['src/x.mjs']);
+    assert.equal(raced.state, 'failed');
+
+    // 3. DSH cancel returning { ok: false } MUST refuse marking cancelled
+    const now = new Date().toISOString();
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, external_id, created_at, updated_at)
+      VALUES ('v13-dsh-okfalse', ?, 'dsh', 'implementer', 'dsh-baton', 'DSH ok:false', 'p', 'running', 'hrun-okfalse', ?, ?)
+    `).run(env.proj, now, now);
+    await assert.rejects(() => cancelTask(env.db, 'v13-dsh-okfalse', { reason: 'Stop' }, {
+      callBaton: async () => ({ ok: false, reason: 'busy' }),
+    }), /ok=false/i);
+    assert.equal(env.db.prepare("SELECT state FROM tasks WHERE task_id = 'v13-dsh-okfalse'").get().state, 'running');
+
+    // 4. Workflow plan digest covers canonical project_dir & rejects re-submission under different directory
+    registerAgent(env.db, {
+      agentId: 'dir-cli', name: 'Dir CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'console.log("DIR-OK")'], timeout_s: 20 },
+    });
+    await runDagWorkflow(env.db, {
+      name: 'dir-lock', batchId: 'wf-dir-lock', projectDir: env.proj,
+      steps: [{ id: 's1', member: 'dir-cli', role: 'implementer', prompt: 'SAME' }],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+    await assert.rejects(() => runDagWorkflow(env.db, {
+      name: 'dir-lock', batchId: 'wf-dir-lock', projectDir: subProj,
+      steps: [{ id: 's1', member: 'dir-cli', role: 'implementer', prompt: 'SAME' }],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem }), /immutable plan digest/i);
+
+    // 5. Lossless SSE reconnect across >55 missed events + logs (zero gaps!)
+    const firstEv = env.db.prepare("INSERT INTO events (task_id, event_type, actor, payload_json, created_at) VALUES (NULL, 'test.anchor', 'sys', '{}', ?)").run(now);
+    const anchorId = Number(firstEv.lastInsertRowid);
+    for (let i = 1; i <= 60; i++) {
+      env.db.prepare("INSERT INTO events (task_id, event_type, actor, payload_json, created_at) VALUES (NULL, ?, 'sys', '{}', ?)").run(`test.seq.${i}`, now);
+    }
+    env.db.prepare("INSERT INTO task_logs (task_id, stream, text, created_at) VALUES ('sse-gap-t', 'stdout', 'LOG-DURING-DISCONNECT', ?)").run(now);
+    const sseReplay = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port, path: '/api/events/stream',
+        headers: { Host: `127.0.0.1:${port}`, 'Last-Event-ID': `ev-${anchorId}` },
+      }, (res) => {
+        let buf = '';
+        res.on('data', (c) => {
+          buf += c.toString('utf8');
+          if (buf.includes('test.seq.60') && buf.includes('LOG-DURING-DISCONNECT')) {
+            req.destroy();
+            resolve(buf);
+          }
+        });
+      });
+      req.on('error', (e) => { if (e.code !== 'ECONNRESET') reject(e); });
+      req.end();
+      setTimeout(() => { req.destroy(); reject(new Error('Lossless SSE >55 replay timed out')); }, 3000);
+    });
+    assert.match(sseReplay, /test\.seq\.52/);
+    assert.match(sseReplay, /test\.seq\.60/);
+    assert.match(sseReplay, /LOG-DURING-DISCONNECT/);
+
+    // 6. True non-blocking async:true HTTP 202 for slow DSH bridge (returns immediately before bridge resolves!)
+    const t0 = Date.now();
+    const asyncDsh = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/dispatch', headers: hdrs,
+      body: JSON.stringify({ task_id: 'v13-dsh-async-1', async: true, member: 'dsh', role: 'implementer', project_dir: env.proj, title: 'Slow DSH', prompt: 'go' }),
+    });
+    assert.equal(asyncDsh.status, 202);
+    assert.ok(Date.now() - t0 < 1500, 'async:true DSH dispatch must return 202 immediately without blocking on bridge');
+    slowDshResolve?.();
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(env.db.prepare("SELECT external_id FROM tasks WHERE task_id = 'v13-dsh-async-1'").get().external_id, 'hrun-slow-async');
+  } finally {
+    slowDshResolve?.();
+    try { await server.shutdown({ drainMs: 500 }); } catch {}
     env.cleanup();
   }
 });
