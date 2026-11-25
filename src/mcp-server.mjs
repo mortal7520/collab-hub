@@ -1,7 +1,7 @@
 import path from 'node:path';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
-import { ensureRuntimeDirs, MAIL_BASE_URL, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT } from './config.mjs';
+import { APP_VERSION, ensureRuntimeDirs, MAIL_BASE_URL, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT } from './config.mjs';
 import {
   clearMemberCooldown, getMemberStatuses, openHubDb, parseTaskRow, setMemberCooldown,
 } from './db.mjs';
@@ -735,7 +735,7 @@ export function startMcpStdioServer() {
           result: {
             protocolVersion: params?.protocolVersion || '2024-11-05',
             capabilities: { tools: {} },
-            serverInfo: { name: 'collab-hub', version: '1.0.0' },
+            serverInfo: { name: 'collab-hub', version: APP_VERSION },
           },
         });
       } else if (method === 'ping') {

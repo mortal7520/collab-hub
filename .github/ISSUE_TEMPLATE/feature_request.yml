@@ -1,0 +1,32 @@
+name: Feature Request
+description: Propose a new agent driver, playbook, UI improvement, or MCP tool
+title: "[Feat]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the real multi-agent workflow pain point.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work while staying zero-dependency and local-first?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Web Workbench UI
+        - MCP Tools / CLI
+        - Agent Drivers & Discovery
+        - Git Worktrees & Verification
+        - DAG Workflows & Playbooks
+        - Documentation / Other
+    validations:
+      required: true

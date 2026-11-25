@@ -5,7 +5,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { promisify } from 'node:util';
 import {
-  INTEGRATIONS, MAX_PROMPT_BYTES, NATIVE_MEMBERS, PAYLOAD_DIR,
+  APP_VERSION, INTEGRATIONS, MAX_PROMPT_BYTES, NATIVE_MEMBERS, PAYLOAD_DIR,
   VALID_ROLES, WORKTREE_DIR, assertValidAgentId, assertValidMember, assertValidTaskId, loadPolicy, resolveProjectDir, toWslPath,
 } from './config.mjs';
 import { logEvent, parseTaskRow, setMemberCooldown } from './db.mjs';
@@ -143,7 +143,7 @@ export async function callBatonTool(toolName, args, { timeoutMs = 75000, nodeExe
     await rpc('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'collab-hub', version: '1.0.0' },
+      clientInfo: { name: 'collab-hub', version: APP_VERSION },
     }, 20000);
     try {
       child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }) + '\n');

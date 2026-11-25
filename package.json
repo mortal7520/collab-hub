@@ -1,6 +1,14 @@
 {
   "name": "collab-hub",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "files": [
+    "bin/",
+    "public/",
+    "src/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
   "description": "Zero-dependency, local-first multi-agent orchestration workbench with MCP (32 tools), Kanban + Table UI, visual DAG builder, Git worktree verification gates, FTS5 shared memory, and pluggable CLI/HTTP/Desktop agent drivers.",
   "type": "module",
   "license": "MIT",

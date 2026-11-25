@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import {
-  APP_ROOT, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT, ensureRuntimeDirs,
+  APP_ROOT, APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT, ensureRuntimeDirs,
 } from '../src/config.mjs';
 import { createDashboardServer } from '../src/dashboard.mjs';
 import { openHubDb, parseTaskRow } from '../src/db.mjs';
@@ -35,7 +35,7 @@ if (cmd === 'mcp') {
   server.listen(port, DASHBOARD_HOST, () => {
     console.log(JSON.stringify({
       event: 'dashboard.listening',
-      version: '1.0.0',
+      version: APP_VERSION,
       url: `http://${DASHBOARD_HOST}:${port}`,
       app_root: APP_ROOT,
       workspace_root: WORKSPACE_ROOT,
@@ -233,7 +233,7 @@ if (cmd === 'mcp') {
       console.log(JSON.stringify({ ...getToolkitStatus(), cass_archive: await getCassStats() }, null, 2));
     } else {
       console.log([
-        'CollabHub v1.0.0 — Zero-Dependency Local-First Multi-Agent Workbench',
+        `CollabHub v${APP_VERSION} — Zero-Dependency Local-First Multi-Agent Workbench`,
         'Commands:',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
         '  mcp                                          Start the 32-tool MCP stdio server',

@@ -269,7 +269,7 @@ export function reviewWorktree(db, { taskId, maxDiffChars = 12000 }) {
   };
 }
 
-export function mergeWorktree(db, { taskId, confirmed = false, cleanup = true }) {
+export function mergeWorktree(db, { taskId, confirmed = false, cleanup = true, requireVerified = false }) {
   if (confirmed !== true) {
     throw new Error('Merging a worktree into the main repository requires confirmed=true after reviewing diff and tests.');
   }
@@ -293,6 +293,12 @@ export function mergeWorktree(db, { taskId, confirmed = false, cleanup = true })
     }
     if (wtHead !== row.reviewed_head_sha) {
       throw new Error(`Worktree HEAD changed after review (reviewed=${row.reviewed_head_sha.slice(0, 12)}, current=${wtHead.slice(0, 12)}). Re-run collab_worktree_review before merging.`);
+    }
+    if (row.verify_status === 'failed' && row.verified_head_sha === wtHead) {
+      throw new Error(`Worktree test verification failed on HEAD ${wtHead.slice(0, 12)} (${row.verify_summary || 'failed'}). Fix tests and re-run collab_worktree_verify before merging.`);
+    }
+    if (requireVerified && (row.verify_status !== 'passed' || row.verified_head_sha !== wtHead)) {
+      throw new Error(`Worktree requires passing collab_worktree_verify on current HEAD ${wtHead.slice(0, 12)} before merging.`);
     }
     const wtDirty = git(row.worktree_path, ['status', '--porcelain']);
     if (wtDirty) {
