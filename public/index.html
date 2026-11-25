@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CollabHub v1.1 · Local-First Multi-Agent Workbench</title>
+<meta name="description" content="CollabHub v1.1 — zero-dependency, local-first multi-agent orchestration workbench." />
+<meta name="color-scheme" content="dark light" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235e6ad2'/%3E%3Cpath d='M12 12 6.5 7M12 12l5.5-5M12 12v6' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='12' r='2.2' fill='%23fff'/%3E%3Ccircle cx='6' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='18' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='12' cy='19' r='1.5' fill='%23fff'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="2.4"></circle>
+          <circle cx="5" cy="6" r="1.7"></circle>
+          <circle cx="19" cy="6" r="1.7"></circle>
+          <circle cx="12" cy="20" r="1.7"></circle>
+          <path d="M12 12 5 6M12 12l7-6M12 12v8"></path>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">CollabHub</span>
+        <span class="brand-version">v1.1</span>
+      </span>
+    </div>
+
+    <nav class="nav" aria-label="Primary navigation">
+      <div class="nav-label">Workspace</div>
+      <button type="button" class="nav-item active" data-view="overview">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.6"></rect><rect x="14" y="3" width="7" height="7" rx="1.6"></rect><rect x="3" y="14" width="7" height="7" rx="1.6"></rect><rect x="14" y="14" width="7" height="7" rx="1.6"></rect></svg>
+        <span class="nav-copy"><span class="nav-title">总览</span><span class="nav-en">Overview</span></span>
+      </button>
+      <button type="button" class="nav-item" data-view="tasks">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5.5" height="16" rx="1.4"></rect><rect x="9.25" y="4" width="5.5" height="11" rx="1.4"></rect><rect x="15.5" y="4" width="5.5" height="14" rx="1.4"></rect></svg>
+        <span class="nav-copy"><span class="nav-title">任务与看板</span><span class="nav-en">Tasks &amp; Kanban</span></span>
+        <span class="nav-count" id="navTaskCount">0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="dag">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"></circle><circle cx="18.5" cy="12" r="2.2"></circle><circle cx="5.5" cy="18" r="2.2"></circle><path d="M7.7 6.8l8.6 4.4M16.3 13.2 7.7 17.2"></path></svg>
+        <span class="nav-copy"><span class="nav-title">编排与流水线</span><span class="nav-en">DAG &amp; Playbooks</span></span>
+      </button>
+      <button type="button" class="nav-item" data-view="worktrees">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2"></circle><circle cx="6" cy="19" r="2.2"></circle><circle cx="18" cy="7" r="2.2"></circle><path d="M6 7.2v9.6M18 9.2c0 4.8-5.2 3.6-9.2 6.4"></path></svg>
+        <span class="nav-copy"><span class="nav-title">分支隔离</span><span class="nav-en">Worktrees</span></span>
+        <span class="nav-count" id="navWtCount">0</span>
+      </button>
+      <div class="nav-label">System</div>
+      <button type="button" class="nav-item" data-view="toolkit">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a3.5 3.5 0 0 0 4.4 4.4l-9.1 9.1a2.1 2.1 0 0 1-3-3l9.1-9.1a3.5 3.5 0 0 0-1.4-1.4Z"></path><path d="M3 6h6M3 12h4"></path></svg>
+        <span class="nav-copy"><span class="nav-title">工具箱与记忆</span><span class="nav-en">Toolkit &amp; Memory</span></span>
+      </button>
+      <button type="button" class="nav-item" data-view="ops">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"></path></svg>
+        <span class="nav-copy"><span class="nav-title">审计与体检</span><span class="nav-en">Ops &amp; Doctor</span></span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button type="button" class="side-action" data-action="probe" id="sideProbe">
+        <span class="side-action-dot" id="sideProbeDot"></span>
+        <span>探活所有 Agent</span>
+        <kbd>R</kbd>
+      </button>
+      <div class="side-meta">
+        <span>CollabHub v1.1</span>
+        <span class="dot-sep">·</span>
+        <span>0 npm deps</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main-shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" class="icon-btn only-mobile" id="btnMobileNav" aria-label="Toggle navigation">☰</button>
+        <div class="crumb">
+          <span class="crumb-title" id="viewTitle">总览</span>
+          <span class="crumb-sub" id="viewSubtitle">Agents, throughput, and live workbench health</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="pill demo-pill" id="demoPill" hidden>● Demo Preview</span>
+        <span class="pill subtle" id="updatedAt">同步中</span>
+        <button type="button" class="pill pill-btn" id="mailPill" title="Mail hub status">Mail 检测中</button>
+        <span class="pill" id="ssePill">SSE 连接中</span>
+        <button type="button" class="cmd-trigger" id="btnPalette" aria-label="Open command palette">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+          <span>搜索</span>
+          <kbd id="paletteKbd">Ctrl K</kbd>
+        </button>
+        <button type="button" class="icon-btn" id="btnTheme" aria-label="Toggle theme" title="切换主题">☀</button>
+        <button type="button" class="btn primary" id="btnOpenDispatch">+ 派发</button>
+      </div>
+    </header>
+
+    <main class="views">
+      <section class="view active" id="view-overview" data-view-panel="overview" aria-labelledby="viewTitle">
+        <div class="alert-banner" id="alertBanner" hidden></div>
+
+        <div class="quick-row">
+          <button type="button" class="quick-btn" id="btnProbe" data-action="probe"><span class="quick-ico">◎</span>探活 Agent</button>
+          <button type="button" class="quick-btn" id="btnOpenAgent" data-action="agent"><span class="quick-ico">＋</span>扩展 Agent</button>
+          <button type="button" class="quick-btn" data-action="memory"><span class="quick-ico">✎</span>写共享记忆</button>
+          <button type="button" class="quick-btn" data-goto-view="dag"><span class="quick-ico">⇄</span>运行 DAG</button>
+          <button type="button" class="quick-btn" data-goto-view="ops"><span class="quick-ico">✚</span>系统体检</button>
+          <button type="button" class="quick-btn" data-action="events"><span class="quick-ico">◉</span>事件流</button>
+        </div>
+
+        <section class="kpi-grid" id="kpiBar"></section>
+        <section class="toolkit-strip" id="toolkitStrip"></section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Agent 名册</h2>
+              <p>内置成员与动态扩展 Agent 的实时状态、历史成功率与令牌用量。</p>
+            </div>
+            <span class="pill" id="rosterCount">0</span>
+          </div>
+          <div class="roster-grid" id="roster"></div>
+        </section>
+
+        <section class="batch-strip" id="batchStrip"></section>
+
+        <div class="grid-2">
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>最近任务</h2><p>真实回执账本的最近动态。</p></div>
+              <button type="button" class="btn ghost sm" data-goto-view="tasks">打开看板 →</button>
+            </div>
+            <div class="mini-list" id="ovRecentTasks"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>活跃 Worktree</h2><p>并发 Git 分支隔离与测试闸门。</p></div>
+              <button type="button" class="btn ghost sm" data-goto-view="worktrees">全部 →</button>
+            </div>
+            <div class="mini-list" id="ovWorktrees"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-tasks" data-view-panel="tasks" aria-labelledby="viewTitle">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>任务与看板</h2>
+              <p>表格账本与 Kanban 双视图；点击任务打开详情、轮询回执与对账。</p>
+            </div>
+            <div class="panel-tools">
+              <div class="segmented" role="group" aria-label="Task view mode">
+                <button type="button" class="seg active" id="btnViewTable">账本</button>
+                <button type="button" class="seg" id="btnViewKanban">看板</button>
+              </div>
+              <span class="pill" id="taskCount">0 条</span>
+            </div>
+          </div>
+          <div class="batch-strip" id="taskBatchStrip"></div>
+          <div class="filter-bar">
+            <input type="search" id="filterText" placeholder="筛选任务标题 / ID / 内容…" autocomplete="off" />
+            <select id="filterAgent"><option value="">全部 Agent</option></select>
+            <select id="filterState">
+              <option value="">全部状态</option>
+              <option value="running">执行中</option>
+              <option value="stalled">疑似卡住</option>
+              <option value="uncertain">待核验</option>
+              <option value="completed">已完成</option>
+              <option value="failed">失败</option>
+              <option value="rerouted">已重路由</option>
+            </select>
+            <button type="button" class="btn ghost sm" id="btnResetFilters">重置</button>
+          </div>
+          <div class="table-wrap" id="tasksTableWrap">
+            <table>
+              <thead><tr><th>任务 / 角色</th><th>Agent · 通道</th><th>状态</th><th>回执 ID</th><th>摘要 / 更新时间</th></tr></thead>
+              <tbody id="tasksBody"></tbody>
+            </table>
+          </div>
+          <div class="kanban" id="tasksKanbanWrap" hidden></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-dag" data-view-panel="dag" aria-labelledby="viewTitle">
+        <div class="dag-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>可视化 DAG 编排</h2>
+                <p>编辑步骤与依赖，右侧画布实时重绘节点与依赖曲线。</p>
+              </div>
+              <div class="panel-tools">
+                <button type="button" class="btn ghost sm" data-dag-tpl="debate">正反红队</button>
+                <button type="button" class="btn ghost sm" data-dag-tpl="pipeline">调研流水线</button>
+              </div>
+            </div>
+            <div class="field-row">
+              <label class="field"><span>工作流名称</span><input type="text" id="dagName" value="multi-stage-review" /></label>
+              <label class="field grow"><span>项目目录</span><input type="text" id="dagDir" list="wsProjects" placeholder="选择或输入项目目录…" /></label>
+            </div>
+            <div class="dag-steps" id="dagStepsList"></div>
+            <div class="form-actions between">
+              <button type="button" class="btn ghost sm" id="btnAddDagStep">+ 添加步骤</button>
+              <button type="button" class="btn primary" id="btnRunDag">执行 DAG 工作流</button>
+            </div>
+            <div class="form-error" id="dagErr"></div>
+            <pre class="mono-pre" id="dagOut" hidden></pre>
+          </section>
+
+          <section class="panel canvas-panel">
+            <div class="panel-head">
+              <div><h2>Flow Canvas</h2><p>实时依赖图 · 点击节点定位步骤</p></div>
+              <span class="pill" id="dagNodeCount">0 nodes</span>
+            </div>
+            <div class="dag-canvas-scroll">
+              <svg id="dagCanvas" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DAG dependency graph"></svg>
+            </div>
+            <div class="canvas-legend">
+              <span><i class="legend-dot planner"></i>planner</span>
+              <span><i class="legend-dot reviewer"></i>reviewer</span>
+              <span><i class="legend-dot synthesizer"></i>synthesizer</span>
+              <span><i class="legend-line"></i>depends_on</span>
+              <span id="dagCycleHint" class="cycle-hint" hidden>⚠ 检测到循环依赖</span>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div><h2>Playbooks</h2><p>四套实战流水线：一键串联工具链、记忆、并行 Agent 与 Worktree 租约。</p></div>
+          </div>
+          <div class="playbook-grid">
+            <button type="button" class="playbook-card" data-playbook="research-and-pack">
+              <span class="playbook-tag">Research</span>
+              <strong>research-and-pack</strong>
+              <span class="playbook-desc">跨端历史 + 文档转 MD + 仓库打包 → 自动写入共享记忆。</span>
+              <span class="playbook-run">配置并运行 →</span>
+            </button>
+            <button type="button" class="playbook-card" data-playbook="code-review-squad">
+              <span class="playbook-tag">Review</span>
+              <strong>code-review-squad</strong>
+              <span class="playbook-desc">repomix + AST 打包 → 并行多 Agent 独立代码审查。</span>
+              <span class="playbook-run">配置并运行 →</span>
+            </button>
+            <button type="button" class="playbook-card" data-playbook="adversarial-debate">
+              <span class="playbook-tag">Debate</span>
+              <strong>adversarial-debate</strong>
+              <span class="playbook-desc">正方方案 vs 反方红队对抗审查 → 自动仲裁 DAG。</span>
+              <span class="playbook-run">配置并运行 →</span>
+            </button>
+            <button type="button" class="playbook-card" data-playbook="multi-agent-build">
+              <span class="playbook-tag">Build</span>
+              <strong>multi-agent-build</strong>
+              <span class="playbook-desc">自动建隔离 Worktree + 租约 → 派发实现任务。</span>
+              <span class="playbook-run">配置并运行 →</span>
+            </button>
+          </div>
+          <details class="playbook-form" id="playbookForm">
+            <summary>Playbook 运行参数</summary>
+            <div class="field-row">
+              <label class="field grow"><span>Playbook</span>
+                <select id="pbType">
+                  <option value="research-and-pack">research-and-pack</option>
+                  <option value="code-review-squad">code-review-squad</option>
+                  <option value="adversarial-debate">adversarial-debate</option>
+                  <option value="multi-agent-build">multi-agent-build</option>
+                </select>
+              </label>
+              <label class="field grow"><span>项目目录</span><input type="text" id="pbDir" list="wsProjects" placeholder="选择或输入项目目录…" /></label>
+            </div>
+            <div class="field-row">
+              <label class="field grow"><span>目标 / 关注点</span><input type="text" id="pbGoal" placeholder="例如：梳理认证边界条件与并发风险" /></label>
+              <label class="field"><span>过滤 Glob（可选）</span><input type="text" id="pbInclude" placeholder="src/*.mjs" /></label>
+            </div>
+            <div class="field-row">
+              <label class="field grow"><span>指定成员（逗号分隔，留空自动）</span><input type="text" id="pbMembers" placeholder="留空自动挑选在线 Agent" /></label>
+              <label class="field grow"><span>检索词 / AST 模式（可选）</span><input type="text" id="pbExtra" placeholder="CollabHub 或 export function $NAME($$$) { $$$ }" /></label>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn primary" id="btnRunPlaybook">立即执行</button>
+            </div>
+            <div class="form-error" id="pbErr"></div>
+            <pre class="mono-pre" id="pbOut" hidden></pre>
+          </details>
+        </section>
+      </section>
+
+      <section class="view" id="view-worktrees" data-view-panel="worktrees" aria-labelledby="viewTitle">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>并发 Git Worktree 隔离</h2>
+              <p>每个实现任务独占一个分支；测试闸门通过后才能合并或清理。</p>
+            </div>
+            <span class="pill" id="wtCount">0</span>
+          </div>
+          <div class="wt-grid" id="wtList"></div>
+        </section>
+        <div class="grid-3">
+          <section class="panel step-card"><span class="step-no">01</span><h3>Review Diff</h3><p>审查 commit 列表、脏状态与 diff 预览，确认改动范围。</p></section>
+          <section class="panel step-card"><span class="step-no">02</span><h3>Verify Gate</h3><p>在隔离目录内运行允许清单里的测试；失败即阻断合并。</p></section>
+          <section class="panel step-card"><span class="step-no">03</span><h3>Merge / Cleanup</h3><p>确认无误后合入基线分支；放弃时清理租约与分支。</p></section>
+        </div>
+      </section>
+
+      <section class="view" id="view-toolkit" data-view-panel="toolkit" aria-labelledby="viewTitle">
+        <section class="panel">
+          <div class="panel-head">
+            <div><h2>开源工程工具箱</h2><p>ast-grep · repomix · markitdown · beads，全部严格目录沙箱。</p></div>
+            <span class="pill" id="tkInstalledCount">0 / 4</span>
+          </div>
+          <div class="tabs" role="tablist">
+            <button type="button" class="tab-btn active" data-tk-tab="ast">AST 语法树搜索</button>
+            <button type="button" class="tab-btn" data-tk-tab="pack">Repomix 仓库打包</button>
+            <button type="button" class="tab-btn" data-tk-tab="doc">MarkItDown 文档转 MD</button>
+            <button type="button" class="tab-btn" data-tk-tab="beads">Beads 任务依赖图</button>
+          </div>
+
+          <div class="tab-pane active" id="pane-ast">
+            <div class="field-row">
+              <label class="field grow"><span>项目目录</span><input type="text" id="tkAstDir" list="wsProjects" placeholder="项目目录…" /></label>
+              <label class="field grow"><span>AST 匹配模式</span><input type="text" id="tkAstPat" value="export function $NAME($$$) { $$$ }" /></label>
+              <label class="field narrow"><span>语言</span><input type="text" id="tkAstLang" value="js" /></label>
+            </div>
+            <div class="form-actions"><button type="button" class="btn primary sm" id="btnRunAst">执行 AST 搜索</button></div>
+          </div>
+
+          <div class="tab-pane" id="pane-pack">
+            <div class="field-row">
+              <label class="field grow"><span>项目目录</span><input type="text" id="tkPackDir" list="wsProjects" placeholder="项目目录…" /></label>
+              <label class="field grow"><span>Include Glob（可选）</span><input type="text" id="tkPackInc" value="src/config.mjs" /></label>
+            </div>
+            <div class="form-actions"><button type="button" class="btn primary sm" id="btnRunPack">打包上下文 (repomix)</button></div>
+          </div>
+
+          <div class="tab-pane" id="pane-doc">
+            <div class="field-row">
+              <label class="field grow"><span>工作区内文档路径（PDF / DOCX / XLSX / PPTX / HTML / MD）</span><input type="text" id="tkDocPath" placeholder="选择或输入文档绝对路径…" /></label>
+            </div>
+            <div class="form-actions"><button type="button" class="btn primary sm" id="btnRunDoc">转换为 Markdown</button></div>
+          </div>
+
+          <div class="tab-pane" id="pane-beads">
+            <div class="field-row">
+              <label class="field grow"><span>项目目录</span><input type="text" id="tkBdDir" list="wsProjects" placeholder="项目目录…" /></label>
+              <label class="field"><span>操作</span>
+                <select id="tkBdAction">
+                  <option value="list">list（列出任务）</option>
+                  <option value="ready">ready（可执行任务）</option>
+                  <option value="init">init（初始化 beads 仓库）</option>
+                  <option value="create">create（新建任务）</option>
+                </select>
+              </label>
+              <label class="field grow"><span>标题（仅 create 需要）</span><input type="text" id="tkBdTitle" placeholder="新任务标题…" /></label>
+            </div>
+            <div class="form-actions"><button type="button" class="btn primary sm" id="btnRunBeads">执行 Beads</button></div>
+          </div>
+
+          <div class="form-error" id="tkErr"></div>
+          <div class="tk-output-head">
+            <span class="meta" id="tkMeta">选择上方工具执行（严格目录沙箱保护）</span>
+            <button type="button" class="btn ghost sm" id="btnCopyTk" hidden>复制输出</button>
+          </div>
+          <pre class="mono-pre" id="tkOut" hidden></pre>
+        </section>
+
+        <div class="grid-2">
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>跨端历史会话秒搜</h2><p>cass 索引 Codex / Claude / AGY 的历史踩坑。</p></div>
+              <button type="button" class="btn ghost sm" id="btnReindexCass">更新索引</button>
+            </div>
+            <div class="search-row">
+              <input type="search" id="sessQuery" placeholder="搜历史会话关键词…" autocomplete="off" />
+              <button type="button" class="btn" id="btnSessSearch">检索</button>
+            </div>
+            <div class="note-list meta" id="sessList">输入关键词检索本机跨 Agent 历史会话（只读落盘）。</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>跨成员共享项目记忆</h2><p>SQLite FTS5 全文检索 + Markdown 富文本。</p></div>
+              <button type="button" class="btn sm" id="btnOpenMemory">+ 记笔记</button>
+            </div>
+            <div class="search-row">
+              <input type="search" id="memQuery" placeholder="支持中文 / 英文关键词检索…" autocomplete="off" />
+              <button type="button" class="btn" id="btnMemSearch">检索</button>
+            </div>
+            <div class="note-list" id="memList"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-ops" data-view-panel="ops" aria-labelledby="viewTitle">
+        <div class="grid-2">
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>8-Point Doctor</h2><p>运行时、数据库、工具链、目录与安全策略的体检。</p></div>
+              <div class="panel-tools">
+                <button type="button" class="btn ghost sm" id="btnRefreshDoctor">重新体检</button>
+                <button type="button" class="btn primary sm" id="btnHotBackup">热备份 hub.db</button>
+              </div>
+            </div>
+            <div class="backup-msg meta" id="backupMsg"></div>
+            <div class="doctor-grid" id="doctorBox"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head">
+              <div><h2>Live Audit Events</h2><p>SSE 实时审计流；每条事件都可追溯到 task / actor。</p></div>
+              <button type="button" class="btn ghost sm" id="btnRefreshEvents">刷新</button>
+            </div>
+            <div class="event-list" id="eventsList"></div>
+          </section>
+        </div>
+        <section class="panel">
+          <div class="panel-head">
+            <div><h2>运行信息</h2><p>本机仪表盘、版本与工具链状态。</p></div>
+          </div>
+          <div class="health-grid" id="healthBox"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+</div>
+
+<datalist id="wsProjects"></datalist>
+
+<div class="drawer-backdrop" id="drawerBg" aria-hidden="true">
+  <div class="drawer" id="drawerContent" role="dialog" aria-modal="true" aria-label="Detail drawer"></div>
+</div>
+
+<div class="palette-backdrop" id="paletteBg" aria-hidden="true">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-search">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
+      <input type="text" id="paletteInput" placeholder="搜索任务、视图与命令…" autocomplete="off" spellcheck="false" aria-label="Search commands and tasks" />
+      <kbd>Esc</kbd>
+    </div>
+    <div class="palette-list" id="paletteList"></div>
+    <div class="palette-foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> 选择</span>
+      <span><kbd>↵</kbd> 打开</span>
+      <span><kbd>Ctrl</kbd>+<kbd>K</kbd> 关闭</span>
+    </div>
+  </div>
+</div>
+
+<div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="false"></div>
+
+<!-- Agent registration modal -->
+<div class="modal-backdrop" id="modalAgentBg" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Register agent">
+    <div class="modal-head">
+      <div><h2>动态扩展新 Agent</h2><p>自动扫描本机模型 / CLI / Desktop，或使用预设模板。</p></div>
+      <button type="button" class="icon-btn" data-close-modal="modalAgentBg" aria-label="Close">×</button>
+    </div>
+    <div class="preset-row">
+      <button type="button" class="btn primary sm" id="btnDiscoverAgents">扫描本机 Ollama / CLI / 环境变量</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="ollama">Ollama</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="deepseek">DeepSeek</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="lmstudio">LM Studio</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="gemini">Gemini CLI</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="aider">Aider</button>
+      <button type="button" class="btn ghost sm" data-agent-preset="cursor">Cursor</button>
+    </div>
+    <div class="discover-box" id="discoverBox" hidden></div>
+    <label class="field"><span>Agent ID（小写字母 / 数字 / 短横线）</span><input type="text" id="agId" placeholder="ollama-qwen" /></label>
+    <label class="field"><span>展示名称</span><input type="text" id="agName" placeholder="Ollama Qwen2.5 Coder" /></label>
+    <label class="field"><span>驱动类型</span>
+      <select id="agDriver">
+        <option value="openai-http">openai-http（本地 Ollama / LM Studio / vLLM / 任意网关模型）</option>
+        <option value="generic-cli">generic-cli（gemini / aider / opencode / qwen / 本地脚本）</option>
+        <option value="desktop-native">desktop-native（Cursor / Windsurf 等桌面原生会话）</option>
+      </select>
+    </label>
+    <label class="field"><span>支持角色（逗号分隔）</span><input type="text" id="agRoles" value="researcher,reviewer,synthesizer" /></label>
+    <label class="field"><span>驱动配置 JSON（api_key 只填环境变量名，绝不存明文）</span><textarea id="agConfig">{"base_url":"http://127.0.0.1:11434/v1","model":"qwen2.5-coder:14b","api_key_env":""}</textarea></label>
+    <div class="form-error" id="agErr"></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-close-modal="modalAgentBg">取消</button>
+      <button type="button" class="btn primary" id="btnSaveAgent">注册并接入</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dispatch modal -->
+<div class="modal-backdrop" id="modalDispatchBg" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Dispatch task">
+    <div class="modal-head">
+      <div><h2>一键派发后台任务</h2><p>智能路由 + Prompt 配方 + 工作区项目自动补全。</p></div>
+      <button type="button" class="icon-btn" data-close-modal="modalDispatchBg" aria-label="Close">×</button>
+    </div>
+    <label class="field"><span>套用内置 Prompt 配方（可选）</span><select id="dpRecipe"><option value="">-- 手动编写 Prompt --</option></select></label>
+    <label class="field"><span>执行 Agent（auto 结合实时探活与历史成功率自动挑选）</span><select id="dpMember"></select></label>
+    <div class="field-row">
+      <label class="field grow"><span>角色</span>
+        <select id="dpRole">
+          <option value="researcher">researcher（调研）</option>
+          <option value="reviewer">reviewer（审查）</option>
+          <option value="implementer">implementer（实现）</option>
+          <option value="tester">tester（测试）</option>
+          <option value="planner">planner（规划）</option>
+          <option value="synthesizer">synthesizer（汇总）</option>
+        </select>
+      </label>
+      <label class="field grow"><span>项目目录（支持工作区项目补全）</span><input type="text" id="dpDir" list="wsProjects" placeholder="选择或输入项目绝对路径…" /></label>
+    </div>
+    <label class="field"><span>任务标题</span><input type="text" id="dpTitle" placeholder="例如：独立审查认证模块边界条件" /></label>
+    <label class="field"><span>Prompt</span><textarea id="dpPrompt" placeholder="明确目标、范围、产出与验收条件…"></textarea></label>
+    <label class="check-row"><input type="checkbox" id="dpFallback" checked /><span>目标离线或 429 冷却时，派发前自动降级路由至其他在线后台 Agent（绝不重复发已发送任务）</span></label>
+    <div class="form-error" id="dpErr"></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-close-modal="modalDispatchBg">取消</button>
+      <button type="button" class="btn primary" id="btnSubmitDispatch">立即派发</button>
+    </div>
+  </div>
+</div>
+
+<!-- Memory write modal -->
+<div class="modal-backdrop" id="modalMemoryBg" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Write memory note">
+    <div class="modal-head">
+      <div><h2>写入共享项目记忆</h2><p>Markdown + SQLite FTS5，跨 Agent 可检索。</p></div>
+      <button type="button" class="icon-btn" data-close-modal="modalMemoryBg" aria-label="Close">×</button>
+    </div>
+    <div class="field-row">
+      <label class="field"><span>项目标识</span><input type="text" id="mmProject" value="collab-hub" /></label>
+      <label class="field grow"><span>标题</span><input type="text" id="mmTitle" placeholder="例如：部署与排障备忘" /></label>
+    </div>
+    <label class="field"><span>标签（逗号分隔）</span><input type="text" id="mmTags" placeholder="architecture, ops" /></label>
+    <label class="field"><span>内容（支持 Markdown）</span><textarea id="mmContent" placeholder="记录跨 Agent 需要共享的约定、边界、踩坑与决策…"></textarea></label>
+    <div class="form-error" id="mmErr"></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-close-modal="modalMemoryBg">取消</button>
+      <button type="button" class="btn primary" id="btnSaveMemory">保存记忆</button>
+    </div>
+  </div>
+</div>
+
+<noscript><div class="noscript">CollabHub 需要启用 JavaScript 才能渲染工作台。</div></noscript>
+<script src="/assets/app.js" type="module"></script>
+</body>
+</html>
