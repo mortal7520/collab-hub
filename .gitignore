@@ -1,0 +1,10 @@
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env
+.env.*
+.DS_Store
+.collab-hub.local.json
+integrations.json

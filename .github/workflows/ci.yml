@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Run zero-dependency test suite
+        run: node --test test/collab-hub.test.mjs
+      - name: Verify MCP stdio handshake (32 tools)
+        run: |
+          node --input-type=module -e "
+          import { spawn } from 'node:child_process';
+          import readline from 'node:readline';
+          const c = spawn(process.execPath, ['src/mcp-server.mjs'], { stdio: ['pipe', 'pipe', 'pipe'] });
+          const rl = readline.createInterface({ input: c.stdout });
+          const out = [];
+          rl.on('line', (l) => {
+            out.push(JSON.parse(l));
+            if (out.length === 2) {
+              if (out[1].result.tools.length !== 32) process.exit(1);
+              console.log('MCP verified:', out[0].result.serverInfo, out[1].result.tools.length, 'tools');
+              c.kill();
+              process.exit(0);
+            }
+          });
+          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'ci', version: '1' } } }) + '\n');
+          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
+          setTimeout(() => process.exit(1), 8000);
+          "

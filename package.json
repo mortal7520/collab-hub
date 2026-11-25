@@ -1,0 +1,38 @@
+{
+  "name": "collab-hub",
+  "version": "1.0.0",
+  "description": "Zero-dependency, local-first multi-agent orchestration workbench with MCP (32 tools), Kanban + Table UI, visual DAG builder, Git worktree verification gates, FTS5 shared memory, and pluggable CLI/HTTP/Desktop agent drivers.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Mortal",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mortal7520/collab-hub.git"
+  },
+  "keywords": [
+    "ai-agents",
+    "multi-agent",
+    "mcp",
+    "git-worktree",
+    "kanban",
+    "dag-workflow",
+    "claude-code",
+    "codex",
+    "ollama",
+    "local-first"
+  ],
+  "bin": {
+    "collab-hub": "bin/collab-hub.mjs"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node src/dashboard.mjs",
+    "mcp": "node src/mcp-server.mjs",
+    "mail-proxy": "node src/mail-mcp-proxy.mjs",
+    "cli": "node bin/collab-hub.mjs",
+    "doctor": "node bin/collab-hub.mjs doctor",
+    "test": "node --test test/collab-hub.test.mjs"
+  }
+}
