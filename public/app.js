@@ -1697,13 +1697,20 @@ function setLang(next, { announce = false } = {}) {
 
 function refreshDynamicI18n() {
   if (state.static) {
-    state.dagTemplates = loadDagTemplates();
+    state.dagTemplates = [];
     applyDemoFixture(buildDemoFixture());
     renderDagTemplates();
     renderDagBatchSelect();
     renderDagCanvas();
   } else {
+    state.dagTemplates = state.demo ? [] : loadDagTemplates();
     renderAllQuiet();
+  }
+  setView(state.view, { silent: true });
+  markDemoPill();
+  if (state.demo) {
+    const sse = $('#ssePill');
+    if (sse) sse.textContent = state.static ? t('topbar.sseStatic') : t('topbar.sseDemo');
   }
   if (state.flags.eventsLoaded) renderEvents();
   if (state.flags.doctorLoaded) renderDoctor(state.doctor, Boolean(state.demo));
@@ -4840,7 +4847,7 @@ async function boot() {
   await detectMode();
 
   applyStaticI18n();
-  state.dagTemplates = loadDagTemplates();
+  state.dagTemplates = state.demo ? [] : loadDagTemplates();
   state.dagSteps = defaultDagSteps();
   renderDagSteps();
   renderDagTemplates();

@@ -554,9 +554,15 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   let cachedCassAt = 0;
   const sseClients = new Set();
 
+  const MAX_SSE_BACKPRESSURE_BYTES = 512 * 1024;
   const onHubEvent = (evt) => {
     const frame = `data: ${JSON.stringify(evt)}\n\n`;
     for (const res of sseClients) {
+      if (res.destroyed || res.writableEnded || res.writableLength > MAX_SSE_BACKPRESSURE_BYTES) {
+        sseClients.delete(res);
+        try { res.destroy(); } catch {}
+        continue;
+      }
       try { res.write(frame); } catch { sseClients.delete(res); }
     }
   };
@@ -773,7 +779,10 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const parsed = await readBoundedJson(req);
         if (!parsed.task_id) { sendJson(res, 400, { error: 'task_id is required' }); return; }
         try {
-          sendJson(res, 200, await cancelTask(db, parsed.task_id, { reason: parsed.reason || 'Cancelled from workbench' }, dispatchDeps));
+          sendJson(res, 200, await cancelTask(db, parsed.task_id, {
+            reason: parsed.reason || 'Cancelled from workbench',
+            force: Boolean(parsed.force),
+          }, dispatchDeps));
         } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
         return;
       }

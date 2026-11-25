@@ -43,12 +43,19 @@ export async function runDagWorkflow(db, {
     : `wf_${Date.now().toString(36)}_${randomUUID().slice(0, 4)}`;
 
   const seenStepIds = new Set();
+  const seenTaskIds = new Set();
   const normalized = steps.map((s, idx) => {
     const rawId = s.id || `step_${idx + 1}`;
     const safeStepId = assertValidTaskId(rawId, 'step.id');
     if (seenStepIds.has(safeStepId)) throw new Error(`Duplicate step id: ${safeStepId}`);
     seenStepIds.add(safeStepId);
-    const taskId = assertValidTaskId(`${safeBatchId}_${safeStepId}`.slice(0, 60), 'task_id');
+    const fullTaskId = `${safeBatchId}_${safeStepId}`;
+    if (fullTaskId.length > 60) {
+      throw new Error(`Combined batch_id + step.id "${fullTaskId}" exceeds 60-character task_id limit; shorten batch_id or step.id`);
+    }
+    const taskId = assertValidTaskId(fullTaskId, 'task_id');
+    if (seenTaskIds.has(taskId)) throw new Error(`Duplicate generated task_id: ${taskId}`);
+    seenTaskIds.add(taskId);
     return {
       stepId: safeStepId,
       taskId,
@@ -89,28 +96,30 @@ export async function runDagWorkflow(db, {
     throw new Error('Workflow steps contain a dependency cycle');
   }
 
+  const planSteps = normalized.map((s) => ({
+    stepId: s.stepId,
+    taskId: s.taskId,
+    member: s.member,
+    role: s.role,
+    title: s.title,
+    prompt: s.prompt,
+    dependsOnTaskIds: s.dependsOnSteps.map((d) => byStepId.get(d).taskId),
+    autoInjectContext: s.autoInjectContext,
+    reservePaths: s.reservePaths,
+    worktreePath: s.worktreePath,
+    branchName: s.branchName,
+  }));
+
+  db.prepare(`
+    INSERT OR REPLACE INTO workflow_plans (batch_id, name, project_dir, plan_json, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(safeBatchId, name, projectDir, JSON.stringify({ batch_id: safeBatchId, name, project_dir: projectDir, steps: planSteps }), new Date().toISOString());
+
   logEvent(db, {
     taskId: null,
     eventType: 'workflow.plan',
     actor: 'collab-hub',
-    payload: {
-      batch_id: safeBatchId,
-      name,
-      project_dir: projectDir,
-      steps: normalized.map((s) => ({
-        stepId: s.stepId,
-        taskId: s.taskId,
-        member: s.member,
-        role: s.role,
-        title: s.title,
-        prompt: s.prompt,
-        dependsOnTaskIds: s.dependsOnSteps.map((d) => byStepId.get(d).taskId),
-        autoInjectContext: s.autoInjectContext,
-        reservePaths: s.reservePaths,
-        worktreePath: s.worktreePath,
-        branchName: s.branchName,
-      })),
-    },
+    payload: { batch_id: safeBatchId, name, project_dir: projectDir, step_count: planSteps.length },
   });
 
   const dispatchedIds = new Set();
@@ -220,9 +229,9 @@ export async function runDagWorkflow(db, {
 }
 
 /**
- * Resume a partially failed, cancelled, or stalled DAG batch from checkpoint.
- * Keeps already-completed steps intact, creates append-only retry task IDs for failed/cancelled/stalled steps
- * (and their downstream dependents), remaps depends_on cleanly, and dispatches ready waves.
+ * Resume a partially failed, cancelled, or partially dispatched DAG batch from checkpoint.
+ * Persists unique plans in `workflow_plans`, never blindly retries `uncertain` or `stalled` tasks,
+ * restores original prompt / reservePaths / autoInjectContext, and advances undispatched downstream steps.
  */
 export async function resumeDagWorkflow(db, {
   batchId,
@@ -231,8 +240,26 @@ export async function resumeDagWorkflow(db, {
 }, deps = {}) {
   const safeBatch = assertValidTaskId(batchId, 'batch_id');
   const allRows = db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(safeBatch).map(parseTaskRow);
-  if (allRows.length === 0) {
-    throw new Error(`No tasks found for batch_id=${safeBatch}`);
+
+  // Load persisted plan keyed by batch_id (fallback to legacy workflow.plan event if upgraded DB)
+  let savedPlan = null;
+  const planRow = db.prepare('SELECT plan_json FROM workflow_plans WHERE batch_id = ?').get(safeBatch);
+  if (planRow?.plan_json) {
+    try { savedPlan = JSON.parse(planRow.plan_json); } catch {}
+  }
+  if (!savedPlan) {
+    const legacyEvents = db.prepare("SELECT payload_json FROM events WHERE event_type = 'workflow.plan' ORDER BY id DESC LIMIT 40").all();
+    for (const pe of legacyEvents) {
+      try {
+        const p = JSON.parse(pe.payload_json || '{}');
+        if (p?.batch_id === safeBatch && Array.isArray(p.steps)) { savedPlan = p; break; }
+      } catch {}
+    }
+  }
+  const planStepsByTaskId = new Map((savedPlan?.steps || []).map((s) => [s.taskId, s]));
+
+  if (allRows.length === 0 && planStepsByTaskId.size === 0) {
+    throw new Error(`No tasks or workflow plan found for batch_id=${safeBatch}`);
   }
 
   // Group retry chains to find the latest task attempt per logical root task
@@ -256,7 +283,10 @@ export async function resumeDagWorkflow(db, {
   }
 
   const latestTasks = [...latestByRoot.entries()].map(([rootId, row]) => ({ rootId, row }));
-  const resumableStates = new Set(['failed', 'cancelled', 'stalled', 'uncertain']);
+
+  // Strictly retry ONLY confirmed terminal failures/cancellations — NEVER resend uncertain or stalled tasks!
+  const resumableStates = new Set(['failed', 'cancelled']);
+  const blockedUncertain = latestTasks.filter((x) => ['uncertain', 'stalled', 'needs_input'].includes(x.row.state)).map((x) => x.row.task_id);
   const toRetryRoots = new Set(latestTasks.filter((x) => resumableStates.has(x.row.state)).map((x) => x.rootId));
 
   // Propagate retry flag to any downstream non-completed task that depended on a retried root
@@ -265,6 +295,7 @@ export async function resumeDagWorkflow(db, {
     changed = false;
     for (const item of latestTasks) {
       if (toRetryRoots.has(item.rootId) || item.row.state === 'completed') continue;
+      if (['uncertain', 'stalled', 'needs_input'].includes(item.row.state)) continue;
       const depRoots = (item.row.depends_on || []).map((depId) => (byId.has(depId) ? rootOf(byId.get(depId)) : depId));
       if (depRoots.some((dr) => toRetryRoots.has(dr))) {
         toRetryRoots.add(item.rootId);
@@ -273,20 +304,7 @@ export async function resumeDagWorkflow(db, {
     }
   }
 
-  const skippedCompleted = latestTasks.filter((x) => x.row.state === 'completed').map((x) => x.row.task_id);
-  if (toRetryRoots.size === 0) {
-    return {
-      batch_id: safeBatch,
-      resumed: false,
-      message: 'No failed, cancelled, stalled, or uncertain steps to resume',
-      skipped_completed: skippedCompleted,
-      retried_steps: [],
-      all_completed: latestTasks.every((x) => x.row.state === 'completed'),
-      tasks: allRows,
-    };
-  }
-
-  // Assign deterministic append-only retry task_ids for steps being resumed
+  // Assign deterministic append-only retry task_ids for failed/cancelled steps AND pick up undispatched plan steps
   const effectiveTaskIdByRoot = new Map();
   const retryPlan = [];
   for (const item of latestTasks) {
@@ -301,53 +319,69 @@ export async function resumeDagWorkflow(db, {
         candidate = assertValidTaskId(`${item.rootId.slice(0, 52)}_${randomUUID().slice(0, 6)}`, 'task_id');
       }
       effectiveTaskIdByRoot.set(item.rootId, candidate);
-      const depRoots = (item.row.depends_on || []).map((depId) => (byId.has(depId) ? rootOf(byId.get(depId)) : depId));
+      const origStep = planStepsByTaskId.get(item.rootId);
+      const depRoots = origStep
+        ? (origStep.dependsOnTaskIds || [])
+        : (item.row.depends_on || []).map((depId) => (byId.has(depId) ? rootOf(byId.get(depId)) : depId));
       retryPlan.push({
         rootId: item.rootId,
         previousTaskId: item.row.task_id,
         newTaskId: candidate,
-        member: item.row.member,
-        role: item.row.role,
-        projectDir: item.row.project_dir,
-        title: item.row.title,
-        prompt: item.row.prompt,
-        worktreePath: item.row.worktree_path || null,
-        branchName: item.row.branch_name || null,
+        member: origStep?.member || item.row.member,
+        role: origStep?.role || item.row.role,
+        projectDir: savedPlan?.project_dir || item.row.project_dir,
+        title: origStep?.title || item.row.title,
+        prompt: origStep?.prompt ?? item.row.prompt,
+        autoInjectContext: origStep ? origStep.autoInjectContext !== false : depRoots.length > 0,
+        reservePaths: Array.isArray(origStep?.reservePaths) ? origStep.reservePaths : [],
+        worktreePath: origStep?.worktreePath ?? item.row.worktree_path ?? null,
+        branchName: origStep?.branchName ?? item.row.branch_name ?? null,
         depRoots,
       });
     }
   }
 
-  // Also pick up any downstream workflow steps from the original workflow.plan event that were never dispatched yet
-  const planEvents = db.prepare("SELECT payload_json FROM events WHERE event_type = 'workflow.plan' ORDER BY id DESC LIMIT 40").all();
-  for (const pe of planEvents) {
-    let payload = null;
-    try { payload = JSON.parse(pe.payload_json || '{}'); } catch {}
-    if (payload?.batch_id !== safeBatch || !Array.isArray(payload.steps)) continue;
-    for (const s of payload.steps) {
-      if (latestByRoot.has(s.taskId) || db.prepare('SELECT 1 FROM tasks WHERE task_id = ?').get(s.taskId)) continue;
-      effectiveTaskIdByRoot.set(s.taskId, s.taskId);
-      retryPlan.push({
-        rootId: s.taskId,
-        previousTaskId: null,
-        newTaskId: s.taskId,
-        member: s.member,
-        role: s.role || 'researcher',
-        projectDir: payload.project_dir || allRows[0].project_dir,
-        title: s.title || s.stepId,
-        prompt: s.prompt,
-        worktreePath: s.worktreePath || null,
-        branchName: s.branchName || null,
-        depRoots: Array.isArray(s.dependsOnTaskIds) ? s.dependsOnTaskIds : [],
-      });
-    }
-    break;
+  for (const s of (savedPlan?.steps || [])) {
+    if (latestByRoot.has(s.taskId) || db.prepare('SELECT 1 FROM tasks WHERE task_id = ?').get(s.taskId)) continue;
+    effectiveTaskIdByRoot.set(s.taskId, s.taskId);
+    retryPlan.push({
+      rootId: s.taskId,
+      previousTaskId: null,
+      newTaskId: s.taskId,
+      member: s.member,
+      role: s.role || 'researcher',
+      projectDir: savedPlan.project_dir || allRows[0]?.project_dir,
+      title: s.title || s.stepId,
+      prompt: s.prompt,
+      autoInjectContext: s.autoInjectContext !== false,
+      reservePaths: Array.isArray(s.reservePaths) ? s.reservePaths : [],
+      worktreePath: s.worktreePath || null,
+      branchName: s.branchName || null,
+      depRoots: Array.isArray(s.dependsOnTaskIds) ? s.dependsOnTaskIds : [],
+    });
   }
 
   const stateByRoot = new Map(latestTasks.map((x) => [x.rootId, toRetryRoots.has(x.rootId) ? 'pending' : x.row.state]));
   for (const s of retryPlan) {
     if (!stateByRoot.has(s.rootId)) stateByRoot.set(s.rootId, 'pending');
   }
+
+  const skippedCompleted = latestTasks.filter((x) => x.row.state === 'completed').map((x) => x.row.task_id);
+  if (retryPlan.length === 0) {
+    return {
+      batch_id: safeBatch,
+      resumed: false,
+      message: blockedUncertain.length
+        ? `Refusing to retry uncertain/stalled/needs_input tasks (${blockedUncertain.join(', ')}); inspect and reconcile them first.`
+        : 'No failed, cancelled, or pending workflow steps to resume',
+      skipped_completed: skippedCompleted,
+      blocked_uncertain: blockedUncertain,
+      retried_steps: [],
+      all_completed: stateByRoot.size > 0 && [...stateByRoot.values()].every((st) => st === 'completed'),
+      tasks: allRows,
+    };
+  }
+
   const dispatched = new Set();
   const retriedSteps = [];
   const errors = [];
@@ -368,7 +402,8 @@ export async function resumeDagWorkflow(db, {
           batchId: safeBatch,
           parentTaskId: s.previousTaskId,
           dependsOn: mappedDeps,
-          autoInjectContext: mappedDeps.length > 0,
+          autoInjectContext: Boolean(s.autoInjectContext) && mappedDeps.length > 0,
+          reservePaths: s.reservePaths || [],
           member: s.member,
           role: s.role,
           projectDir: s.projectDir,
@@ -406,11 +441,11 @@ export async function resumeDagWorkflow(db, {
   }
 
   const freshTasks = db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(safeBatch).map(parseTaskRow);
-  const allCompleted = [...stateByRoot.values()].every((st) => st === 'completed');
+  const allCompleted = stateByRoot.size > 0 && [...stateByRoot.values()].every((st) => st === 'completed');
   let memoryNote = null;
   if (saveReportToMemory && allCompleted && freshTasks.length > 0) {
     const md = buildBatchMarkdownReport(db, safeBatch).markdown;
-    const projSlug = String(allRows[0].project_dir || 'workspace').split(/[\\/]/).filter(Boolean).pop() || 'workspace';
+    const projSlug = String(savedPlan?.project_dir || allRows[0]?.project_dir || 'workspace').split(/[\\/]/).filter(Boolean).pop() || 'workspace';
     memoryNote = writeMemoryNote(db, {
       project: projSlug,
       slug: `workflow-${safeBatch}`,
@@ -424,8 +459,9 @@ export async function resumeDagWorkflow(db, {
 
   return {
     batch_id: safeBatch,
-    resumed: true,
+    resumed: retriedSteps.length > 0,
     skipped_completed: skippedCompleted,
+    blocked_uncertain: blockedUncertain,
     retried_steps: retriedSteps,
     all_completed: allCompleted,
     errors,

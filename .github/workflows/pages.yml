@@ -38,7 +38,7 @@ jobs:
           html = html
             .replaceAll('href=\"/assets/styles.css\"', 'href=\"./styles.css\"')
             .replaceAll('src=\"/assets/app.js\"', 'src=\"./app.js\"')
-            .replace('</head>', '<meta name=\"collabhub-static-demo\" content=\"1\" />\n</head>');
+            .replace('</head>', '<meta http-equiv=\"Content-Security-Policy\" content=\"default-src \x27self\x27; script-src \x27self\x27; style-src \x27self\x27 \x27unsafe-inline\x27; connect-src \x27self\x27; img-src \x27self\x27 data:; object-src \x27none\x27; base-uri \x27none\x27\" />\n<meta name=\"collabhub-static-demo\" content=\"1\" />\n</head>');
           fs.writeFileSync(path.join('_site', 'index.html'), html, 'utf8');
           fs.writeFileSync(path.join('_site', '.nojekyll'), '', 'utf8');
           console.log('Built _site interactive demo:', fs.readdirSync('_site'));

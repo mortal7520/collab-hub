@@ -143,7 +143,10 @@ if (cmd === 'mcp') {
     } else if (cmd === 'poll-batch') {
       console.log(JSON.stringify(await pollBatchTasks(db, { batchId: positionals[0] || flag('batch'), waitSec: Number(flag('wait', '10')) }), null, 2));
     } else if (cmd === 'cancel') {
-      console.log(JSON.stringify(await cancelTask(db, positionals[0] || flag('id'), { reason: flag('reason', 'Cancelled via CLI') }), null, 2));
+      console.log(JSON.stringify(await cancelTask(db, positionals[0] || flag('id'), {
+        reason: flag('reason', 'Cancelled via CLI'),
+        force: Boolean(flags.force),
+      }), null, 2));
     } else if (cmd === 'logs') {
       console.log(JSON.stringify(getTaskLogs(positionals[0] || flag('id')), null, 2));
     } else if (cmd === 'resume') {

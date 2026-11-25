@@ -108,6 +108,14 @@ function initSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+
+    CREATE TABLE IF NOT EXISTS workflow_plans (
+      batch_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      project_dir TEXT NOT NULL,
+      plan_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Safe forward-compatible migrations for existing hub.db

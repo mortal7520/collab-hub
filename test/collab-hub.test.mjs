@@ -1450,20 +1450,67 @@ test('v1.2: Dashboard /api/tasks/logs, /api/tasks/cancel, /api/workflows/resume 
     });
     assert.equal(noCsrf.status, 403);
 
-    // 3. POST /api/tasks/cancel with CSRF cancels cleanly
-    const cancelRes = await rawHttpRequest({
+    // 3. POST /api/tasks/cancel refuses unconfirmed out-of-process cancel without force=true (Codex P1 #1)
+    const cancelRefused = await rawHttpRequest({
       port, method: 'POST', pathName: '/api/tasks/cancel', headers: hdrs,
       body: JSON.stringify({ task_id: 'api-cancel-1', reason: 'Dashboard stop' }),
+    });
+    assert.equal(cancelRefused.status, 400);
+
+    // 4. POST /api/tasks/cancel with force=true cancels cleanly
+    const cancelRes = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/cancel', headers: hdrs,
+      body: JSON.stringify({ task_id: 'api-cancel-1', reason: 'Dashboard stop', force: true }),
     });
     assert.equal(cancelRes.status, 200);
     assert.equal(JSON.parse(cancelRes.body).task.state, 'cancelled');
 
-    // 4. POST /api/workflows/resume requires batch_id and handles clean no-op
+    // 5. POST /api/workflows/resume requires batch_id and refuses to retry uncertain tasks (Codex P1 #2)
     const resumeBad = await rawHttpRequest({
       port, method: 'POST', pathName: '/api/workflows/resume', headers: hdrs,
       body: JSON.stringify({}),
     });
     assert.equal(resumeBad.status, 400);
+
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, batch_id, project_dir, member, role, channel, title, prompt, state, created_at, updated_at)
+      VALUES ('uncertain-1', 'b-uncertain', ?, 'dsh', 'implementer', 'dsh-baton', 'Uncertain task', 'work', 'uncertain', ?, ?)
+    `).run(env.proj, now, now);
+    const resumeUncertain = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/workflows/resume', headers: hdrs,
+      body: JSON.stringify({ batch_id: 'b-uncertain' }),
+    });
+    assert.equal(resumeUncertain.status, 200);
+    const uBody = JSON.parse(resumeUncertain.body);
+    assert.equal(uBody.resumed, false);
+    assert.deepEqual(uBody.blocked_uncertain, ['uncertain-1']);
+
+    // 6. Three-step workflow_plans persistence: step 1 completed, steps 2-3 undispatched -> resume advances them instead of false all_completed (Codex P1 #3 & #4)
+    registerAgent(env.db, {
+      agentId: 'step-cli', name: 'Step CLI', driver: 'generic-cli', roles: ['planner', 'implementer', 'synthesizer'],
+      config: { command: process.execPath, args: ['-e', 'process.stdout.write("DONE:" + process.argv[1])', '{{prompt}}'], timeout_s: 20 },
+    });
+    env.db.prepare(`
+      INSERT INTO workflow_plans (batch_id, name, project_dir, plan_json, created_at)
+      VALUES ('b-partial', 'three-step', ?, ?, ?)
+    `).run(env.proj, JSON.stringify({
+      batch_id: 'b-partial',
+      name: 'three-step',
+      project_dir: env.proj,
+      steps: [
+        { stepId: 's1', taskId: 'b-partial_s1', member: 'step-cli', role: 'planner', title: 'S1', prompt: 'RAW-S1', dependsOnTaskIds: [], autoInjectContext: true, reservePaths: [] },
+        { stepId: 's2', taskId: 'b-partial_s2', member: 'step-cli', role: 'implementer', title: 'S2', prompt: 'RAW-S2', dependsOnTaskIds: ['b-partial_s1'], autoInjectContext: false, reservePaths: [] },
+      ],
+    }), now);
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, batch_id, project_dir, member, role, channel, title, prompt, state, result_text, created_at, updated_at, completed_at)
+      VALUES ('b-partial_s1', 'b-partial', ?, 'step-cli', 'planner', 'generic-cli', 'S1', 'RAW-S1', 'completed', 'OUT-S1', ?, ?, ?)
+    `).run(env.proj, now, now, now);
+    const partialResumed = await resumeDagWorkflow(env.db, { batchId: 'b-partial', waitSec: 10 }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+    assert.equal(partialResumed.resumed, true);
+    assert.equal(partialResumed.all_completed, true);
+    const s2Row = env.db.prepare('SELECT prompt FROM tasks WHERE task_id = ?').get('b-partial_s2');
+    assert.equal(s2Row.prompt, 'RAW-S2', 'autoInjectContext=false must be preserved on resume');
   } finally {
     server.close();
     env.cleanup();

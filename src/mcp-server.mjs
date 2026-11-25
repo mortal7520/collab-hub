@@ -495,13 +495,14 @@ export const TOOLS = Object.freeze([
   },
   {
     name: 'collab_cancel',
-    description: 'Cancel an active background task: terminates running local CLI process trees, aborts in-flight HTTP requests, sends best-effort DSH cancel, and records cancelled state + audit log.',
+    description: 'Cancel an active background task: terminates running local CLI process trees, aborts in-flight HTTP requests, sends upstream DSH cancel, and records cancelled state + audit log.',
     inputSchema: {
       type: 'object',
       required: ['task_id'],
       properties: {
         task_id: { type: 'string' },
         reason: { type: 'string', description: 'Optional cancellation reason recorded in the receipt ledger.' },
+        force: { type: 'boolean', description: 'Only set true after verifying an out-of-process/remote task has already stopped.' },
       },
     },
   },
@@ -721,7 +722,7 @@ export async function handleToolCall(db, name, args = {}) {
       return report;
     }
     case 'collab_cancel':
-      return cancelTask(db, args.task_id, { reason: args.reason || 'Cancelled via MCP' });
+      return cancelTask(db, args.task_id, { reason: args.reason || 'Cancelled via MCP', force: Boolean(args.force) });
     case 'collab_workflow_resume':
       return resumeDagWorkflow(db, {
         batchId: args.batch_id,

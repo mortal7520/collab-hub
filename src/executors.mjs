@@ -471,7 +471,29 @@ async function runOpenAiHttpDriver(agent, { prompt, taskId = null }) {
       }),
       signal,
     });
-    const text = await res.text();
+    const MAX_HTTP_RESPONSE_BYTES = 2 * 1024 * 1024;
+    let text = '';
+    if (res.body && typeof res.body.getReader === 'function') {
+      const reader = res.body.getReader();
+      const dec = new TextDecoder('utf-8');
+      let totalBytes = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_HTTP_RESPONSE_BYTES) {
+          try { await reader.cancel(); } catch {}
+          throw Object.assign(new Error(`HTTP response from ${agent.id} exceeded ${MAX_HTTP_RESPONSE_BYTES} byte cap`), { code: 'HTTP_AGENT_RESPONSE_TOO_LARGE' });
+        }
+        text += dec.decode(value, { stream: true });
+      }
+      text += dec.decode();
+    } else {
+      text = await res.text();
+      if (Buffer.byteLength(text, 'utf8') > MAX_HTTP_RESPONSE_BYTES) {
+        throw Object.assign(new Error(`HTTP response from ${agent.id} exceeded ${MAX_HTTP_RESPONSE_BYTES} byte cap`), { code: 'HTTP_AGENT_RESPONSE_TOO_LARGE' });
+      }
+    }
     if (res.status === 429) {
       throw Object.assign(new Error(`HTTP 429 rate limit on ${agent.id}: ${text.slice(0, 240)}`), { code: 'HTTP_AGENT_429' });
     }
@@ -867,9 +889,10 @@ export async function dispatchBackgroundTask(db, {
 
 /**
  * Cancel an active background task: aborts any in-flight CLI process tree or HTTP request,
- * sends best-effort DSH cancel if applicable, and persists terminal cancelled state.
+ * sends upstream DSH cancel if applicable, and persists terminal cancelled state only after
+ * stopping the run (or when `force: true` is explicitly passed after operator verification).
  */
-export async function cancelTask(db, taskId, { reason = 'Cancelled by operator' } = {}, deps = {}) {
+export async function cancelTask(db, taskId, { reason = 'Cancelled by operator', force = false } = {}, deps = {}) {
   const safeTaskId = assertValidTaskId(taskId, 'task_id');
   const existing = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
   if (!existing) throw new Error(`Task not found: ${safeTaskId}`);
@@ -878,17 +901,31 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator' 
   }
 
   let abortedLiveProcess = false;
+  let upstreamCancel = null;
+  let stopConfirmed = false;
+
   const active = ACTIVE_RUNS.get(safeTaskId);
   if (active && typeof active.cancel === 'function') {
     abortedLiveProcess = true;
+    stopConfirmed = true;
     try { active.cancel(reason); } catch {}
     ACTIVE_RUNS.delete(safeTaskId);
+  } else if (existing.member === 'dsh' && existing.external_id) {
+    const baton = deps.callBaton || callBatonTool;
+    try {
+      upstreamCancel = await baton('dsh_cancel', { run_id: existing.external_id }, { timeoutMs: 10000 });
+      stopConfirmed = Boolean(upstreamCancel && !upstreamCancel.error);
+    } catch (e) {
+      upstreamCancel = { error: String(e?.message || e) };
+      stopConfirmed = false;
+    }
   }
 
-  let upstreamCancel = null;
-  if (existing.member === 'dsh' && existing.external_id) {
-    const baton = deps.callBaton || callBatonTool;
-    upstreamCancel = await baton('dsh_cancel', { run_id: existing.external_id }, { timeoutMs: 10000 }).catch((e) => ({ error: String(e?.message || e) }));
+  if (!stopConfirmed && !force) {
+    const why = upstreamCancel?.error
+      ? `upstream cancel failed (${upstreamCancel.error})`
+      : `no live abort handle in this process for channel=${existing.channel}`;
+    throw new Error(`Cannot confirm cancellation of ${safeTaskId}: ${why}. Cancel from the owning process or pass force=true after verifying the run stopped.`);
   }
 
   const updated = updateTask(db, safeTaskId, {
@@ -897,17 +934,28 @@ export async function cancelTask(db, taskId, { reason = 'Cancelled by operator' 
     error_message: String(reason || 'Cancelled by operator').slice(0, 500),
     completed_at: new Date().toISOString(),
   });
+  if (updated?.state !== 'cancelled') {
+    return {
+      task: updated,
+      cancelled: false,
+      already_terminal: true,
+      aborted_live_process: abortedLiveProcess,
+      upstream_cancel: upstreamCancel,
+    };
+  }
+
   appendTaskLog(safeTaskId, 'system', `[cancelled] ${reason}`);
   logEvent(db, {
     taskId: safeTaskId,
     eventType: 'task.cancelled',
     actor: 'coordinator',
-    payload: { member: existing.member, reason, aborted_live_process: abortedLiveProcess },
+    payload: { member: existing.member, reason, aborted_live_process: abortedLiveProcess, forced: Boolean(force && !stopConfirmed) },
   });
   return {
     task: updated,
     cancelled: true,
     aborted_live_process: abortedLiveProcess,
+    forced: Boolean(force && !stopConfirmed),
     upstream_cancel: upstreamCancel,
   };
 }

@@ -2,7 +2,11 @@
 
 <img src="docs/assets/banner.svg" alt="CollabHub — Local-First Multi-Agent Engineering Workbench" width="100%" />
 
-<h3>Coordinate every AI coding agent you already use — in one local-first MCP hub with real receipt ledgers, Git worktree verification gates, and visual DAGs.</h3>
+<h3>Coordinate every AI coding agent you already use — in one local-first MCP hub with live streaming logs, live SVG DAGs, checkpoint resume, Git worktree gates, and zero npm dependencies.</h3>
+
+<p>
+  <a href="https://mortal7520.github.io/collab-hub/"><img src="https://img.shields.io/badge/Live%20Demo-Try%20in%20Browser-5e6ad2?style=for-the-badge" alt="Live Interactive Demo" /></a>
+</p>
 
 <p>
   <a href="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml"><img src="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
@@ -10,31 +14,61 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-32%20Tools-8b5cf6" alt="MCP 32 Tools" />
+  <img src="https://img.shields.io/badge/MCP-34%20Tools-8b5cf6" alt="MCP 34 Tools" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="Zero npm runtime deps" />
 </p>
 
 <p>
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="CONTRIBUTING.md">Contributing</a>
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://mortal7520.github.io/collab-hub/">Live Demo</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 </div>
 
 ---
 
-- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **32 unified MCP tools** and one local web workbench.
-- **No blind merges, no lost runs** — Every dispatch writes a SQLite receipt ledger with token/latency telemetry, stall detection, per-channel 429 cooldowns, and isolated Git worktrees gated by allowlisted test verification before merge.
+> **Try it live — zero install:** [**Open the Interactive Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
+> Flip **EN / 中文**, switch **Obsidian Dark / Alabaster Light**, inspect the **4-column Kanban**, hit `Ctrl+K`, and click **Simulate Live DAG** to watch nodes light up and streaming logs roll in — 100% in your browser, zero install, zero signup.
+
+- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **34 unified MCP tools** and one local web workbench.
+- **Watch it run, stop or resume cleanly** — Real-time CLI/HTTP streaming logs over SSE, live process **Cancel/Abort** (`collab_cancel`), live SVG DAG overlays, **Checkpoint Resume** (`collab_workflow_resume`), and SHA-pinned Git worktree verification gates before merge.
 - **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux.
 
 <p align="center">
-  <img src="docs/assets/workbench-overview.png" alt="CollabHub v1.1 Workbench Overview — Live Fleet Telemetry, KPI Strip & Agent Roster" width="100%" />
+  <a href="https://mortal7520.github.io/collab-hub/">
+    <img src="docs/assets/workbench-overview-en.png" alt="CollabHub v1.2 Workbench Overview — Bilingual EN/ZH, Live Telemetry, KPI Strip & Agent Roster" width="100%" />
+  </a>
+</p>
+
+---
+
+## What You'll See in the Demo
+
+### Live SVG DAG Execution Overlay & Checkpoint Resume
+Watch multi-stage workflows light up on the interactive `Flow Canvas` (`Completed · 2.2s ✓`, pulsing `Running` ring, dashed dependency curves), save your own reusable DAG templates, or resume failed runs from their last checkpoint without re-running completed upstream stages.
+
+<p align="center">
+  <img src="docs/assets/workbench-dag-live.png" alt="CollabHub v1.2 — Live SVG DAG Execution Overlay and Custom Templates" width="100%" />
+</p>
+
+### Live Streaming Output & Process Cancel/Abort
+Click any running task in the Kanban board or DAG canvas to watch stdout/stderr chunks stream in real time over SSE, copy output in one click, or terminate a runaway CLI/HTTP process cleanly via **Cancel** (`collab_cancel`).
+
+<p align="center">
+  <img src="docs/assets/workbench-live-logs.png" alt="CollabHub v1.2 — Task Detail Drawer with Real-Time Streaming Logs and Cancel Action" width="100%" />
+</p>
+
+### Dual Table + 4-Column Kanban & Batch Receipts
+Track every delegated task across `Queued`, `Running`, `Needs Attention / Stalled`, and `Done` lanes with instant filtering, colorized Worktree unified diffs, and one-click Markdown batch reports.
+
+<p align="center">
+  <img src="docs/assets/workbench-kanban.png" alt="CollabHub v1.2 — 4-Column Kanban Board and Batch Ledger" width="100%" />
 </p>
 
 ---
 
 ## Quick Start
 
-### 1. Launch the Workbench in 10 Seconds (Zero `npm install`)
+### 1. Launch Locally in 10 Seconds (Zero `npm install`)
 
 Requires **Node.js `>=22.13.0`** (uses built-in `node:sqlite`) and `git`.
 
@@ -44,9 +78,9 @@ cd collab-hub
 npm start
 ```
 
-- **Instant safe preview (zero personal data, in-memory fixture)**: open `http://127.0.0.1:5290/?demo=1`
-- **Your live local workbench**: open `http://127.0.0.1:5290`
-- Press `Ctrl+K` / `Cmd+K` anywhere in the UI for the Command Palette, or click the theme icon to toggle **Obsidian Dark** / **Alabaster Light**.
+- **Local safe demo preview (zero personal data, in-memory fixture)**: `http://127.0.0.1:5290/?demo=1`
+- **Your live local workbench**: `http://127.0.0.1:5290`
+- Press `Ctrl+K` / `Cmd+K` for the Command Palette, click `EN / 中` to switch languages, or toggle **Obsidian Dark** / **Alabaster Light**.
 
 ### 2. Connect Your MCP Client
 
@@ -69,27 +103,9 @@ Add CollabHub to Claude Code, Codex, Antigravity, Cursor, or any MCP-compatible 
 # Auto-detect installed local coding CLIs & OpenAI-compatible endpoints (Ollama, LM Studio, etc.)
 node bin/collab-hub.mjs discover
 
-# Run the full automated test suite (26 tests, zero external deps)
+# Run the full automated test suite (29 tests, zero external deps)
 npm test
 ```
-
----
-
-## Visual Walkthrough
-
-### Dual Table + 4-Column Kanban & Batch Receipts
-Track every delegated task across `Queued`, `Running`, `Needs Attention / Stalled`, and `Done` lanes. Filter by agent, status, or batch, inspect full delivery receipts, and export formatted Markdown batch reports in one click.
-
-<p align="center">
-  <img src="docs/assets/workbench-kanban.png" alt="CollabHub v1.1 — 4-Column Kanban Board and Batch Ledger" width="100%" />
-</p>
-
-### Interactive SVG DAG Builder & One-Click Playbooks
-Compose multi-stage workflows where downstream stages automatically inherit upstream outputs, detect cycles visually on the interactive SVG `Flow Canvas`, or launch 4 battle-tested Playbooks (`code-review-squad`, `research-and-pack`, `adversarial-debate`, `multi-agent-build`).
-
-<p align="center">
-  <img src="docs/assets/workbench-dag.png" alt="CollabHub v1.1 — Interactive Visual SVG DAG Flow Canvas" width="100%" />
-</p>
 
 ---
 
@@ -97,14 +113,14 @@ Compose multi-stage workflows where downstream stages automatically inherit upst
 
 ```mermaid
 flowchart LR
-  Host["Active Coordinator\n(Claude / Codex / AGY / Cursor)"] -->|MCP stdio · 32 tools| MCP["CollabHub MCP Server"]
-  User["Engineer"] -->|HTTP + SSE · :5290| UI["Modular Web Workbench\n(Dark/Light · Kanban · SVG DAG)"]
+  Host["Active Coordinator\n(Claude / Codex / AGY / Cursor)"] -->|MCP stdio · 34 tools| MCP["CollabHub MCP Server"]
+  User["Engineer"] -->|HTTP + SSE · :5290| UI["Bilingual Web Workbench\n(EN/ZH · Dark/Light · Kanban · Live SVG DAG)"]
 
-  MCP --> Core["CollabHub Core\n(Router · DAG · Playbooks · Doctor)"]
+  MCP --> Core["CollabHub Core\n(Router · DAG & Resume · Cancel · Logs · Doctor)"]
   UI --> Core
 
-  Core --> DB[("SQLite + FTS5\nReceipts · Memory · Telemetry")]
-  Core --> WT["Git Worktree Manager\n(.worktreeinclude · Test Gate · Merge)"]
+  Core --> DB[("SQLite + FTS5\nReceipts · Workflow Plans · Memory · Telemetry")]
+  Core --> WT["Git Worktree Manager\n(.worktreeinclude · Test Gate · Colorized Diff · Merge)"]
   Core --> TK["Optional CLI Toolkit\n(cass · ast-grep · repomix · beads · markitdown)"]
 
   Core -->|generic-cli| CLI["Gemini CLI / Aider / OpenCode / Scripts"]
@@ -122,8 +138,9 @@ How CollabHub compares with popular open-source coding-agent orchestrators:
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Primary form factor** | Local MCP hub + Web Workbench | Kanban web app | IDE extension | CLI orchestrator + `ov serve` UI | Full autonomous cloud/Docker platform |
 | **Multi-agent heterogeneous routing** | Built-in (`auto` + fallback + 429 cooldown) | Multiple agents per card | Single IDE loop | Multi-agent CLI swarm | Multi-agent SDK / runtime |
-| **Visual SVG DAG + Playbooks** | Built-in | Kanban cards | Workflows / hooks | Sling / mail waves | SDK pipelines |
-| **Git worktree + test-gated merge** | Built-in (`verify` SHA gate + `.worktreeinclude`) | Built-in worktrees | Workspace edits | Built-in worktrees | Containerized sandboxes |
+| **Live SVG DAG + Checkpoint Resume** | **Built-in** (live overlay + `workflow_plans`) | Kanban cards | Workflows / hooks | Sling / mail waves | SDK pipelines |
+| **Live streaming logs + Cancel** | **Built-in** (SSE tail + process abort) | Built-in logs | IDE panel | CLI logs | Container logs |
+| **Git worktree + test-gated merge** | Built-in (`verify` SHA gate + colorized diff) | Built-in worktrees | Workspace edits | Built-in worktrees | Containerized sandboxes |
 | **Zero npm runtime dependencies** | **Yes** (`node:sqlite` + built-ins) | No (Rust/Node stack) | No (VS Code ext) | No (Bun/TS stack) | No (Python + Docker) |
 | **Hosted SaaS / Cloud sandboxes** | **No** (strictly local-first) | Optional | BYO API / cloud | No | **Yes** |
 
@@ -133,29 +150,29 @@ How CollabHub compares with popular open-source coding-agent orchestrators:
 
 ## Pluggable Agent Adapters
 
-Register any additional agent dynamically via the UI (`+ Expand Agent`) or `collab_agent_register` — persisted in `<dataDir>/agents.json`:
+Register any additional agent dynamically via the UI (`+ Add agent`) or `collab_agent_register` — persisted in `<dataDir>/agents.json`:
 
 | Adapter Type | Examples | Security Model |
 | :--- | :--- | :--- |
-| `generic-cli` | Gemini CLI, Aider, OpenCode, Qwen Code, custom shell/Python scripts | Executed via argv array (`shell: false`), strict timeout, output captured to receipt ledger |
-| `openai-http` | Ollama (`localhost:11434/v1`), LM Studio, vLLM, DeepSeek, OpenRouter | **`api_key_env` only** — CollabHub never stores or logs plaintext API keys |
+| `generic-cli` | Gemini CLI, Aider, OpenCode, Qwen Code, custom shell/Python scripts | Executed via argv array (`shell: false`), strict timeout, live log ring buffer & process-tree abort |
+| `openai-http` | Ollama (`localhost:11434/v1`), LM Studio, vLLM, DeepSeek, OpenRouter | **`api_key_env` only** — never stores plaintext keys; 2 MiB response cap & `AbortController` cancel |
 | `desktop-native` | Active IDE / Desktop agent conversations | Coordinator-attested handoff ledger; never silently spoofs or replaces a Desktop session with CLI |
 
 Optional local integrations (such as custom bridges or [mcp_agent_mail_rust](https://github.com/Dicklesworthstone/mcp_agent_mail_rust) for advisory file leases) can be configured outside Git via `<dataDir>/integrations.json` or environment variables.
 
 ---
 
-## MCP Tool Reference (32 Tools)
+## MCP Tool Reference (34 Tools)
 
 <details>
-<summary><strong>Click to expand all 32 unified MCP tools</strong></summary>
+<summary><strong>Click to expand all 34 unified MCP tools</strong></summary>
 
 | Category | Tools |
 | :--- | :--- |
 | **Fleet & Routing** | `collab_roster`, `collab_plan`, `collab_metrics`, `collab_cooldown` |
 | **Dynamic Agent Registry** | `collab_agent_discover`, `collab_agent_register`, `collab_agent_list`, `collab_agent_remove` |
-| **Dispatch & Receipt Ledger** | `collab_dispatch`, `collab_poll`, `collab_poll_batch`, `collab_task_reconcile`, `collab_record_handoff`, `collab_tasks`, `collab_batch_report` |
-| **DAGs, Playbooks & Recipes** | `collab_workflow_run`, `collab_playbook_run`, `collab_recipes` |
+| **Dispatch, Cancel & Receipt Ledger** | `collab_dispatch`, `collab_poll`, `collab_poll_batch`, `collab_cancel`, `collab_task_reconcile`, `collab_record_handoff`, `collab_tasks`, `collab_batch_report` |
+| **DAGs, Resume, Playbooks & Recipes** | `collab_workflow_run`, `collab_workflow_resume`, `collab_playbook_run`, `collab_recipes` |
 | **Git Worktree Isolation & Gates** | `collab_worktree_create`, `collab_worktree_review`, `collab_worktree_verify`, `collab_worktree_merge`, `collab_worktree_cleanup` |
 | **Shared FTS5 Memory** | `collab_memory_write`, `collab_memory_search`, `collab_memory_list` |
 | **Optional Open-Source Toolkit** | `collab_session_search` (`cass`), `collab_ast_search` (`ast-grep`), `collab_repo_pack` (`repomix`), `collab_beads` (`bd`), `collab_doc_to_md` (`markitdown`) |
@@ -182,19 +199,19 @@ You may also place a gitignored `.collab-hub.local.json` file in the repository 
 
 ## Security & Hardening
 
-- **Loopback-only binding**: HTTP/SSE server binds strictly to `127.0.0.1`.
-- **Hardened static serving & CSP**: `public/` assets are served through a flat exact-filename allowlist with strict `Content-Security-Policy` (`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'`).
-- **SHA-pinned worktree verification gate**: `collab_worktree_verify` executes allowlisted test commands and records the tested commit SHA; `collab_worktree_merge` blocks merges if verification failed or if new unverified commits landed since verification.
-- **Zero plaintext secrets**: `openai-http` agents accept environment variable names (`api_key_env`) only; `?demo=1` preview reads zero database/disk state (verified by automated canary isolation tests).
+- **Loopback-only binding & SSE backpressure guard**: HTTP/SSE server binds strictly to `127.0.0.1` with a 512 KiB per-client SSE backpressure cutoff and 2 MiB HTTP agent response cap.
+- **Hardened static serving & CSP**: `public/` assets are served through a flat exact-filename allowlist with strict `Content-Security-Policy`; GitHub Pages builds also inject `<meta http-equiv="Content-Security-Policy">` and skip same-origin `localStorage` templates in demo mode.
+- **Confirmed cancellation & safe checkpoint resume**: `collab_cancel` refuses unconfirmed out-of-process cancellations unless `force: true` is explicitly set; `collab_workflow_resume` preserves original `workflow_plans` parameters and never blindly retries `uncertain` or `stalled` tasks.
+- **SHA-pinned worktree verification gate**: `collab_worktree_verify` records the tested commit SHA; `collab_worktree_merge` blocks merges if verification failed or new unverified commits landed.
 
 ---
 
 ## Dogfooding: Built with CollabHub
 
-`v1.1.0` was orchestrated using CollabHub itself (`batch_id: v11_release_team`):
-1. **Frontend Redesign** — Delegated to an autonomous coding worker inside an isolated Git worktree (`wt_v11_ui`), automatically reviewed with `collab_worktree_review`, gated with `collab_worktree_verify`, and merged via `collab_worktree_merge`.
-2. **Adversarial Security & Release Audit** — Cross-checked in parallel by an independent reviewer agent, surfacing CSP hardening, `HEAD` body handling, `?demo=1` DB canary isolation, and worktree verification-gate guards.
-3. **Open-Source Positioning Review** — Reviewed by a research agent to streamline Quick Start, tighten benchmark honesty, and craft the 3-frame visual showcase.
+`v1.2.0` was built and audited concurrently using CollabHub's own 4-agent team (`batch_id: v12_combo_team`):
+1. **Frontend Combo (`wt_v12_ui`)** — Built inside an isolated Git worktree, gated by `collab_worktree_verify`, and merged with zero conflicts via `collab_worktree_merge`.
+2. **Adversarial P0/P1 Audit** — Independently audited in parallel with live in-memory reproduction, surfacing and fixing 6 edge cases across cross-process cancellation, `workflow_plans` persistence, SSE backpressure, and Pages CSP before tagging.
+3. **Launch Positioning & Copy** — Reviewed concurrently to elevate the interactive browser demo above the fold and tighten release notes.
 
 ---
 
