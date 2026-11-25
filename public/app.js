@@ -960,21 +960,22 @@ function renderDagCanvas() {
   }
 
   const graph = computeDagGraph(steps);
-  const NODE_W = 176;
-  const NODE_H = 62;
-  const COL_GAP = 232;
+  const NODE_W = 166;
+  const NODE_H = 64;
+  const COL_GAP = 214;
   const ROW_GAP = 96;
-  const PAD_X = 30;
-  const PAD_Y = 30;
+  const PAD_X = 22;
+  const PAD_Y = 26;
   const maxDepth = Math.max(0, ...graph.nodes.map((n) => graph.depthMap.get(n.id) || 0));
   const maxRows = Math.max(1, ...graph.columns.map((c) => (c ? c.length : 0)));
-  const width = Math.max(420, PAD_X * 2 + maxDepth * COL_GAP + NODE_W);
+  const width = Math.max(412, PAD_X * 2 + maxDepth * COL_GAP + NODE_W);
   const contentHeight = PAD_Y * 2 + (maxRows - 1) * ROW_GAP + NODE_H;
   const height = Math.max(300, contentHeight + 20);
   const offsetY = Math.max(0, (height - contentHeight) / 2);
-  svg.setAttribute('width', String(width));
-  svg.setAttribute('height', String(height));
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.style.minWidth = maxDepth > 2 ? `${width}px` : '100%';
 
   const defs = svgEl('defs');
   const marker = svgEl('marker', { id: 'dagArrow', viewBox: '0 0 8 8', refX: '7', refY: '4', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });

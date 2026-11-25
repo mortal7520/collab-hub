@@ -1225,8 +1225,13 @@ test('v1.1: static assets served from jailed public allowlist with strict CSP', 
       assert.match(String(res.headers['content-type']), new RegExp(expectedType));
       const csp = String(res.headers['content-security-policy']);
       assert.ok(csp.includes("script-src 'self'"), `${pathName} CSP must lock script-src to 'self'`);
+      assert.ok(csp.includes("base-uri 'none'") && csp.includes("frame-ancestors 'none'"));
       assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/);
       assert.ok(res.body.length > 0);
+
+      const headRes = await rawHttpRequest({ port, method: 'HEAD', pathName, headers: { Host: host } });
+      assert.equal(headRes.status, 200);
+      assert.equal(headRes.body, '');
     }
 
     // Jail: traversal (plain + encoded), null byte, and non-allowlisted names all 404.
@@ -1256,9 +1261,19 @@ test('v1.1: read-only demo overview is anonymized with zero personal paths', asy
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address();
   try {
+    // Seed a real DB canary note to prove ?demo=1 NEVER reads or leaks real DB data (Codex P0 audit)
+    writeMemoryNote(env.db, {
+      project: 'canary-private',
+      title: 'CANARY-REAL-DB-SECRET-999',
+      content: 'MUST_NEVER_APPEAR_IN_DEMO_MODE',
+      memoryDir: env.mem,
+    });
+
     const res = await rawHttpRequest({ port, pathName: '/api/overview?demo=1', headers: { Host: `127.0.0.1:${port}` } });
     assert.equal(res.status, 200);
     const body = res.body;
+    assert.equal(body.includes('CANARY-REAL-DB-SECRET-999'), false);
+    assert.equal(body.includes('MUST_NEVER_APPEAR_IN_DEMO_MODE'), false);
     const demo = JSON.parse(body);
 
     assert.equal(demo.demo, true);

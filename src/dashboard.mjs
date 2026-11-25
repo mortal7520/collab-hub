@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs/promises';
 import {
-  DASHBOARD_HOST, DASHBOARD_PORT, DB_PATH,
+  APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, DB_PATH,
   assertValidAgentId, assertValidTaskId, ensureRuntimeDirs,
 } from './config.mjs';
 import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, parseTaskRow, upsertMemberStatus } from './db.mjs';
@@ -33,8 +33,6 @@ const CASS_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const MAX_SSE_CLIENTS = 20;
 const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted']);
 
-const APP_VERSION = '1.1.0';
-
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
 // Flat allowlist: the only three files the dashboard will ever serve from PUBLIC_DIR.
@@ -44,7 +42,7 @@ const STATIC_ASSETS = new Map([
   ['app.js', 'text/javascript; charset=utf-8'],
 ]);
 
-const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:";
+const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
 
 /**
  * Resolve a raw request path segment to a served asset.
@@ -585,7 +583,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
     res.end(body);
   };
 
-  const sendStaticAsset = async (res, assetRef) => {
+  const sendStaticAsset = async (res, assetRef, isHead = false) => {
     const asset = typeof assetRef === 'string'
       ? { name: assetRef, filePath: path.resolve(PUBLIC_DIR, assetRef), contentType: STATIC_ASSETS.get(assetRef) }
       : assetRef;
@@ -597,8 +595,6 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
     try {
       body = await fs.readFile(asset.filePath);
     } catch (err) {
-      // The name already passed the allowlist, so a read failure means a broken
-      // deployment (missing/unreadable file) — report it honestly instead of 404.
       sendJson(res, 500, { error: `Failed to read static asset ${asset.name}: ${err.code || err.message}` });
       return;
     }
@@ -607,7 +603,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
       'Content-Type': asset.contentType,
       'Content-Length': body.length,
     });
-    res.end(body);
+    res.end(isHead ? undefined : body);
   };
 
   const isAllowedHost = (hostHeader, actualPort) => {
@@ -648,11 +644,11 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
       }
 
       if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/') {
-        await sendStaticAsset(res, 'index.html');
+        await sendStaticAsset(res, 'index.html', req.method === 'HEAD');
         return;
       }
       if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/assets/')) {
-        await sendStaticAsset(res, resolveStaticAsset(url.pathname));
+        await sendStaticAsset(res, resolveStaticAsset(url.pathname), req.method === 'HEAD');
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/events/stream') {

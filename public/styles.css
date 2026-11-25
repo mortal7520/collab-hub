@@ -550,7 +550,7 @@ code {
   background-size: 16px 16px;
   background-position: -8px -8px;
 }
-#dagCanvas { display: block; min-width: 100%; }
+#dagCanvas { display: block; width: 100%; height: auto; }
 .dag-node-box { fill: var(--panel); stroke: var(--border-strong); stroke-width: 1; rx: 8; transition: stroke 0.15s, fill 0.15s; }
 .dag-node-group { cursor: pointer; }
 .dag-node-group:hover .dag-node-box { stroke: var(--accent); fill: var(--panel-2); }
