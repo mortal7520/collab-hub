@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { assertValidTaskId } from './config.mjs';
-import { parseTaskRow } from './db.mjs';
+import { logEvent, parseTaskRow } from './db.mjs';
 import { dispatchBackgroundTask, pollBatchTasks } from './executors.mjs';
 import { writeMemoryNote } from './memory.mjs';
 
-const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted']);
+const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
 
 /**
  * Execute a declarative multi-stage DAG workflow across ANY registered background agents.
@@ -88,6 +88,30 @@ export async function runDagWorkflow(db, {
   if (visited !== normalized.length) {
     throw new Error('Workflow steps contain a dependency cycle');
   }
+
+  logEvent(db, {
+    taskId: null,
+    eventType: 'workflow.plan',
+    actor: 'collab-hub',
+    payload: {
+      batch_id: safeBatchId,
+      name,
+      project_dir: projectDir,
+      steps: normalized.map((s) => ({
+        stepId: s.stepId,
+        taskId: s.taskId,
+        member: s.member,
+        role: s.role,
+        title: s.title,
+        prompt: s.prompt,
+        dependsOnTaskIds: s.dependsOnSteps.map((d) => byStepId.get(d).taskId),
+        autoInjectContext: s.autoInjectContext,
+        reservePaths: s.reservePaths,
+        worktreePath: s.worktreePath,
+        branchName: s.branchName,
+      })),
+    },
+  });
 
   const dispatchedIds = new Set();
   const stepResults = new Map();
@@ -185,6 +209,230 @@ export async function runDagWorkflow(db, {
     memory_note: memoryNote,
     tasks: tasks.map((t) => ({
       task_id: t.task_id,
+      member: t.member,
+      role: t.role,
+      state: t.state,
+      external_id: t.external_id,
+      result_preview: t.result_text ? t.result_text.slice(0, 300) : null,
+      error_code: t.error_code,
+    })),
+  };
+}
+
+/**
+ * Resume a partially failed, cancelled, or stalled DAG batch from checkpoint.
+ * Keeps already-completed steps intact, creates append-only retry task IDs for failed/cancelled/stalled steps
+ * (and their downstream dependents), remaps depends_on cleanly, and dispatches ready waves.
+ */
+export async function resumeDagWorkflow(db, {
+  batchId,
+  waitSec = 15,
+  saveReportToMemory = true,
+}, deps = {}) {
+  const safeBatch = assertValidTaskId(batchId, 'batch_id');
+  const allRows = db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(safeBatch).map(parseTaskRow);
+  if (allRows.length === 0) {
+    throw new Error(`No tasks found for batch_id=${safeBatch}`);
+  }
+
+  // Group retry chains to find the latest task attempt per logical root task
+  const byId = new Map(allRows.map((t) => [t.task_id, t]));
+  const rootOf = (task) => {
+    let cur = task;
+    const seen = new Set();
+    while (cur.parent_task_id && byId.has(cur.parent_task_id) && !seen.has(cur.task_id)) {
+      seen.add(cur.task_id);
+      cur = byId.get(cur.parent_task_id);
+    }
+    return cur.task_id;
+  };
+
+  const latestByRoot = new Map();
+  const attemptCount = new Map();
+  for (const row of allRows) {
+    const r = rootOf(row);
+    latestByRoot.set(r, row);
+    attemptCount.set(r, (attemptCount.get(r) || 0) + 1);
+  }
+
+  const latestTasks = [...latestByRoot.entries()].map(([rootId, row]) => ({ rootId, row }));
+  const resumableStates = new Set(['failed', 'cancelled', 'stalled', 'uncertain']);
+  const toRetryRoots = new Set(latestTasks.filter((x) => resumableStates.has(x.row.state)).map((x) => x.rootId));
+
+  // Propagate retry flag to any downstream non-completed task that depended on a retried root
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of latestTasks) {
+      if (toRetryRoots.has(item.rootId) || item.row.state === 'completed') continue;
+      const depRoots = (item.row.depends_on || []).map((depId) => (byId.has(depId) ? rootOf(byId.get(depId)) : depId));
+      if (depRoots.some((dr) => toRetryRoots.has(dr))) {
+        toRetryRoots.add(item.rootId);
+        changed = true;
+      }
+    }
+  }
+
+  const skippedCompleted = latestTasks.filter((x) => x.row.state === 'completed').map((x) => x.row.task_id);
+  if (toRetryRoots.size === 0) {
+    return {
+      batch_id: safeBatch,
+      resumed: false,
+      message: 'No failed, cancelled, stalled, or uncertain steps to resume',
+      skipped_completed: skippedCompleted,
+      retried_steps: [],
+      all_completed: latestTasks.every((x) => x.row.state === 'completed'),
+      tasks: allRows,
+    };
+  }
+
+  // Assign deterministic append-only retry task_ids for steps being resumed
+  const effectiveTaskIdByRoot = new Map();
+  const retryPlan = [];
+  for (const item of latestTasks) {
+    if (!toRetryRoots.has(item.rootId)) {
+      effectiveTaskIdByRoot.set(item.rootId, item.row.task_id);
+    } else {
+      const nextAttempt = (attemptCount.get(item.rootId) || 1) + 1;
+      const suffix = `_r${nextAttempt}`;
+      const base = item.rootId.slice(0, Math.max(1, 60 - suffix.length));
+      let candidate = assertValidTaskId(`${base}${suffix}`, 'task_id');
+      while (db.prepare('SELECT 1 FROM tasks WHERE task_id = ?').get(candidate)) {
+        candidate = assertValidTaskId(`${item.rootId.slice(0, 52)}_${randomUUID().slice(0, 6)}`, 'task_id');
+      }
+      effectiveTaskIdByRoot.set(item.rootId, candidate);
+      const depRoots = (item.row.depends_on || []).map((depId) => (byId.has(depId) ? rootOf(byId.get(depId)) : depId));
+      retryPlan.push({
+        rootId: item.rootId,
+        previousTaskId: item.row.task_id,
+        newTaskId: candidate,
+        member: item.row.member,
+        role: item.row.role,
+        projectDir: item.row.project_dir,
+        title: item.row.title,
+        prompt: item.row.prompt,
+        worktreePath: item.row.worktree_path || null,
+        branchName: item.row.branch_name || null,
+        depRoots,
+      });
+    }
+  }
+
+  // Also pick up any downstream workflow steps from the original workflow.plan event that were never dispatched yet
+  const planEvents = db.prepare("SELECT payload_json FROM events WHERE event_type = 'workflow.plan' ORDER BY id DESC LIMIT 40").all();
+  for (const pe of planEvents) {
+    let payload = null;
+    try { payload = JSON.parse(pe.payload_json || '{}'); } catch {}
+    if (payload?.batch_id !== safeBatch || !Array.isArray(payload.steps)) continue;
+    for (const s of payload.steps) {
+      if (latestByRoot.has(s.taskId) || db.prepare('SELECT 1 FROM tasks WHERE task_id = ?').get(s.taskId)) continue;
+      effectiveTaskIdByRoot.set(s.taskId, s.taskId);
+      retryPlan.push({
+        rootId: s.taskId,
+        previousTaskId: null,
+        newTaskId: s.taskId,
+        member: s.member,
+        role: s.role || 'researcher',
+        projectDir: payload.project_dir || allRows[0].project_dir,
+        title: s.title || s.stepId,
+        prompt: s.prompt,
+        worktreePath: s.worktreePath || null,
+        branchName: s.branchName || null,
+        depRoots: Array.isArray(s.dependsOnTaskIds) ? s.dependsOnTaskIds : [],
+      });
+    }
+    break;
+  }
+
+  const stateByRoot = new Map(latestTasks.map((x) => [x.rootId, toRetryRoots.has(x.rootId) ? 'pending' : x.row.state]));
+  for (const s of retryPlan) {
+    if (!stateByRoot.has(s.rootId)) stateByRoot.set(s.rootId, 'pending');
+  }
+  const dispatched = new Set();
+  const retriedSteps = [];
+  const errors = [];
+  const clampedWait = Math.max(0, Math.min(45, Number(waitSec) || 0));
+
+  for (let wave = 0; wave < retryPlan.length + 1; wave++) {
+    const ready = retryPlan.filter((s) => {
+      if (dispatched.has(s.rootId)) return false;
+      return s.depRoots.every((dr) => stateByRoot.get(dr) === 'completed' || db.prepare('SELECT state FROM tasks WHERE task_id = ?').get(dr)?.state === 'completed');
+    });
+
+    if (ready.length > 0) {
+      const settled = await Promise.allSettled(ready.map((s) => {
+        dispatched.add(s.rootId);
+        const mappedDeps = s.depRoots.map((dr) => effectiveTaskIdByRoot.get(dr) || dr);
+        return dispatchBackgroundTask(db, {
+          taskId: s.newTaskId,
+          batchId: safeBatch,
+          parentTaskId: s.previousTaskId,
+          dependsOn: mappedDeps,
+          autoInjectContext: mappedDeps.length > 0,
+          member: s.member,
+          role: s.role,
+          projectDir: s.projectDir,
+          title: s.title,
+          prompt: s.prompt,
+          worktreePath: s.worktreePath,
+          branchName: s.branchName,
+          waitSec: 0,
+        }, deps);
+      }));
+
+      settled.forEach((res, i) => {
+        const s = ready[i];
+        if (res.status === 'fulfilled') {
+          stateByRoot.set(s.rootId, res.value.state);
+          retriedSteps.push({ previous_task_id: s.previousTaskId, task_id: res.value.task_id, member: res.value.member, state: res.value.state });
+        } else {
+          stateByRoot.set(s.rootId, 'failed');
+          errors.push({ previous_task_id: s.previousTaskId, task_id: s.newTaskId, error: String(res.reason?.message || res.reason) });
+        }
+      });
+    }
+
+    const hasActive = retryPlan.some((s) => dispatched.has(s.rootId) && !TERMINAL_STATES.has(stateByRoot.get(s.rootId)));
+    if (hasActive && clampedWait > 0) {
+      const polled = await pollBatchTasks(db, { batchId: safeBatch, waitSec: clampedWait }, deps);
+      for (const s of retryPlan) {
+        const found = polled.tasks.find((t) => t.task_id === s.newTaskId);
+        if (found) stateByRoot.set(s.rootId, found.state);
+      }
+    }
+
+    const moreReady = retryPlan.some((s) => !dispatched.has(s.rootId) && s.depRoots.every((dr) => stateByRoot.get(dr) === 'completed'));
+    if (!moreReady) break;
+  }
+
+  const freshTasks = db.prepare('SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at ASC').all(safeBatch).map(parseTaskRow);
+  const allCompleted = [...stateByRoot.values()].every((st) => st === 'completed');
+  let memoryNote = null;
+  if (saveReportToMemory && allCompleted && freshTasks.length > 0) {
+    const md = buildBatchMarkdownReport(db, safeBatch).markdown;
+    const projSlug = String(allRows[0].project_dir || 'workspace').split(/[\\/]/).filter(Boolean).pop() || 'workspace';
+    memoryNote = writeMemoryNote(db, {
+      project: projSlug,
+      slug: `workflow-${safeBatch}`,
+      title: `Workflow 恢复完成报告：${safeBatch}`,
+      tags: ['workflow', 'resumed', safeBatch],
+      author: 'collab-hub',
+      content: md,
+      memoryDir: deps.memoryDir,
+    });
+  }
+
+  return {
+    batch_id: safeBatch,
+    resumed: true,
+    skipped_completed: skippedCompleted,
+    retried_steps: retriedSteps,
+    all_completed: allCompleted,
+    errors,
+    memory_note: memoryNote,
+    tasks: freshTasks.map((t) => ({
+      task_id: t.task_id,
+      parent_task_id: t.parent_task_id,
       member: t.member,
       role: t.role,
       state: t.state,

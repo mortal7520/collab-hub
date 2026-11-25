@@ -6,7 +6,7 @@ import {
   clearMemberCooldown, getMemberStatuses, openHubDb, parseTaskRow, setMemberCooldown,
 } from './db.mjs';
 import {
-  dispatchBackgroundTask, pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff,
+  cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff,
 } from './executors.mjs';
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, runSystemDoctor } from './doctor.mjs';
@@ -20,7 +20,7 @@ import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep, searchSessionsCass,
 } from './toolkit.mjs';
-import { buildBatchMarkdownReport, runDagWorkflow } from './workflows.mjs';
+import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from './workflows.mjs';
 import { cleanupWorktree, createWorktree, listWorktrees, mergeWorktree, reviewWorktree, verifyWorktree } from './worktree.mjs';
 
 export const TOOLS = Object.freeze([
@@ -493,6 +493,31 @@ export const TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'collab_cancel',
+    description: 'Cancel an active background task: terminates running local CLI process trees, aborts in-flight HTTP requests, sends best-effort DSH cancel, and records cancelled state + audit log.',
+    inputSchema: {
+      type: 'object',
+      required: ['task_id'],
+      properties: {
+        task_id: { type: 'string' },
+        reason: { type: 'string', description: 'Optional cancellation reason recorded in the receipt ledger.' },
+      },
+    },
+  },
+  {
+    name: 'collab_workflow_resume',
+    description: 'Resume a partially failed, cancelled, or stalled DAG workflow batch from checkpoint — preserves completed steps and retries only failed/downstream steps with append-only retry task IDs.',
+    inputSchema: {
+      type: 'object',
+      required: ['batch_id'],
+      properties: {
+        batch_id: { type: 'string' },
+        wait_sec: { type: 'number', description: 'Optional wait window per wave (0-45s, default 15).' },
+        save_report_to_memory: { type: 'boolean', description: 'Save Markdown synthesis report to shared memory when all steps complete (default true).' },
+      },
+    },
+  },
 ]);
 
 export async function handleToolCall(db, name, args = {}) {
@@ -586,7 +611,7 @@ export async function handleToolCall(db, name, args = {}) {
       if (args.task_id) {
         const row = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(args.task_id));
         const events = row ? db.prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id DESC LIMIT 30').all(args.task_id) : [];
-        return { task: row, events };
+        return { task: row, events, live_logs: row ? getTaskLogs(args.task_id) : null };
       }
       const clauses = [];
       const params = [];
@@ -695,6 +720,14 @@ export async function handleToolCall(db, name, args = {}) {
       if (args.backup) report.backup = createHotBackup(db);
       return report;
     }
+    case 'collab_cancel':
+      return cancelTask(db, args.task_id, { reason: args.reason || 'Cancelled via MCP' });
+    case 'collab_workflow_resume':
+      return resumeDagWorkflow(db, {
+        batchId: args.batch_id,
+        waitSec: args.wait_sec ?? 15,
+        saveReportToMemory: args.save_report_to_memory !== false,
+      });
     default:
       throw new Error(`Unknown collab-hub tool: ${name}`);
   }

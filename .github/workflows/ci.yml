@@ -15,13 +15,13 @@ jobs:
         node-version: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
       - name: Run zero-dependency test suite
         run: node --test test/collab-hub.test.mjs
-      - name: Verify MCP stdio handshake (32 tools)
+      - name: Verify MCP stdio handshake (34 tools)
         run: |
           node --input-type=module -e "
           import { spawn } from 'node:child_process';
@@ -32,7 +32,7 @@ jobs:
           rl.on('line', (l) => {
             out.push(JSON.parse(l));
             if (out.length === 2) {
-              if (out[1].result.tools.length !== 32) process.exit(1);
+              if (out[1].result.tools.length !== 34) process.exit(1);
               console.log('MCP verified:', out[0].result.serverInfo, out[1].result.tools.length, 'tools');
               c.kill();
               process.exit(0);

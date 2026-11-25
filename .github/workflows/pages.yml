@@ -1,0 +1,60 @@
+name: Deploy Interactive Demo (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Build static interactive demo bundle
+        run: |
+          node --input-type=module -e "
+          import fs from 'node:fs';
+          import path from 'node:path';
+          fs.mkdirSync('_site', { recursive: true });
+          for (const f of ['styles.css', 'app.js']) {
+            fs.copyFileSync(path.join('public', f), path.join('_site', f));
+          }
+          let html = fs.readFileSync(path.join('public', 'index.html'), 'utf8');
+          html = html
+            .replaceAll('href=\"/assets/styles.css\"', 'href=\"./styles.css\"')
+            .replaceAll('src=\"/assets/app.js\"', 'src=\"./app.js\"')
+            .replace('</head>', '<meta name=\"collabhub-static-demo\" content=\"1\" />\n</head>');
+          fs.writeFileSync(path.join('_site', 'index.html'), html, 'utf8');
+          fs.writeFileSync(path.join('_site', '.nojekyll'), '', 'utf8');
+          console.log('Built _site interactive demo:', fs.readdirSync('_site'));
+          "
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

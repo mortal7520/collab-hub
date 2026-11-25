@@ -10,7 +10,7 @@ import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, p
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { hubBus } from './event-bus.mjs';
-import { dispatchBackgroundTask, pollBackgroundTask, reconcileTask } from './executors.mjs';
+import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask } from './executors.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
 import { runPlaybook } from './playbooks.mjs';
@@ -22,7 +22,7 @@ import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from './toolkit.mjs';
-import { buildBatchMarkdownReport, runDagWorkflow } from './workflows.mjs';
+import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from './workflows.mjs';
 import { cleanupWorktree, listWorktrees, mergeWorktree, reviewWorktree, verifyWorktree } from './worktree.mjs';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -31,7 +31,7 @@ const CASS_STATS_TTL_MS = 60000;
 const AUTO_POLL_INTERVAL_MS = 30000;
 const CASS_REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 const MAX_SSE_CLIENTS = 20;
-const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted']);
+const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -752,13 +752,29 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/tasks/logs') {
+        const rawId = url.searchParams.get('task_id') || '';
+        if (!rawId) { sendJson(res, 400, { error: 'task_id is required' }); return; }
+        try {
+          sendJson(res, 200, getTaskLogs(rawId));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/tasks/')) {
         const rawId = decodeURIComponent(url.pathname.slice('/api/tasks/'.length));
         const safeId = assertValidTaskId(rawId, 'task_id');
         const task = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeId));
         if (!task) { sendJson(res, 404, { error: 'Task not found' }); return; }
         const events = db.prepare('SELECT * FROM events WHERE task_id = ? ORDER BY id DESC LIMIT 40').all(safeId);
-        sendJson(res, 200, { task, events });
+        sendJson(res, 200, { task, events, live_logs: getTaskLogs(safeId) });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/tasks/cancel') {
+        const parsed = await readBoundedJson(req);
+        if (!parsed.task_id) { sendJson(res, 400, { error: 'task_id is required' }); return; }
+        try {
+          sendJson(res, 200, await cancelTask(db, parsed.task_id, { reason: parsed.reason || 'Cancelled from workbench' }, dispatchDeps));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
         return;
       }
       if (req.method === 'POST' && url.pathname === '/api/tasks/dispatch') {
@@ -809,6 +825,19 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
             batchId: parsed.batch_id || null,
             projectDir: parsed.project_dir,
             steps: parsed.steps || [],
+            waitSec: Math.max(0, Math.min(30, Number(parsed.wait_sec) || 0)),
+            saveReportToMemory: parsed.save_report_to_memory !== false,
+          }, dispatchDeps);
+          sendJson(res, 200, result);
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/workflows/resume') {
+        const parsed = await readBoundedJson(req);
+        if (!parsed.batch_id) { sendJson(res, 400, { error: 'batch_id is required' }); return; }
+        try {
+          const result = await resumeDagWorkflow(db, {
+            batchId: parsed.batch_id,
             waitSec: Math.max(0, Math.min(30, Number(parsed.wait_sec) || 0)),
             saveReportToMemory: parsed.save_report_to_memory !== false,
           }, dispatchDeps);

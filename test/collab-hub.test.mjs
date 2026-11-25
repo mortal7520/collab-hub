@@ -6,15 +6,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { assertValidGitRef, assertValidTaskId, resolveProjectDir, toWslPath } from '../src/config.mjs';
+import { APP_VERSION, assertValidGitRef, assertValidTaskId, resolveProjectDir, toWslPath } from '../src/config.mjs';
 import { clearMemberCooldown, getMemberStatuses, openHubDb, setMemberCooldown, upsertMemberStatus } from '../src/db.mjs';
 import { createDashboardServer } from '../src/dashboard.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
 import {
-  callBatonTool, canonicalGoJson, dispatchBackgroundTask, pollBackgroundTask,
-  pollBatchTasks, reconcileTask, recordNativeHandoff, uuidv5Url,
+  callBatonTool, cancelTask, canonicalGoJson, dispatchBackgroundTask, getTaskLogs,
+  pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff, uuidv5Url,
 } from '../src/executors.mjs';
+import { hubBus } from '../src/event-bus.mjs';
 import { createSseParser, parseSseEvents } from '../src/mail-mcp-proxy.mjs';
 import { mailNameForMember } from '../src/mail-sync.mjs';
 import { searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
@@ -25,7 +26,7 @@ import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import { convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep } from '../src/toolkit.mjs';
-import { buildBatchMarkdownReport, runDagWorkflow } from '../src/workflows.mjs';
+import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
 import { createWorktree, mergeWorktree, reviewWorktree, verifyWorktree } from '../src/worktree.mjs';
 
 function makeTempEnv() {
@@ -398,8 +399,8 @@ test('Muse outer identity verification, monotonic generation, ACK-only rejection
   }
 });
 
-test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 32 MCP tools', async () => {
-  assert.equal(TOOLS.length, 32);
+test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 34 MCP tools', async () => {
+  assert.equal(TOOLS.length, 34);
   const sse = parseSseEvents('event: message\ndata: {"jsonrpc":"2.0",\ndata: "id":1}\n\ndata: {"id":2}\n\n');
   assert.equal(sse.length, 2);
   assert.deepEqual(JSON.parse(sse[0]), { jsonrpc: '2.0', id: 1 });
@@ -779,7 +780,7 @@ test('v4: Dashboard /api/agents/register, /api/tasks/dispatch, /api/health v4, a
 
   try {
     const health = JSON.parse((await rawHttpRequest({ port, pathName: '/api/health', headers: { Host: `127.0.0.1:${port}` } })).body);
-    assert.equal(health.version, '1.1.0');
+    assert.equal(health.version, APP_VERSION);
     assert.equal(typeof health.toolkit.ast_grep.installed, 'boolean');
 
     // CSRF block on new register route
@@ -1302,6 +1303,167 @@ test('v1.1: read-only demo overview is anonymized with zero personal paths', asy
     assert.doesNotMatch(body, /\/home\/|\/Users\/|\/mnt\/|[A-Za-z]:\\|\b127\.0\.0\.1\b|\blocalhost\b|\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
     assert.ok(!body.includes(os.homedir()), 'demo payload must not contain the real home directory');
     assert.ok(!body.includes('../'), 'demo payload must not contain a .. traversal segment');
+  } finally {
+    server.close();
+    env.cleanup();
+  }
+});
+
+test('v1.2: live CLI streaming logs (hubBus + getTaskLogs) and real cancelTask process abort', async () => {
+  const env = makeTempEnv();
+  const seenLogs = [];
+  const onEvt = (evt) => { if (evt.type === 'task.log') seenLogs.push(evt); };
+  hubBus.on('hub-event', onEvt);
+  try {
+    // 1. Streaming logs captured on normal CLI completion
+    registerAgent(env.db, {
+      agentId: 'log-cli', name: 'Log CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'console.log("STREAM-LINE-1"); console.error("STREAM-ERR-2");'], timeout_s: 20 },
+    });
+    const done = await dispatchBackgroundTask(env.db, {
+      taskId: 'v12-log-ok', member: 'log-cli', role: 'implementer', projectDir: env.proj, title: 'Log stream test', prompt: 'run',
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.equal(done.state, 'completed');
+    const logs = getTaskLogs('v12-log-ok');
+    assert.equal(logs.active, false);
+    assert.ok(logs.logs.some((e) => e.stream === 'stdout' && e.text.includes('STREAM-LINE-1')));
+    assert.ok(logs.logs.some((e) => e.stream === 'stderr' && e.text.includes('STREAM-ERR-2')));
+    assert.ok(seenLogs.some((e) => e.task_id === 'v12-log-ok' && e.text.includes('STREAM-LINE-1')));
+
+    // 2. Live cancel aborts a long-running CLI process cleanly
+    registerAgent(env.db, {
+      agentId: 'slow-cli', name: 'Slow CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'console.log("SLOW-STARTED"); setTimeout(() => console.log("NEVER"), 20000);'], timeout_s: 30 },
+    });
+    const runPromise = dispatchBackgroundTask(env.db, {
+      taskId: 'v12-slow-abort', member: 'slow-cli', role: 'implementer', projectDir: env.proj, title: 'Cancel target', prompt: 'wait',
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+
+    // Wait until the live process is active in ACTIVE_RUNS
+    const deadline = Date.now() + 5000;
+    while (!getTaskLogs('v12-slow-abort').active && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    assert.equal(getTaskLogs('v12-slow-abort').active, true);
+
+    const cancelled = await cancelTask(env.db, 'v12-slow-abort', { reason: 'User clicked abort' });
+    assert.equal(cancelled.cancelled, true);
+    assert.equal(cancelled.aborted_live_process, true);
+    assert.equal(cancelled.task.state, 'cancelled');
+
+    const settled = await runPromise;
+    assert.equal(settled.state, 'cancelled');
+    await assert.rejects(() => cancelTask(env.db, 'v12-slow-abort'), /terminal state=cancelled/i);
+  } finally {
+    hubBus.off('hub-event', onEvt);
+    env.cleanup();
+  }
+});
+
+test('v1.2: resumeDagWorkflow skips completed steps, retries failed + downstream with append-only IDs', async () => {
+  const env = makeTempEnv();
+  const flagFile = path.join(env.dir, 'allow-step-b.flag');
+  try {
+    registerAgent(env.db, {
+      agentId: 'wf-ok', name: 'WF OK', driver: 'generic-cli', roles: ['planner', 'synthesizer'],
+      config: { command: process.execPath, args: ['-e', 'process.stdout.write("OK:" + process.argv[1].slice(0, 140))', '{{prompt}}'], timeout_s: 20 },
+    });
+    registerAgent(env.db, {
+      agentId: 'wf-flaky', name: 'WF Flaky', driver: 'generic-cli', roles: ['reviewer'],
+      config: {
+        command: process.execPath,
+        args: ['-e', `const fs=require("fs"); if(!fs.existsSync(${JSON.stringify(flagFile)})){console.error("BOOM-ONCE"); process.exit(2);} process.stdout.write("RECOVERED-B");`],
+        timeout_s: 20,
+      },
+    });
+
+    const first = await runDagWorkflow(env.db, {
+      name: 'checkpoint-test',
+      batchId: 'wf-v12-resume',
+      projectDir: env.proj,
+      steps: [
+        { id: 'plan', member: 'wf-ok', role: 'planner', prompt: 'STEP-A' },
+        { id: 'check', member: 'wf-flaky', role: 'reviewer', prompt: 'STEP-B' },
+        { id: 'synth', member: 'wf-ok', role: 'synthesizer', depends_on: ['plan', 'check'], prompt: 'FINAL-C' },
+      ],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+
+    assert.equal(first.all_completed, false);
+    assert.equal(first.pending_steps.length, 1);
+    assert.equal(first.pending_steps[0].step, 'synth');
+
+    // Now unblock flaky step and also insert the blocked synth step? Wait: synth wasn't dispatched yet, let's test resuming failed step!
+    fs.writeFileSync(flagFile, 'ok');
+    const resumed = await resumeDagWorkflow(env.db, {
+      batchId: 'wf-v12-resume',
+      waitSec: 10,
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+
+    assert.equal(resumed.resumed, true);
+    assert.deepEqual(resumed.skipped_completed, ['wf-v12-resume_plan']);
+    assert.equal(resumed.retried_steps.length, 2);
+    assert.equal(resumed.retried_steps[0].previous_task_id, 'wf-v12-resume_check');
+    assert.equal(resumed.retried_steps[0].task_id, 'wf-v12-resume_check_r2');
+    assert.equal(resumed.retried_steps[0].state, 'completed');
+    assert.equal(resumed.retried_steps[1].task_id, 'wf-v12-resume_synth');
+    assert.equal(resumed.retried_steps[1].state, 'completed');
+    assert.equal(resumed.all_completed, true);
+
+    // Downstream synth step inherited BOTH original completed plan AND recovered check_r2!
+    const synthRow = env.db.prepare('SELECT prompt FROM tasks WHERE task_id = ?').get('wf-v12-resume_synth');
+    assert.match(synthRow.prompt, /OK:STEP-A/);
+    assert.match(synthRow.prompt, /RECOVERED-B/);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v1.2: Dashboard /api/tasks/logs, /api/tasks/cancel, /api/workflows/resume & CSRF enforcement', async () => {
+  const env = makeTempEnv();
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
+  try {
+    // Seed a running task and a failed batch task
+    const now = new Date().toISOString();
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, batch_id, project_dir, member, role, channel, title, prompt, state, created_at, updated_at)
+      VALUES ('api-cancel-1', 'b-api', ?, 'dsh', 'implementer', 'dsh-baton', 'Running task', 'work', 'running', ?, ?)
+    `).run(env.proj, now, now);
+
+    // 1. GET /api/tasks/logs works without hitting /api/tasks/:id 404
+    const logsRes = await rawHttpRequest({
+      port, pathName: '/api/tasks/logs?task_id=api-cancel-1', headers: { Host: `127.0.0.1:${port}` },
+    });
+    assert.equal(logsRes.status, 200);
+    assert.equal(JSON.parse(logsRes.body).task_id, 'api-cancel-1');
+
+    // 2. POST /api/tasks/cancel blocks missing CSRF header (403)
+    const noCsrf = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/cancel',
+      headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: 'api-cancel-1' }),
+    });
+    assert.equal(noCsrf.status, 403);
+
+    // 3. POST /api/tasks/cancel with CSRF cancels cleanly
+    const cancelRes = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/cancel', headers: hdrs,
+      body: JSON.stringify({ task_id: 'api-cancel-1', reason: 'Dashboard stop' }),
+    });
+    assert.equal(cancelRes.status, 200);
+    assert.equal(JSON.parse(cancelRes.body).task.state, 'cancelled');
+
+    // 4. POST /api/workflows/resume requires batch_id and handles clean no-op
+    const resumeBad = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/workflows/resume', headers: hdrs,
+      body: JSON.stringify({}),
+    });
+    assert.equal(resumeBad.status, 400);
   } finally {
     server.close();
     env.cleanup();

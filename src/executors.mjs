@@ -9,6 +9,7 @@ import {
   VALID_ROLES, WORKTREE_DIR, assertValidAgentId, assertValidMember, assertValidTaskId, loadPolicy, resolveProjectDir, toWslPath,
 } from './config.mjs';
 import { logEvent, parseTaskRow, setMemberCooldown } from './db.mjs';
+import { hubBus } from './event-bus.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
 import { planDispatch } from './prober.mjs';
 import { getAgent } from './registry.mjs';
@@ -16,12 +17,52 @@ import { getAgent } from './registry.mjs';
 const execFileAsync = promisify(execFile);
 
 const QUOTA_429_PATTERN = /\b429\b|quota|rate.?limit|cool(?:ing)?\s*down|too many requests|capacity|resource\s+has\s+been\s+exhausted|exhausted/i;
-const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted']);
+const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
 const ALLOWED_TASK_COLUMNS = new Set([
   'state', 'external_id', 'session_id', 'reply_generation', 'payload_sha256',
   'worktree_path', 'branch_name', 'result_text', 'evidence_json', 'error_code',
   'error_message', 'meta_json', 'mail_message_id', 'completed_at', 'attempted_at',
 ]);
+
+const MAX_LOG_TASKS = 100;
+const MAX_LOG_ENTRIES_PER_TASK = 200;
+const MAX_LOG_BYTES_PER_TASK = 64 * 1024;
+const ACTIVE_RUNS = new Map();
+const TASK_LOGS = new Map();
+
+export function appendTaskLog(taskId, stream, text) {
+  if (!taskId || !text) return;
+  const chunk = String(text).slice(0, 4096);
+  if (!chunk) return;
+  let bucket = TASK_LOGS.get(taskId);
+  if (!bucket) {
+    if (TASK_LOGS.size >= MAX_LOG_TASKS) {
+      const oldestKey = TASK_LOGS.keys().next().value;
+      if (oldestKey) TASK_LOGS.delete(oldestKey);
+    }
+    bucket = { bytes: 0, entries: [] };
+    TASK_LOGS.set(taskId, bucket);
+  }
+  const entry = { ts: new Date().toISOString(), stream: stream || 'stdout', text: chunk };
+  bucket.entries.push(entry);
+  bucket.bytes += Buffer.byteLength(chunk, 'utf8');
+  while (bucket.entries.length > MAX_LOG_ENTRIES_PER_TASK || bucket.bytes > MAX_LOG_BYTES_PER_TASK) {
+    const dropped = bucket.entries.shift();
+    if (!dropped) break;
+    bucket.bytes -= Buffer.byteLength(dropped.text, 'utf8');
+  }
+  hubBus.publish('task.log', { task_id: taskId, stream: entry.stream, text: entry.text });
+}
+
+export function getTaskLogs(taskId) {
+  const safeId = assertValidTaskId(taskId, 'task_id');
+  const bucket = TASK_LOGS.get(safeId);
+  return {
+    task_id: safeId,
+    active: ACTIVE_RUNS.has(safeId),
+    logs: bucket ? bucket.entries.slice() : [],
+  };
+}
 
 function isAckOnlyText(text) {
   const s = String(text || '').trim();
@@ -304,7 +345,7 @@ function updateTask(db, taskId, fields, { allowTerminalOverwrite = false } = {})
   const now = new Date().toISOString();
   const sets = [...keys.map((k) => `${k} = ?`), 'updated_at = ?'].join(', ');
   const vals = [...keys.map((k) => fields[k]), now, taskId];
-  const guard = allowTerminalOverwrite ? '' : ` AND state NOT IN ('completed', 'failed', 'rerouted')`;
+  const guard = allowTerminalOverwrite ? '' : ` AND state NOT IN ('completed', 'failed', 'rerouted', 'cancelled')`;
   db.prepare(`UPDATE tasks SET ${sets} WHERE task_id = ?${guard}`).run(...vals);
   return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(taskId));
 }
@@ -314,7 +355,7 @@ function updateTask(db, taskId, fields, { allowTerminalOverwrite = false } = {})
  * Strictly validates task_id, enforces policy roots (including WORKTREE_DIR), persists dispatching intent first,
  * and never resends an existing task.
  */
-async function runGenericCliDriver(agent, { cwd, prompt }) {
+async function runGenericCliDriver(agent, { cwd, prompt, taskId = null }) {
   const cfg = agent.config || {};
   const command = cfg.command;
   if (!command) throw new Error(`generic-cli agent "${agent.id}" has no command configured`);
@@ -338,7 +379,26 @@ async function runGenericCliDriver(agent, { cwd, prompt }) {
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const finish = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); fn(v); } };
+    let cancelled = false;
+    const finish = (fn, v) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        if (taskId) ACTIVE_RUNS.delete(taskId);
+        fn(v);
+      }
+    };
+    if (taskId) {
+      appendTaskLog(taskId, 'system', `[start] ${command} (${agent.id})`);
+      ACTIVE_RUNS.set(taskId, {
+        kind: 'generic-cli',
+        cancel(reason) {
+          cancelled = true;
+          killProcessTree(child);
+          finish(reject, Object.assign(new Error(reason || 'Cancelled by operator'), { code: 'TASK_CANCELLED' }));
+        },
+      });
+    }
     const timer = setTimeout(() => {
       killProcessTree(child);
       finish(reject, Object.assign(new Error(`generic-cli "${agent.id}" timed out after ${timeoutMs}ms`), { code: 'GENERIC_CLI_TIMEOUT' }));
@@ -346,11 +406,26 @@ async function runGenericCliDriver(agent, { cwd, prompt }) {
 
     child.on('error', (err) => finish(reject, Object.assign(new Error(`generic-cli spawn error: ${err.message}`), { code: err.code || 'GENERIC_CLI_SPAWN' })));
     child.stdin.on('error', () => {});
-    child.stdout.on('data', (c) => { if (stdout.length < 2 * 1024 * 1024) stdout += c.toString('utf8'); });
-    child.stderr.on('data', (c) => { if (stderr.length < 256 * 1024) stderr += c.toString('utf8'); });
+    child.stdout.on('data', (c) => {
+      const s = c.toString('utf8');
+      if (stdout.length < 2 * 1024 * 1024) stdout += s;
+      if (taskId) appendTaskLog(taskId, 'stdout', s);
+    });
+    child.stderr.on('data', (c) => {
+      const s = c.toString('utf8');
+      if (stderr.length < 256 * 1024) stderr += s;
+      if (taskId) appendTaskLog(taskId, 'stderr', s);
+    });
     child.on('close', (code) => {
-      if (code === 0) finish(resolve, { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 });
-      else finish(reject, Object.assign(new Error(`generic-cli exited ${code}: ${(stderr || stdout).slice(0, 400)}`), { code: `GENERIC_CLI_EXIT_${code}` }));
+      if (cancelled) {
+        finish(reject, Object.assign(new Error('Cancelled by operator'), { code: 'TASK_CANCELLED' }));
+      } else if (code === 0) {
+        if (taskId) appendTaskLog(taskId, 'system', '[exit 0]');
+        finish(resolve, { stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 });
+      } else {
+        if (taskId) appendTaskLog(taskId, 'system', `[exit ${code}]`);
+        finish(reject, Object.assign(new Error(`generic-cli exited ${code}: ${(stderr || stdout).slice(0, 400)}`), { code: `GENERIC_CLI_EXIT_${code}` }));
+      }
     });
     try {
       if (useStdin) child.stdin.write(prompt);
@@ -359,7 +434,7 @@ async function runGenericCliDriver(agent, { cwd, prompt }) {
   });
 }
 
-async function runOpenAiHttpDriver(agent, { prompt }) {
+async function runOpenAiHttpDriver(agent, { prompt, taskId = null }) {
   const cfg = agent.config || {};
   const headers = { 'Content-Type': 'application/json' };
   if (cfg.api_key_env) {
@@ -372,29 +447,50 @@ async function runOpenAiHttpDriver(agent, { prompt }) {
   messages.push({ role: 'user', content: prompt });
 
   const timeoutMs = Math.max(10, Math.min(300, Number(cfg.timeout_s) || 90)) * 1000;
-  const res = await fetch(`${cfg.base_url}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: cfg.model,
-      messages,
-      max_tokens: cfg.max_tokens || 4096,
-    }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const text = await res.text();
-  if (res.status === 429) {
-    throw Object.assign(new Error(`HTTP 429 rate limit on ${agent.id}: ${text.slice(0, 240)}`), { code: 'HTTP_AGENT_429' });
+  const controller = new AbortController();
+  let cancelled = false;
+  if (taskId) {
+    appendTaskLog(taskId, 'system', `[http] POST ${cfg.base_url}/chat/completions (model=${cfg.model})`);
+    ACTIVE_RUNS.set(taskId, {
+      kind: 'openai-http',
+      cancel(reason) {
+        cancelled = true;
+        controller.abort(new Error(reason || 'Cancelled by operator'));
+      },
+    });
   }
-  if (!res.ok) {
-    throw Object.assign(new Error(`HTTP ${res.status} from ${agent.id}: ${text.slice(0, 240)}`), { code: `HTTP_AGENT_${res.status}` });
+  try {
+    const signal = AbortSignal.any ? AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]) : controller.signal;
+    const res = await fetch(`${cfg.base_url}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: cfg.model,
+        messages,
+        max_tokens: cfg.max_tokens || 4096,
+      }),
+      signal,
+    });
+    const text = await res.text();
+    if (res.status === 429) {
+      throw Object.assign(new Error(`HTTP 429 rate limit on ${agent.id}: ${text.slice(0, 240)}`), { code: 'HTTP_AGENT_429' });
+    }
+    if (!res.ok) {
+      throw Object.assign(new Error(`HTTP ${res.status} from ${agent.id}: ${text.slice(0, 240)}`), { code: `HTTP_AGENT_${res.status}` });
+    }
+    const data = JSON.parse(text);
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || !content.trim()) {
+      throw Object.assign(new Error(`Empty completion from ${agent.id}`), { code: 'HTTP_AGENT_EMPTY' });
+    }
+    if (taskId) appendTaskLog(taskId, 'stdout', content.trim().slice(0, 2000));
+    return { content: content.trim(), usage: data.usage || null, model: data.model || cfg.model, id: data.id || null };
+  } catch (err) {
+    if (cancelled) throw Object.assign(new Error('Cancelled by operator'), { code: 'TASK_CANCELLED' });
+    throw err;
+  } finally {
+    if (taskId) ACTIVE_RUNS.delete(taskId);
   }
-  const data = JSON.parse(text);
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string' || !content.trim()) {
-    throw Object.assign(new Error(`Empty completion from ${agent.id}`), { code: 'HTTP_AGENT_EMPTY' });
-  }
-  return { content: content.trim(), usage: data.usage || null, model: data.model || cfg.model, id: data.id || null };
 }
 
 export async function dispatchBackgroundTask(db, {
@@ -695,8 +791,9 @@ export async function dispatchBackgroundTask(db, {
 
     if (agent.driver === 'generic-cli') {
       const cliRunner = deps.runGenericCli || runGenericCliDriver;
+      updateTask(db, safeTaskId, { state: 'running', external_id: `cli-${dispatchToken.slice(0, 12)}` });
       try {
-        const out = await cliRunner(agent, { cwd: resolvedDir.windows, prompt: effectivePrompt });
+        const out = await cliRunner(agent, { cwd: resolvedDir.windows, prompt: effectivePrompt, taskId: safeTaskId });
         const updated = updateTask(db, safeTaskId, {
           state: 'completed',
           external_id: `cli-${dispatchToken.slice(0, 12)}`,
@@ -706,7 +803,9 @@ export async function dispatchBackgroundTask(db, {
           error_message: null,
           completed_at: new Date().toISOString(),
         });
-        logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'generic-cli' } });
+        if (updated?.state === 'completed') {
+          logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'generic-cli' } });
+        }
         return updated;
       } finally {
         if (leaseInfo?.synced) {
@@ -717,8 +816,9 @@ export async function dispatchBackgroundTask(db, {
 
     if (agent.driver === 'openai-http') {
       const httpRunner = deps.runOpenAiHttp || runOpenAiHttpDriver;
+      updateTask(db, safeTaskId, { state: 'running', external_id: `http-${dispatchToken.slice(0, 12)}` });
       try {
-        const out = await httpRunner(agent, { prompt: effectivePrompt });
+        const out = await httpRunner(agent, { prompt: effectivePrompt, taskId: safeTaskId });
         const updated = updateTask(db, safeTaskId, {
           state: 'completed',
           external_id: out.id || `http-${dispatchToken.slice(0, 12)}`,
@@ -728,7 +828,9 @@ export async function dispatchBackgroundTask(db, {
           error_message: null,
           completed_at: new Date().toISOString(),
         });
-        logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'openai-http', model: out.model } });
+        if (updated?.state === 'completed') {
+          logEvent(db, { taskId: safeTaskId, eventType: 'task.completed', actor: member, payload: { driver: 'openai-http', model: out.model } });
+        }
         return updated;
       } finally {
         if (leaseInfo?.synced) {
@@ -739,6 +841,12 @@ export async function dispatchBackgroundTask(db, {
   } catch (err) {
     const msg = String(err.message || err);
     const code = err.code || 'DISPATCH_ERROR';
+    const current = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+    if (code === 'TASK_CANCELLED' || current?.state === 'cancelled') {
+      return current?.state === 'cancelled'
+        ? current
+        : updateTask(db, safeTaskId, { state: 'cancelled', error_code: 'TASK_CANCELLED', error_message: msg, completed_at: new Date().toISOString() });
+    }
     if (member === 'claude' || agent.driver === 'openai-http') {
       const q429 = detectClaude429(null, err);
       if (q429.is429) {
@@ -755,6 +863,53 @@ export async function dispatchBackgroundTask(db, {
     logEvent(db, { taskId: safeTaskId, eventType: 'task.error', actor: member, payload: { code, message: msg } });
     return parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
   }
+}
+
+/**
+ * Cancel an active background task: aborts any in-flight CLI process tree or HTTP request,
+ * sends best-effort DSH cancel if applicable, and persists terminal cancelled state.
+ */
+export async function cancelTask(db, taskId, { reason = 'Cancelled by operator' } = {}, deps = {}) {
+  const safeTaskId = assertValidTaskId(taskId, 'task_id');
+  const existing = parseTaskRow(db.prepare('SELECT * FROM tasks WHERE task_id = ?').get(safeTaskId));
+  if (!existing) throw new Error(`Task not found: ${safeTaskId}`);
+  if (TERMINAL_STATES.has(existing.state)) {
+    throw new Error(`Task ${safeTaskId} is already in terminal state=${existing.state}; cannot cancel.`);
+  }
+
+  let abortedLiveProcess = false;
+  const active = ACTIVE_RUNS.get(safeTaskId);
+  if (active && typeof active.cancel === 'function') {
+    abortedLiveProcess = true;
+    try { active.cancel(reason); } catch {}
+    ACTIVE_RUNS.delete(safeTaskId);
+  }
+
+  let upstreamCancel = null;
+  if (existing.member === 'dsh' && existing.external_id) {
+    const baton = deps.callBaton || callBatonTool;
+    upstreamCancel = await baton('dsh_cancel', { run_id: existing.external_id }, { timeoutMs: 10000 }).catch((e) => ({ error: String(e?.message || e) }));
+  }
+
+  const updated = updateTask(db, safeTaskId, {
+    state: 'cancelled',
+    error_code: 'TASK_CANCELLED',
+    error_message: String(reason || 'Cancelled by operator').slice(0, 500),
+    completed_at: new Date().toISOString(),
+  });
+  appendTaskLog(safeTaskId, 'system', `[cancelled] ${reason}`);
+  logEvent(db, {
+    taskId: safeTaskId,
+    eventType: 'task.cancelled',
+    actor: 'coordinator',
+    payload: { member: existing.member, reason, aborted_live_process: abortedLiveProcess },
+  });
+  return {
+    task: updated,
+    cancelled: true,
+    aborted_live_process: abortedLiveProcess,
+    upstream_cancel: upstreamCancel,
+  };
 }
 
 /**
