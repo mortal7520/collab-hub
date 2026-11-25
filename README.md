@@ -30,8 +30,8 @@
 > Flip **EN / 中文**, switch **Obsidian Dark / Alabaster Light**, inspect the **4-column Kanban**, hit `Ctrl+K`, and click **Simulate Live DAG** to watch nodes light up and streaming logs roll in — 100% in your browser, zero install, zero signup.
 
 - **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **34 unified MCP tools** and one local web workbench.
-- **Watch it run, stop or resume cleanly** — Real-time CLI/HTTP streaming logs over SSE, live process **Cancel/Abort** (`collab_cancel`), live SVG DAG overlays, **Checkpoint Resume** (`collab_workflow_resume`), and SHA-pinned Git worktree verification gates before merge.
-- **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux.
+- **Watch it run, stop or resume cleanly** — Cross-process durable SQLite streaming logs with lossless SSE replay, confirmed process-group **Cancel/Abort** (`collab_cancel`), live SVG DAG overlays, **Checkpoint Resume** (`collab_workflow_resume`), and SHA-pinned Git worktree verification gates before merge.
+- **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux, with transactional schema migrations, credential-to-host binding, and dirty-gated 0-mutation idle UI.
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">

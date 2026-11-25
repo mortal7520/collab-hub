@@ -30,8 +30,8 @@
 > 一键切换 **EN / 中文** 与 **Obsidian Dark / Alabaster Light** 主题，浏览 **4 列看板**，按 `Ctrl+K` 呼出命令面板，点击 **模拟 DAG 实时运行** 即可在浏览器中亲眼看到节点亮起与实时流式日志滚动 —— 零安装、零注册。
 
 - **零厂商锁定，复用你已有的 Agent** —— 通过 **34 个统一 MCP 工具** 和一个本地 Web 工作台，统一编排 Claude Code、Codex、Gemini CLI、Aider、OpenCode、Ollama、LM Studio、DeepSeek、OpenRouter 或自定义脚本。
-- **过程全可见，可中止、可断点续跑** —— SSE 实时流式日志终端、进程级**一键中止**（`collab_cancel`）、Live SVG DAG 状态联动、**失败断点续跑**（`collab_workflow_resume`），以及基于 SHA 验证闸门的 Git Worktree 并发隔离合并。
-- **零 npm 第三方依赖，10 秒启动** —— 纯 Node.js `>=22.13` 原生内置模块（`node:sqlite`、`node:http`、`node:child_process`），开箱兼容 Windows、macOS 与 Linux。
+- **过程全可见，可确认中止、可断点续跑** —— 跨进程持久化 SQLite 流式日志与无损 SSE 断线补发、进程组级**可确认中止**（`collab_cancel`）、Live SVG DAG 状态联动、**失败断点续跑**（`collab_workflow_resume`），以及 SHA 锁定合并的 Git Worktree 测试闸门。
+- **零 npm 第三方依赖，10 秒启动** —— 纯 Node.js `>=22.13` 原生内置模块（`node:sqlite`、`node:http`、`node:child_process`），具备事务化数据库迁移、凭据与目标主机绑定，以及内容指纹脏检查的零空转前端渲染。
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">

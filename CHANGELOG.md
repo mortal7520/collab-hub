@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.3.0 (2026-11-25)
+
+**Deep Systems & Architecture Hardening: cross-process SQLite control plane, lossless SSE replay, confirmed cancellation, transactional migrations, credential-to-host binding, and 0-mutation dirty-gated UI** — audited & hardened concurrently by `Codex Desktop` + `WSL DSH` + `AGY`.
+
+### Highlights
+- **Cross-Process Durable Control Plane & 6x Faster SQLite (`src/db.mjs`, `src/executors.mjs`, `src/dashboard.mjs`)**:
+  - Migrated `task_logs` to SQLite WAL (`PRAGMA synchronous = NORMAL`, `temp_store = MEMORY`, `cache_size = -16000`, composite indexes) — per-test DB latency dropped ~6x while logs now survive restarts and stream across MCP/CLI/Dashboard processes.
+  - Serialized schema migrations inside `BEGIN IMMEDIATE` with `PRAGMA user_version = 130`, including atomic FTS5 rebuild over pre-existing `memory_notes` rows (eliminating upgrade-time FTS5 corruption) and bounded retention pruning (`pruneRetentionTables`).
+  - Lossless SSE reconnect catch-up (`Last-Event-ID`: `e<ev>-l<log>`, `ev-<N>`, `log-<N>`) with synchronous tip snapshot and paginated chunk replay so reconnects never drop events or logs.
+- **Confirmed Cancellation, Atomic Dispatch Ownership & Crash Safety (`src/executors.mjs`, `src/workflows.mjs`, `src/worktree.mjs`, `bin/collab-hub.mjs`)**:
+  - Atomic `dispatch_token` ownership verification right before external bridge calls (aborts send and releases Mail reservations if the task was terminated while awaiting leases).
+  - Strict stop confirmation: POSIX process-group cleanup (`-pid`), OS-confirmed exit detection (`childClosed`), cross-process SQLite cancel-signal watcher (`cancel_requested_at`), DSH `still_busy: true` / `ok: false` refusal, and conservative `uncertain` recovery in `sweepOrphanTasks` so `collab_workflow_resume` never blindly retries an uncertain run.
+  - True non-blocking `POST /api/tasks/dispatch` (`async: true` → `HTTP 202`) across all drivers including DSH/Muse/Claude, unified `bin/collab-hub.mjs start` orphan sweeping & graceful `server.shutdown()` drain.
+  - Immutable `workflow_plans` digest covering canonical `project_dir` + steps (with automatic legacy digest backfill); SHA-pinned `git merge --no-ff` + atomic `renameSync` stale-lock handoff & token-verified release + Git root jail verification.
+- **Security & Resource Hardening (`src/registry.mjs`, `src/prober.mjs`, `src/toolkit.mjs`, `src/memory.mjs`, `src/discovery.mjs`)**:
+  - `openai-http` enforces `https://` for non-loopback hosts, restricts `api_key_env` to `*_API_KEY` / `*_KEY` / `*_TOKEN`, binds built-in provider credentials (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, etc.) to their official HTTPS hosts, and re-validates on both probe and dispatch.
+  - Minimal allowlisted `childEnv` & accurate timeout→`offline` mapping in `probeCustomAgent`, bounded concurrency (`4`) custom probes, bounded `packRepoRepomix` file reads, `beads create --` argument guard, 64-char SQL `LIKE` cap, and collision-safe `slugId` hashing.
+- **Frontend Performance & Cross-Process Cancel UX (`public/app.js`, `public/styles.css`, `public/index.html`)**:
+  - Content-signature dirty-gated `renderAll()` cuts unchanged overview poll mutations from `80 / 60 KB` → **`0 / 0 B`**; active-view-only task rendering, debounced filter, and 30s SSE fallback polling.
+  - Transition-only DAG simulation cuts 5s SVG DOM churn & layout/script time by **−80%**; compositor-friendly `opacity` pulse animation; exact retry-aware (`_r2`, `_r3`) DAG node matching; zero-wipe deduped live log console (cap 200 + truncation banner + Follow toggle, 0 redundant `/api/tasks/logs` fetches); two-step `Force Cancel` flow for `cancel_requested` cross-process runs.
+
 ## v1.2.0 (2026-11-25)
 
 **Watch it run: live streaming logs, live DAG execution overlay, one-click checkpoint resume, zero-dependency EN/中文 UI, and a live interactive GitHub Pages demo** — built & audited concurrently by our 4-agent team (`WSL DSH` + `Codex Desktop` + `Cloud Muse` + `AGY`).
