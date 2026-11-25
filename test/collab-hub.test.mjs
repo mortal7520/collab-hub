@@ -779,7 +779,7 @@ test('v4: Dashboard /api/agents/register, /api/tasks/dispatch, /api/health v4, a
 
   try {
     const health = JSON.parse((await rawHttpRequest({ port, pathName: '/api/health', headers: { Host: `127.0.0.1:${port}` } })).body);
-    assert.equal(health.version, '1.0.0');
+    assert.equal(health.version, '1.1.0');
     assert.equal(typeof health.toolkit.ast_grep.installed, 'boolean');
 
     // CSRF block on new register route
@@ -1201,7 +1201,92 @@ test('v1.0: Real token usage telemetry aggregation + Kanban board HTML & /api/wo
     const html = (await rawHttpRequest({ port, pathName: '/', headers: { Host: `127.0.0.1:${port}` } })).body;
     assert.match(html, /tasksKanbanWrap/);
     assert.match(html, /btnViewKanban/);
-    assert.match(html, /CollabHub v1\.0/);
+    assert.match(html, /CollabHub v1\.1/);
+  } finally {
+    server.close();
+    env.cleanup();
+  }
+});
+
+test('v1.1: static assets served from jailed public allowlist with strict CSP', async () => {
+  const env = makeTempEnv();
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const host = `127.0.0.1:${port}`;
+  try {
+    // Every allowlisted asset: exact MIME, strict CSP (no script-src unsafe-inline).
+    for (const [pathName, expectedType] of [['/assets/styles.css', 'text/css'], ['/assets/app.js', 'text/javascript']]) {
+      const res = await rawHttpRequest({ port, pathName, headers: { Host: host } });
+      assert.equal(res.status, 200, `${pathName} must be served`);
+      assert.match(String(res.headers['content-type']), new RegExp(expectedType));
+      const csp = String(res.headers['content-security-policy']);
+      assert.ok(csp.includes("script-src 'self'"), `${pathName} CSP must lock script-src to 'self'`);
+      assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/);
+      assert.ok(res.body.length > 0);
+    }
+
+    // Jail: traversal (plain + encoded), null byte, and non-allowlisted names all 404.
+    for (const bad of [
+      '/assets/../package.json',
+      '/assets/app.js%00.txt',
+      '/assets/nope.css',
+      '/assets/%2e%2e%2fpackage.json',
+      '/assets/..%2fapp.js',
+      '/assets/%00index.html',
+    ]) {
+      const res = await rawHttpRequest({ port, pathName: bad, headers: { Host: host } });
+      assert.equal(res.status, 404, `${bad} must be 404, got ${res.status}`);
+    }
+  } finally {
+    server.close();
+    env.cleanup();
+  }
+});
+
+test('v1.1: read-only demo overview is anonymized with zero personal paths', async () => {
+  const env = makeTempEnv();
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    const res = await rawHttpRequest({ port, pathName: '/api/overview?demo=1', headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(res.status, 200);
+    const body = res.body;
+    const demo = JSON.parse(body);
+
+    assert.equal(demo.demo, true);
+    assert.equal(demo.members.length, 4);
+    assert.equal(demo.tasks.length, 6);
+
+    // At least one task in every Kanban column.
+    const states = new Set(demo.tasks.map((t) => t.state));
+    const groups = {
+      queued: ['created', 'dispatching', 'dispatched'],
+      running: ['running'],
+      attention: ['stalled', 'uncertain', 'needs_input'],
+      done: ['completed', 'failed', 'rerouted'],
+    };
+    for (const [group, allowed] of Object.entries(groups)) {
+      assert.ok([...states].some((s) => allowed.includes(s)), `no demo task in Kanban group ${group} (states: ${[...states].join(',')})`);
+    }
+
+    assert.equal(demo.worktrees.length, 1);
+    assert.equal(demo.worktrees[0].verify_status, 'passed');
+    assert.equal(demo.notes.length, 2);
+    assert.equal(Object.keys(demo.telemetry.agents).length, 4);
+    assert.equal(demo.metrics.tasks_total, 6);
+
+    // Privacy: no personal paths, no drive letters, no IPs, no localhost, no relative escapes.
+    assert.doesNotMatch(body, /\/home\/|\/Users\/|\/mnt\/|[A-Za-z]:\\|\b127\.0\.0\.1\b|\blocalhost\b|\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    assert.ok(!body.includes(os.homedir()), 'demo payload must not contain the real home directory');
+    assert.ok(!body.includes('../'), 'demo payload must not contain a .. traversal segment');
   } finally {
     server.close();
     env.cleanup();
