@@ -14,7 +14,7 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-34%20Tools-8b5cf6" alt="MCP 34 Tools" />
+  <img src="https://img.shields.io/badge/MCP-37%20Tools-8b5cf6" alt="MCP 37 Tools" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="Zero npm runtime deps" />
 </p>
 
@@ -29,7 +29,8 @@
 > **Try it live — zero install:** [**Open the Interactive Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
 > Flip **EN / 中文**, switch **Obsidian Dark / Alabaster Light**, inspect the **4-column Kanban**, hit `Ctrl+K`, and click **Simulate Live DAG** to watch nodes light up and streaming logs roll in — 100% in your browser, zero install, zero signup.
 
-- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **34 unified MCP tools** and one local web workbench.
+- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **37 unified MCP tools** and one local web workbench.
+- **Self-diagnosing, self-healing & self-improving** — Runtime **0–100 Health Score**, dry-run/apply safe **Auto-Heal** (`collab_self_heal`), toggleable **Learned Guardrails** (`collab_lessons`) injected into future dispatches, per-channel Bayesian reliability + soft circuit breakers, and opt-in closed-loop **Auto-Repair DAG** steps.
 - **Watch it run, stop or resume cleanly** — Cross-process durable SQLite streaming logs with lossless SSE replay, confirmed process-group **Cancel/Abort** (`collab_cancel`), live SVG DAG overlays, **Checkpoint Resume** (`collab_workflow_resume`), and SHA-pinned Git worktree verification gates before merge.
 - **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux, with transactional schema migrations, credential-to-host binding, and dirty-gated 0-mutation idle UI.
 

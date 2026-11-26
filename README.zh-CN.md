@@ -14,7 +14,7 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-34%20Tools-8b5cf6" alt="MCP 34 Tools" />
+  <img src="https://img.shields.io/badge/MCP-37%20Tools-8b5cf6" alt="MCP 37 Tools" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="零 npm 依赖" />
 </p>
 
@@ -29,7 +29,8 @@
 > **在线试用，无需安装：** [**打开交互式工作台演示 →**](https://mortal7520.github.io/collab-hub/)
 > 一键切换 **EN / 中文** 与 **Obsidian Dark / Alabaster Light** 主题，浏览 **4 列看板**，按 `Ctrl+K` 呼出命令面板，点击 **模拟 DAG 实时运行** 即可在浏览器中亲眼看到节点亮起与实时流式日志滚动 —— 零安装、零注册。
 
-- **零厂商锁定，复用你已有的 Agent** —— 通过 **34 个统一 MCP 工具** 和一个本地 Web 工作台，统一编排 Claude Code、Codex、Gemini CLI、Aider、OpenCode、Ollama、LM Studio、DeepSeek、OpenRouter 或自定义脚本。
+- **零厂商锁定，复用你已有的 Agent** —— 通过 **37 个统一 MCP 工具** 和一个本地 Web 工作台，统一编排 Claude Code、Codex、Gemini CLI、Aider、OpenCode、Ollama、LM Studio、DeepSeek、OpenRouter 或自定义脚本。
+- **运行态自诊断、一键安全自愈与经验护栏自进化** —— 实时 **0–100 健康度评分**、预览/执行分离的安全自愈（`collab_self_heal`）、可启停的**经验护栏库**（`collab_lessons` 自动从重复故障中提炼并有界注入后续任务）、按通道隔离的贝叶斯可靠性路由与软熔断，以及可选的闭环 **Auto-Repair DAG** 自动返修。
 - **过程全可见，可确认中止、可断点续跑** —— 跨进程持久化 SQLite 流式日志与无损 SSE 断线补发、进程组级**可确认中止**（`collab_cancel`）、Live SVG DAG 状态联动、**失败断点续跑**（`collab_workflow_resume`），以及 SHA 锁定合并的 Git Worktree 测试闸门。
 - **零 npm 第三方依赖，10 秒启动** —— 纯 Node.js `>=22.13` 原生内置模块（`node:sqlite`、`node:http`、`node:child_process`），具备事务化数据库迁移、凭据与目标主机绑定，以及内容指纹脏检查的零空转前端渲染。
 

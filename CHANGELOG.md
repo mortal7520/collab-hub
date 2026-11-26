@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.4.0 (2026-11-25)
+
+**Self-Improving & Self-Healing Multi-Agent Engine: runtime self-diagnosis, safe dry-run/apply auto-heal, learned incident guardrails, per-channel Bayesian telemetry, opt-in closed-loop auto-repair DAG, and 37 unified MCP tools** — built & adversarially audited concurrently by `Codex Desktop` + `WSL DSH` + `Cloud Muse` + `AGY`.
+
+### Highlights
+- **Runtime Self-Diagnosis & Safe Auto-Heal Engine (`src/self-improve.mjs`, `collab_self_check`, `collab_self_heal`, `/api/system/self-check`, `/api/system/self-heal`)**:
+  - Computes a decomposable `0–100` operational Health Score across 8 runtime detectors: dead-owner orphans, stuck/needs_input tasks, expired cooldowns, missing-on-disk worktrees, repeating failure clusters, degraded agent circuit breakers, WAL/retention size, and stale desktop presence.
+  - Strict boolean `apply` guard (`dry_run` default is 100% read-only with zero DB writes); `apply: true` executes ONLY verified zero-risk operational heals: conservative orphan recovery (`uncertain`), atomic conditional cooldown cleanup, non-terminal-task-safe missing worktree reconciliation, bounded 500-row retention pruning preserving open-task audit trails, non-blocking `PRAGMA wal_checkpoint(PASSIVE)`, and automatic deduplicated `incident_lessons` extraction.
+  - Every `apply` run is persisted in an append-only `self_improve_runs` audit trail (`SCHEMA_VERSION = 140` inside `BEGIN IMMEDIATE`).
+- **Learned Runtime Guardrails (`incident_lessons`, `collab_lessons`, `/api/lessons*`)**:
+  - Automatically extracts and deduplicates operational lessons from repeating failure clusters and successful auto-repairs, injecting up to 3 relevant active guardrails (strictly capped at `<= 700 chars` total prefix, redacted of secrets & prompt-injection delimiters, opt-out via `inject_guardrails: false` across HTTP/MCP/DAG).
+  - Full operator control in the UI & CLI (`collab-hub lessons list|save|toggle`) to inspect hit counts, pause/resume rules, or add custom guardrails.
+- **Per-Channel Bayesian Reliability & Soft Circuit Breaker (`src/telemetry.mjs`, `src/prober.mjs`)**:
+  - Isolates reliability scoring strictly by `(member, channel)` so `claude-cli` 429s never penalize `claude` `desktop-native` sessions and cold-start channels start neutral (`0`).
+  - Fixes stalled-task denominator distortion (`effective_attempts = completed + failed + stalled`) with 7-day exponential recency decay, excluding operator `cancelled`, `needs_input`, and `429` from permanent reliability penalties while surfacing an `open`/`half_open`/`closed` circuit breaker.
+- **Opt-In Closed-Loop Auto-Repair DAG (`src/workflows.mjs`) & Windows+WSL Worktree Self-Heal (`src/worktree.mjs`)**:
+  - Opt-in `auto_repair: { enabled: true, max_repairs: 1..2 }` (included in `plan_sha256`, hard batch cap `4` enforced against persisted SQLite rows, strictly blocked on `uncertain`/`stalled`/`needs_input`/`cancelled`/429, halts immediately on duplicate failure fingerprint, passes allowlisted structured metadata only — zero raw stderr/secret leakage!).
+  - Self-healing `healWslWorktreeConfig()` in `src/worktree.mjs` automatically clears rogue WSL `worktree = /mnt/...` entries in Windows `.git/config` so mixed Windows + WSL agent teams never hit `fatal: Invalid path '/mnt'`.
+- **Self-Improve & Auto-Heal Workbench UI (`public/app.js`, `public/styles.css`, `public/index.html`)**:
+  - Animated `132px` SVG Health Score ring, Overview KPI health pill (0 DOM mutations on unchanged 15s polls), Live Findings list (`Auto-Healable` vs `Operator Review`), interactive Learned Guardrails library with toggle & inline add form, Recent Self-Heal audit timeline, 104 new EN/中文 keys (`752/752` parity), and full zero-network interactive Demo (`84 → 98` simulated heal).
+- **37 Unified MCP Tools & CLI Subcommands**: Added `collab_self_check` (#35), `collab_self_heal` (#36), and `collab_lessons` (#37), plus CLI `self-check`, `self-heal [--apply]`, and `lessons`.
+
 ## v1.3.0 (2026-11-25)
 
 **Deep Systems & Architecture Hardening: cross-process SQLite control plane, lossless SSE replay, confirmed cancellation, transactional migrations, credential-to-host binding, and 0-mutation dirty-gated UI** — audited & hardened concurrently by `Codex Desktop` + `WSL DSH` + `AGY`.
