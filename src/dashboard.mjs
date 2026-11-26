@@ -869,8 +869,12 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
       if (req.method === 'POST' && url.pathname === '/api/system/self-heal') {
         const parsed = await readBoundedJson(req);
         try {
+          if (parsed.apply !== undefined && typeof parsed.apply !== 'boolean') {
+            sendJson(res, 400, { error: 'apply must be a strict boolean (true or false)' });
+            return;
+          }
           sendJson(res, 200, applySelfHeal(db, {
-            apply: Boolean(parsed.apply),
+            apply: parsed.apply === true,
             recordLessons: parsed.record_lessons !== false,
             worktreeDir: dispatchDeps.worktreeRoot,
             memoryDir: dispatchDeps.memoryDir,
@@ -1014,6 +1018,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
             prompt: parsed.prompt,
             batchId: parsed.batch_id || null,
             autoFallback: Boolean(parsed.auto_fallback),
+            injectGuardrails: parsed.inject_guardrails !== false,
             asyncRun: isAsync,
             waitSec: 0,
           }, dispatchDeps);

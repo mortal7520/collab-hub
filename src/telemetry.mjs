@@ -87,7 +87,7 @@ function accumulateRow(bucket, r, nowMs) {
     if (!is429 && !bucket.streak_broken && ageMs <= CIRCUIT_WINDOW_MS) {
       bucket.recent_streak_bad += 1;
     }
-  } else if (['stalled', 'uncertain', 'needs_input'].includes(r.state)) {
+  } else if (['stalled', 'uncertain'].includes(r.state)) {
     bucket.stalled += 1;
     if (withinCap) {
       bucket.weighted_fail += decayWeight * 0.25;
@@ -96,6 +96,9 @@ function accumulateRow(bucket, r, nowMs) {
     if (!bucket.streak_broken && ageMs <= CIRCUIT_WINDOW_MS) {
       bucket.recent_streak_bad += 1;
     }
+  } else if (r.state === 'needs_input') {
+    // Waiting on human approval/input is NOT an agent reliability failure
+    bucket.stalled += 1;
   } else if (r.state === 'cancelled') {
     bucket.cancelled += 1;
   } else if (['running', 'dispatching', 'dispatched'].includes(r.state)) {
@@ -118,9 +121,9 @@ function finalizeBucket(m) {
   if (weightedDenom > 0) {
     const posterior = (4 + m.weighted_ok) / (8 + m.weighted_ok + m.weighted_fail);
     reliabilityDelta = Math.round((posterior - 0.5) * 8);
-    // Ensure small clean streaks of >=2 successes still get at least +1 (and >=2 failures get <= -1)
-    if (reliabilityDelta === 0 && m.completed >= 2 && m.failed === 0 && m.stalled === 0) reliabilityDelta = 1;
-    if (reliabilityDelta === 0 && (m.failed + m.stalled) >= 2 && m.completed === 0) reliabilityDelta = -1;
+    // Ensure clean attributable streaks of >=2 successes get >= +1, and attributable failures get <= -1
+    if (reliabilityDelta === 0 && m.weighted_ok >= 1.5 && m.weighted_fail === 0) reliabilityDelta = 1;
+    if (reliabilityDelta === 0 && m.weighted_fail >= 1.5 && m.weighted_ok === 0) reliabilityDelta = -1;
   }
 
   const circuitState = m.recent_streak_bad >= 3

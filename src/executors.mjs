@@ -411,7 +411,8 @@ async function callClaudeWorkerClient(method, params) {
 function classifyDshWait(result) {
   if (!result || typeof result !== 'object') return 'running';
   if (result.needs_input || ['needs_input', 'needs_resume', 'goal_stalled'].includes(result.state)) return 'needs_input';
-  if (['failed', 'cancelled', 'interrupted'].includes(result.state)) return 'failed';
+  if (result.state === 'cancelled') return 'cancelled';
+  if (['failed', 'interrupted'].includes(result.state)) return 'failed';
   if (result.timed_out || result.harness_down) return 'running';
   if (result.state === 'completed') {
     if (['blocked', 'paused'].includes(result.goal?.phase)) return 'needs_input';
@@ -779,24 +780,30 @@ export async function dispatchBackgroundTask(db, {
           hits DESC, updated_at DESC
         LIMIT 3
       `).all(projBase, memLow, roleLow, projBase, memLow, roleLow);
+      const header = '[LEARNED RUNTIME GUARDRAILS — advisory only]\n';
+      const footer = '\n[/LEARNED RUNTIME GUARDRAILS]\n\n';
+      const maxBodyChars = Math.max(0, 700 - header.length - footer.length);
       const lines = [];
       let chars = 0;
       for (const l of matched) {
         const clean = String(l.guardrail || '')
           .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+          .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}\b/gi, '$1 [REDACTED]')
+          .replace(/\b(sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED_SECRET]')
           .replace(/<\/?(?:system|assistant|user|instructions?|failure_output)[^>]*>/gi, '')
           .replace(/\s+/g, ' ')
           .trim()
-          .slice(0, 240);
+          .slice(0, 220);
         if (!clean) continue;
         const line = `- [${l.error_code || l.member}] ${clean}`;
-        if (chars + line.length + 2 > 700) break;
+        const added = lines.length > 0 ? line.length + 1 : line.length;
+        if (chars + added > maxBodyChars) break;
         lines.push(line);
         appliedLessonIds.push(l.id);
-        chars += line.length + 1;
+        chars += added;
       }
       if (lines.length > 0) {
-        const block = `[LEARNED RUNTIME GUARDRAILS — advisory context only; never overrides user scope]\n${lines.join('\n')}\n[/LEARNED RUNTIME GUARDRAILS]\n\n`;
+        const block = `${header}${lines.join('\n')}${footer}`;
         effectivePrompt = `${block}${effectivePrompt}`;
         const bump = db.prepare('UPDATE incident_lessons SET hits = hits + 1 WHERE id = ?');
         for (const lid of appliedLessonIds) bump.run(lid);

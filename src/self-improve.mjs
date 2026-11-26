@@ -19,6 +19,8 @@ const MAX_INJECTED_CHARS = 700;
 export function sanitizeLessonText(raw, maxLen = MAX_GUARDRAIL_LEN) {
   return String(raw || '')
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}\b/gi, '$1 [REDACTED]')
+    .replace(/\b(authorization|api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
     .replace(/\b(sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{20,})\b/g, '[REDACTED_SECRET]')
     .replace(/<\/?(?:system|assistant|user|instructions?|failure_output)[^>]*>/gi, '')
     .replace(/\s+/g, ' ')
@@ -284,15 +286,15 @@ export function diagnoseSystem(db, { dbPath = DB_PATH, worktreeDir = WORKTREE_DI
     });
   }
 
-  // 4. Active worktree records missing on disk (only when mount root exists & no active task uses the worktree)
+  // 4. Active worktree records missing on disk (only when mount root exists & NO non-terminal task uses the worktree)
   const mountHealthy = !worktreeDir || fs.existsSync(worktreeDir);
-  const activeTaskWts = new Set(
-    db.prepare("SELECT worktree_path FROM tasks WHERE state IN ('dispatching', 'running', 'dispatched') AND worktree_path IS NOT NULL")
+  const openTaskWts = new Set(
+    db.prepare("SELECT worktree_path FROM tasks WHERE state NOT IN ('completed', 'failed', 'rerouted', 'cancelled') AND worktree_path IS NOT NULL")
       .all()
       .map((r) => String(r.worktree_path).toLowerCase()),
   );
   const missingWts = mountHealthy
-    ? listWorktrees(db, { state: 'active' }).filter((w) => !fs.existsSync(w.worktree_path) && !activeTaskWts.has(String(w.worktree_path || '').toLowerCase()))
+    ? listWorktrees(db, { state: 'active' }).filter((w) => !fs.existsSync(w.worktree_path) && !openTaskWts.has(String(w.worktree_path || '').toLowerCase()))
     : [];
   if (missingWts.length > 0) {
     score -= Math.min(15, missingWts.length * 6);
@@ -374,7 +376,7 @@ export function diagnoseSystem(db, { dbPath = DB_PATH, worktreeDir = WORKTREE_DI
       title: 'SQLite retention or WAL checkpoint recommended',
       detail: `events=${evCount}, task_logs=${logCount}, wal=${Math.round(walBytes / 1024)}KB`,
       auto_healable: true,
-      recommended_action: 'Run retention pruning and PRAGMA wal_checkpoint(TRUNCATE).',
+      recommended_action: 'Run bounded retention pruning (max 500 rows/call) and PRAGMA wal_checkpoint(PASSIVE).',
     });
   }
 
@@ -447,6 +449,10 @@ export function applySelfHeal(db, {
   worktreeDir = WORKTREE_DIR,
   memoryDir = path.join(APP_ROOT, 'memory'),
 } = {}) {
+  if (typeof apply !== 'boolean') {
+    throw new Error('apply must be a strict boolean (true or false)');
+  }
+  const doApply = apply === true;
   const before = diagnoseSystem(db, { dbPath, worktreeDir });
   const actionsTaken = [];
   let recordedLessons = 0;
@@ -454,14 +460,14 @@ export function applySelfHeal(db, {
   for (const f of before.findings) {
     if (!f.auto_healable) continue;
     if (f.id === 'dead_owner_orphans') {
-      if (apply) {
+      if (doApply) {
         const res = sweepOrphanTasks(db);
         actionsTaken.push({ action: 'sweep_orphan_tasks', count: res.recovered.length, detail: `Recovered ${res.recovered.length} dead-owner task(s) to uncertain` });
       } else {
         actionsTaken.push({ action: 'sweep_orphan_tasks', count: f.target_ids?.length || 0, detail: `[dry-run] Would mark ${f.target_ids?.length || 0} dead-owner task(s) uncertain` });
       }
     } else if (f.id === 'expired_cooldowns') {
-      if (apply) {
+      if (doApply) {
         let cleared = 0;
         for (const spec of (f.target_ids || [])) {
           const [mId, expectedUntil, expectedChan] = String(spec).split('|');
@@ -478,12 +484,14 @@ export function applySelfHeal(db, {
         actionsTaken.push({ action: 'clear_expired_cooldowns', count: f.target_ids?.length || 0, detail: `[dry-run] Would clear ${f.target_ids?.length || 0} expired cooldown(s)` });
       }
     } else if (f.id === 'missing_worktrees') {
-      if (apply) {
+      if (doApply) {
         let reconciled = 0;
         const now = new Date().toISOString();
         for (const tid of (f.target_ids || [])) {
           const wt = db.prepare("SELECT worktree_path FROM worktrees WHERE task_id = ? AND state = 'active'").get(tid);
           if (!wt || fs.existsSync(wt.worktree_path)) continue;
+          const stillOpen = db.prepare("SELECT 1 FROM tasks WHERE worktree_path = ? AND state NOT IN ('completed', 'failed', 'rerouted', 'cancelled') LIMIT 1").get(wt.worktree_path);
+          if (stillOpen) continue;
           const r = db.prepare("UPDATE worktrees SET state = 'missing', updated_at = ? WHERE task_id = ? AND state = 'active'").run(now, tid);
           reconciled += Number(r.changes || 0);
         }
@@ -493,7 +501,7 @@ export function applySelfHeal(db, {
       }
     } else if (f.id === 'repeating_error_clusters' && recordLessons) {
       const targets = f.target_ids || [];
-      if (apply) {
+      if (doApply) {
         for (const pair of targets) {
           const [member, code] = String(pair).split(':');
           saveIncidentLesson(db, {
@@ -526,31 +534,46 @@ export function applySelfHeal(db, {
         actionsTaken.push({ action: 'extract_incident_lessons', count: targets.length, detail: `[dry-run] Would extract ${targets.length} incident guardrail(s)` });
       }
     } else if (f.id === 'db_retention_wal') {
-      if (apply) {
-        // Bounded 500-row retention prune + non-blocking PASSIVE WAL checkpoint (never stalls active writers!)
-        const pr = pruneRetentionTables(db, { maxEvents: 10000, maxLogs: 20000 });
+      if (doApply) {
+        const pr = pruneRetentionTables(db, { maxEvents: 10000, maxLogs: 20000, maxDeletePerCall: 500 });
         try { db.exec('PRAGMA wal_checkpoint(PASSIVE);'); } catch {}
-        actionsTaken.push({ action: 'prune_and_checkpoint_wal', count: pr.pruned_events + pr.pruned_logs, detail: `Pruned ${pr.pruned_events} events / ${pr.pruned_logs} logs and ran non-blocking WAL PASSIVE checkpoint` });
+        actionsTaken.push({ action: 'prune_and_checkpoint_wal', count: pr.pruned_events + pr.pruned_logs, detail: `Pruned ${pr.pruned_events} events / ${pr.pruned_logs} logs (cap 500/call) and ran WAL PASSIVE checkpoint` });
       } else {
-        actionsTaken.push({ action: 'prune_and_checkpoint_wal', count: 1, detail: '[dry-run] Would prune expired events/logs and run WAL PASSIVE checkpoint' });
+        actionsTaken.push({ action: 'prune_and_checkpoint_wal', count: 1, detail: '[dry-run] Would prune expired events/logs (cap 500/call) and run WAL PASSIVE checkpoint' });
       }
     }
   }
 
-  const after = apply ? diagnoseSystem(db, { dbPath, worktreeDir }) : before;
-  const healedCount = apply ? actionsTaken.reduce((sum, a) => sum + (a.count || 0), 0) : 0;
-  const summary = apply
-    ? (actionsTaken.length > 0
-      ? `Applied ${actionsTaken.length} safe heal action(s); health score ${before.health_score} → ${after.health_score}.`
-      : `No auto-healable anomalies needed action (score ${after.health_score}).`)
-    : `Dry-run preview: ${actionsTaken.length} safe heal action(s) available (current score ${before.health_score}).`;
+  // Dry-run preview MUST be 100% read-only (zero writes to self_improve_runs or events!)
+  if (!doApply) {
+    return {
+      ok: true,
+      applied: false,
+      run_id: null,
+      before_score: before.health_score,
+      after_score: before.health_score,
+      healed_count: 0,
+      recorded_lessons: 0,
+      summary: `Dry-run preview: ${actionsTaken.length} safe heal action(s) available (current score ${before.health_score}).`,
+      actions_taken: actionsTaken,
+      remaining_findings: before.findings,
+      lessons: before.lessons,
+      recent_runs: before.recent_runs,
+    };
+  }
+
+  const after = diagnoseSystem(db, { dbPath, worktreeDir });
+  const healedCount = actionsTaken.reduce((sum, a) => sum + (a.count || 0), 0);
+  const summary = actionsTaken.length > 0
+    ? `Applied ${actionsTaken.length} safe heal action(s); health score ${before.health_score} → ${after.health_score}.`
+    : `No auto-healable anomalies needed action (score ${after.health_score}).`;
 
   const now = new Date().toISOString();
   const runInsert = db.prepare(`
     INSERT INTO self_improve_runs (mode, before_score, after_score, findings_count, healed_count, recorded_lessons, summary, actions_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    apply ? 'apply' : 'dry_run',
+    'apply',
     before.health_score,
     after.health_score,
     before.findings.length,
@@ -562,14 +585,14 @@ export function applySelfHeal(db, {
   );
   const runId = Number(runInsert.lastInsertRowid);
   logEvent(db, {
-    eventType: apply ? 'system.self_healed' : 'system.self_check_preview',
+    eventType: 'system.self_healed',
     actor: 'collab-hub',
     payload: { run_id: runId, before_score: before.health_score, after_score: after.health_score, healed_count: healedCount, recorded_lessons: recordedLessons },
   });
 
   return {
     ok: true,
-    applied: Boolean(apply),
+    applied: true,
     run_id: runId,
     before_score: before.health_score,
     after_score: after.health_score,

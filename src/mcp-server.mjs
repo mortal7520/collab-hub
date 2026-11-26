@@ -598,6 +598,7 @@ export async function handleToolCall(db, name, args = {}) {
         dependsOn: args.depends_on || [],
         autoInjectContext: Boolean(args.auto_inject_context),
         autoFallback: Boolean(args.auto_fallback),
+        injectGuardrails: args.inject_guardrails !== false,
         reservePaths: args.reserve_paths || [],
         allowLeaseConflict: Boolean(args.allow_lease_conflict),
         member: args.member,
@@ -767,11 +768,15 @@ export async function handleToolCall(db, name, args = {}) {
       });
     case 'collab_self_check':
       return diagnoseSystem(db);
-    case 'collab_self_heal':
+    case 'collab_self_heal': {
+      if (args.apply !== undefined && typeof args.apply !== 'boolean') {
+        throw new Error('apply must be a strict boolean (true or false)');
+      }
       return applySelfHeal(db, {
-        apply: Boolean(args.apply),
+        apply: args.apply === true,
         recordLessons: args.record_lessons !== false,
       });
+    }
     case 'collab_lessons': {
       if (args.action === 'list') {
         return { lessons: listIncidentLessons(db, { member: args.member || null }) };

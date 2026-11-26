@@ -70,7 +70,29 @@ function detectVerifyPreset(wtPath) {
   return 'node-test';
 }
 
+/**
+ * Self-healing guard for mixed Windows + WSL worktree workflows:
+ * if a WSL git invocation leaves a Linux `worktree = /mnt/...` entry in the main repo `.git/config`,
+ * Windows `git` fails with `fatal: Invalid path '/mnt'`. Strip only that rogue POSIX mount entry.
+ */
+function healWslWorktreeConfig(cwd) {
+  if (process.platform !== 'win32' || !cwd) return;
+  try {
+    const cfgPath = path.join(cwd, '.git', 'config');
+    if (!fs.existsSync(cfgPath) || !fs.statSync(cfgPath).isFile()) return;
+    const raw = fs.readFileSync(cfgPath, 'utf8');
+    if (!/^[ \t]*worktree[ \t]*=[ \t]*\/mnt\/[a-z]\//im.test(raw)) return;
+    const cleaned = raw.replace(/^[ \t]*worktree[ \t]*=[ \t]*\/mnt\/[a-z]\/[^\r\n]*\r?\n?/gim, '');
+    if (cleaned !== raw) {
+      const tmp = `${cfgPath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmp, cleaned, 'utf8');
+      fs.renameSync(tmp, cfgPath);
+    }
+  } catch { /* best-effort */ }
+}
+
 function git(cwd, args, { timeout = 60000 } = {}) {
+  healWslWorktreeConfig(cwd);
   return execFileSync('git', ['--no-optional-locks', ...args], {
     cwd,
     encoding: 'utf8',

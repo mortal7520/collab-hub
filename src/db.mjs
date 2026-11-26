@@ -249,19 +249,41 @@ function initSchema(db) {
  * Bounded retention budget for append-only `events` and `task_logs` tables so long-running hubs
  * never bloat SQLite unboundedly.
  */
-export function pruneRetentionTables(db, { maxEvents = 10000, maxLogs = 20000 } = {}) {
+export function pruneRetentionTables(db, { maxEvents = 10000, maxLogs = 20000, maxDeletePerCall = 500 } = {}) {
   let prunedEvents = 0;
   let prunedLogs = 0;
+  const batchCap = Math.max(1, Math.min(5000, Number(maxDeletePerCall) || 500));
   try {
     const evCut = db.prepare('SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?').get(maxEvents);
     if (evCut?.id) {
-      prunedEvents = db.prepare('DELETE FROM events WHERE id <= ?').run(evCut.id).changes || 0;
+      // Never delete events belonging to non-terminal tasks, and cap deletion per call to `batchCap` rows
+      prunedEvents = db.prepare(`
+        DELETE FROM events
+        WHERE id IN (
+          SELECT e.id FROM events e
+          LEFT JOIN tasks t ON t.task_id = e.task_id
+          WHERE e.id <= ?
+            AND (e.task_id IS NULL OR t.task_id IS NULL OR t.state IN ('completed', 'failed', 'rerouted', 'cancelled'))
+          ORDER BY e.id ASC
+          LIMIT ?
+        )
+      `).run(evCut.id, batchCap).changes || 0;
     }
   } catch { /* best-effort */ }
   try {
     const logCut = db.prepare('SELECT id FROM task_logs ORDER BY id DESC LIMIT 1 OFFSET ?').get(maxLogs);
     if (logCut?.id) {
-      prunedLogs = db.prepare('DELETE FROM task_logs WHERE id <= ?').run(logCut.id).changes || 0;
+      prunedLogs = db.prepare(`
+        DELETE FROM task_logs
+        WHERE id IN (
+          SELECT l.id FROM task_logs l
+          LEFT JOIN tasks t ON t.task_id = l.task_id
+          WHERE l.id <= ?
+            AND (t.task_id IS NULL OR t.state IN ('completed', 'failed', 'rerouted', 'cancelled'))
+          ORDER BY l.id ASC
+          LIMIT ?
+        )
+      `).run(logCut.id, batchCap).changes || 0;
     }
   } catch { /* best-effort */ }
   return { pruned_events: prunedEvents, pruned_logs: prunedLogs };

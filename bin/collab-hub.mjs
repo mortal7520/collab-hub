@@ -230,8 +230,11 @@ if (cmd === 'mcp') {
     } else if (cmd === 'self-check') {
       console.log(JSON.stringify(diagnoseSystem(db), null, 2));
     } else if (cmd === 'self-heal') {
+      if (flags.apply !== undefined && flags.apply !== true && flags.apply !== 'true' && flags.apply !== 'false') {
+        throw new Error('--apply accepts only true/false or bare flag');
+      }
       console.log(JSON.stringify(applySelfHeal(db, {
-        apply: Boolean(flags.apply),
+        apply: flags.apply === true || flags.apply === 'true',
         recordLessons: flags['no-lessons'] ? false : true,
       }), null, 2));
     } else if (cmd === 'lessons') {

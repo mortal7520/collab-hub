@@ -325,9 +325,10 @@ export function planDispatch(db, {
     else if (m.state === 'idle') score += 30;
     if (m.member === 'claude' && m.channel === 'desktop-native' && m.state === 'online') score += 15;
     const chanKey = `${m.member}::${m.channel || 'default'}`;
-    const tStats = channelTelemetry[chanKey] || telemetry[m.member] || null;
+    // Strict per-channel isolation: cold-start channels stay neutral (0) and NEVER inherit penalties from another channel!
+    const tStats = channelTelemetry[chanKey] || null;
     if (tStats?.reliability_delta) score += tStats.reliability_delta;
-    // Soft circuit-breaker penalty on >=3 consecutive recent non-429 failures/stalls
+    // Soft circuit-breaker penalty on >=3 consecutive recent non-429, non-needs_input failures/stalls on THIS channel
     if (tStats?.circuit_state === 'open') score -= 8;
 
     const executionMode = (m.channel === 'desktop-native') ? 'desktop_native_bridge' : 'background_auto';

@@ -1947,18 +1947,33 @@ test('v1.4: per-channel telemetry isolation, stalled denominator fix, self-diagn
     assert.ok(diagBefore.findings.some((f) => f.id === 'missing_worktrees'));
     assert.ok(diagBefore.findings.some((f) => f.id === 'repeating_error_clusters'));
 
-    // Dry-run MUST NOT mutate DB
+    // Dry-run MUST NOT mutate DB or write to self_improve_runs
+    const runsBeforeDry = env.db.prepare('SELECT COUNT(*) AS c FROM self_improve_runs').get().c;
     const preview = applySelfHeal(env.db, { apply: false, worktreeDir: env.wts, memoryDir: env.mem });
     assert.equal(preview.applied, false);
+    assert.equal(preview.run_id, null);
+    assert.equal(env.db.prepare('SELECT COUNT(*) AS c FROM self_improve_runs').get().c, runsBeforeDry);
     assert.equal(env.db.prepare("SELECT state FROM tasks WHERE task_id = 'v14-orphan-1'").get().state, 'running');
 
-    // Apply safe auto-heal -> improves score, marks orphan uncertain, clears expired cooldown, marks missing worktree, extracts lessons
+    // Non-terminal (needs_input) task worktree MUST NOT be marked missing
+    const openWtPath = path.join(env.wts, 'needs-input-wt');
+    env.db.prepare(`
+      INSERT INTO worktrees (task_id, repo_dir, worktree_path, wsl_path, branch_name, base_ref, member, state, created_at, updated_at)
+      VALUES ('wt-open-ni', ?, ?, '/mnt/d/ni', 'collab/dsh/wt-open-ni', 'main', 'dsh', 'active', ?, ?)
+    `).run(env.proj, openWtPath, now, now);
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, worktree_path, created_at, updated_at)
+      VALUES ('t-open-ni', ?, 'dsh', 'implementer', 'dsh-baton', 'Needs input', 'p', 'needs_input', ?, ?, ?)
+    `).run(env.proj, openWtPath, now, now);
+
+    // Apply safe auto-heal -> improves score, marks orphan uncertain, clears expired cooldown, marks missing worktree, protects needs_input worktree, extracts lessons
     const healed = applySelfHeal(env.db, { apply: true, recordLessons: true, worktreeDir: env.wts, memoryDir: env.mem });
     assert.equal(healed.applied, true);
     assert.ok(healed.after_score > healed.before_score);
     assert.equal(env.db.prepare("SELECT state FROM tasks WHERE task_id = 'v14-orphan-1'").get().state, 'uncertain');
     assert.equal(env.db.prepare("SELECT cooldown_until FROM member_status WHERE member = 'claude'").get().cooldown_until, null);
     assert.equal(env.db.prepare("SELECT state FROM worktrees WHERE task_id = 'wt-gone'").get().state, 'missing');
+    assert.equal(env.db.prepare("SELECT state FROM worktrees WHERE task_id = 'wt-open-ni'").get().state, 'active');
     assert.ok(healed.recorded_lessons >= 1);
 
     // 4. Learned guardrail injection into dispatch prompt + toggle pause
@@ -2058,12 +2073,34 @@ test('v1.4: opt-in closed-loop auto_repair DAG (redacts secrets, stops on duplic
     });
     assert.equal(noCsrf.status, 403);
 
+    const badBool = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/system/self-heal', headers: hdrs,
+      body: JSON.stringify({ apply: 'false' }),
+    });
+    assert.equal(badBool.status, 400, 'string "false" must be rejected instead of coerced to true');
+
     const sh = await rawHttpRequest({
       port, method: 'POST', pathName: '/api/system/self-heal', headers: hdrs,
       body: JSON.stringify({ apply: false }),
     });
     assert.equal(sh.status, 200);
     assert.equal(JSON.parse(sh.body).applied, false);
+
+    // Dashboard dispatch honors inject_guardrails: false
+    saveIncidentLesson(env.db, {
+      project: 'demo-proj', member: 'repair-cli', role: 'implementer', errorCode: 'NO_INJ',
+      pattern: 'Suppress test', guardrail: 'MUST_NOT_APPEAR_WHEN_DISABLED',
+    });
+    const noGuardDisp = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/tasks/dispatch', headers: hdrs,
+      body: JSON.stringify({
+        task_id: 'v14-noguard-http', member: 'repair-cli', role: 'implementer', project_dir: env.proj,
+        title: 'No guard', prompt: 'CLOSED-LOOP REPAIR DIAGNOSTIC', inject_guardrails: false,
+      }),
+    });
+    assert.equal(noGuardDisp.status, 200);
+    const storedPrompt = env.db.prepare("SELECT prompt FROM tasks WHERE task_id = 'v14-noguard-http'").get().prompt;
+    assert.equal(storedPrompt.includes('MUST_NOT_APPEAR_WHEN_DISABLED'), false);
 
     const lsSave = await rawHttpRequest({
       port, method: 'POST', pathName: '/api/lessons/save', headers: hdrs,
