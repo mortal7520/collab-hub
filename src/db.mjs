@@ -40,7 +40,7 @@ function ensureColumn(db, table, column, definition) {
   }
 }
 
-const SCHEMA_VERSION = 130;
+const SCHEMA_VERSION = 140;
 
 function initSchema(db) {
   db.exec('BEGIN IMMEDIATE;');
@@ -150,6 +150,36 @@ function initSchema(db) {
       project_dir TEXT NOT NULL,
       plan_json TEXT NOT NULL,
       plan_sha256 TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS incident_lessons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fingerprint TEXT NOT NULL UNIQUE,
+      project TEXT NOT NULL DEFAULT '*',
+      member TEXT NOT NULL DEFAULT '*',
+      role TEXT NOT NULL DEFAULT '*',
+      error_code TEXT NOT NULL DEFAULT '',
+      pattern TEXT NOT NULL,
+      guardrail TEXT NOT NULL,
+      hits INTEGER NOT NULL DEFAULT 1,
+      active INTEGER NOT NULL DEFAULT 1,
+      auto_learned INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_incident_lessons_active ON incident_lessons(active, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS self_improve_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode TEXT NOT NULL,
+      before_score INTEGER NOT NULL,
+      after_score INTEGER NOT NULL,
+      findings_count INTEGER NOT NULL,
+      healed_count INTEGER NOT NULL,
+      recorded_lessons INTEGER NOT NULL DEFAULT 0,
+      summary TEXT NOT NULL,
+      actions_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
   `);

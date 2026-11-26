@@ -14,6 +14,7 @@ import { runPlaybook } from '../src/playbooks.mjs';
 import { probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
+import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
@@ -226,6 +227,30 @@ if (cmd === 'mcp') {
       const rep = await runSystemDoctor(db);
       if (flags.backup) rep.backup = createHotBackup(db);
       console.log(JSON.stringify(rep, null, 2));
+    } else if (cmd === 'self-check') {
+      console.log(JSON.stringify(diagnoseSystem(db), null, 2));
+    } else if (cmd === 'self-heal') {
+      console.log(JSON.stringify(applySelfHeal(db, {
+        apply: Boolean(flags.apply),
+        recordLessons: flags['no-lessons'] ? false : true,
+      }), null, 2));
+    } else if (cmd === 'lessons') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ lessons: listIncidentLessons(db) }, null, 2));
+      else if (sub === 'save') {
+        console.log(JSON.stringify({
+          lesson: saveIncidentLesson(db, {
+            project: flag('project', '*'),
+            member: flag('member', '*'),
+            role: flag('role', '*'),
+            errorCode: flag('code', ''),
+            pattern: flag('pattern'),
+            guardrail: flag('guardrail'),
+          }),
+        }, null, 2));
+      } else if (sub === 'toggle') {
+        console.log(JSON.stringify({ lesson: toggleIncidentLesson(db, Number(positionals[1] || flag('id')), flags.active !== 'false' && !flags.disable) }, null, 2));
+      } else throw new Error(`Unknown lessons subcommand "${sub}". Use: list | save | toggle`);
     } else if (cmd === 'backup') {
       console.log(JSON.stringify(createHotBackup(db), null, 2));
     } else if (cmd === 'metrics') {

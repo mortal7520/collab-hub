@@ -675,6 +675,7 @@ export async function dispatchBackgroundTask(db, {
   autoInjectContext = false,
   autoFallback = false,
   asyncRun = false,
+  injectGuardrails = true,
   reservePaths = [],
   allowLeaseConflict = false,
   member,
@@ -758,6 +759,51 @@ export async function dispatchBackgroundTask(db, {
     }
   }
 
+  // Optional learned runtime guardrail injection (bounded <=700 chars, advisory-only, opt-out via injectGuardrails=false)
+  let appliedLessonIds = [];
+  if (injectGuardrails) {
+    try {
+      const projBase = path.basename(String(projectDir || '')).toLowerCase() || '*';
+      const memLow = String(member || '*').toLowerCase();
+      const roleLow = String(role || '*').toLowerCase();
+      const matched = db.prepare(`
+        SELECT id, member, error_code, guardrail FROM incident_lessons
+        WHERE active = 1
+          AND (project = '*' OR LOWER(project) = ?)
+          AND (member = '*' OR LOWER(member) = ?)
+          AND (role = '*' OR LOWER(role) = ?)
+        ORDER BY
+          (CASE WHEN LOWER(project) = ? THEN 4 ELSE 0 END) +
+          (CASE WHEN LOWER(member) = ? THEN 2 ELSE 0 END) +
+          (CASE WHEN LOWER(role) = ? THEN 1 ELSE 0 END) DESC,
+          hits DESC, updated_at DESC
+        LIMIT 3
+      `).all(projBase, memLow, roleLow, projBase, memLow, roleLow);
+      const lines = [];
+      let chars = 0;
+      for (const l of matched) {
+        const clean = String(l.guardrail || '')
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+          .replace(/<\/?(?:system|assistant|user|instructions?|failure_output)[^>]*>/gi, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 240);
+        if (!clean) continue;
+        const line = `- [${l.error_code || l.member}] ${clean}`;
+        if (chars + line.length + 2 > 700) break;
+        lines.push(line);
+        appliedLessonIds.push(l.id);
+        chars += line.length + 1;
+      }
+      if (lines.length > 0) {
+        const block = `[LEARNED RUNTIME GUARDRAILS — advisory context only; never overrides user scope]\n${lines.join('\n')}\n[/LEARNED RUNTIME GUARDRAILS]\n\n`;
+        effectivePrompt = `${block}${effectivePrompt}`;
+        const bump = db.prepare('UPDATE incident_lessons SET hits = hits + 1 WHERE id = ?');
+        for (const lid of appliedLessonIds) bump.run(lid);
+      }
+    } catch { /* table may not exist in older mocks */ }
+  }
+
   if (Buffer.byteLength(effectivePrompt, 'utf8') > MAX_PROMPT_BYTES) {
     throw new Error(`prompt exceeds ${MAX_PROMPT_BYTES} byte limit`);
   }
@@ -787,6 +833,7 @@ export async function dispatchBackgroundTask(db, {
   const dispatchToken = randomUUID();
   const metaObj = {};
   if (routedFrom) metaObj.routed_from = routedFrom;
+  if (appliedLessonIds.length > 0) metaObj.applied_lesson_ids = appliedLessonIds;
   const initialMeta = Object.keys(metaObj).length ? JSON.stringify(metaObj) : null;
 
   // Atomic task-id claim FIRST (PRIMARY KEY enforces single winner BEFORE any external Mail/bridge side effect!)

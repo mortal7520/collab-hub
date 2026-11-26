@@ -274,7 +274,9 @@ export function planDispatch(db, {
 }) {
   if (!VALID_ROLES.has(role)) throw new Error(`Invalid role: ${role}`);
   const statuses = getMemberStatuses(db, desktopTtlMs !== undefined ? { desktopTtlMs } : {});
-  const telemetry = computeAgentTelemetry(db, { days: 30 }).agents;
+  const teleReport = computeAgentTelemetry(db, { days: 30 });
+  const telemetry = teleReport.agents;
+  const channelTelemetry = teleReport.channels || {};
   const excludeSet = new Set(exclude || []);
   const preferList = Array.isArray(prefer) ? prefer : [];
 
@@ -322,8 +324,11 @@ export function planDispatch(db, {
     if (m.state === 'online') score += 40;
     else if (m.state === 'idle') score += 30;
     if (m.member === 'claude' && m.channel === 'desktop-native' && m.state === 'online') score += 15;
-    const tStats = telemetry[m.member] || null;
+    const chanKey = `${m.member}::${m.channel || 'default'}`;
+    const tStats = channelTelemetry[chanKey] || telemetry[m.member] || null;
     if (tStats?.reliability_delta) score += tStats.reliability_delta;
+    // Soft circuit-breaker penalty on >=3 consecutive recent non-429 failures/stalls
+    if (tStats?.circuit_state === 'open') score -= 8;
 
     const executionMode = (m.channel === 'desktop-native') ? 'desktop_native_bridge' : 'background_auto';
     eligible.push({
@@ -335,6 +340,7 @@ export function planDispatch(db, {
       state: m.state,
       score,
       success_rate: tStats?.success_rate ?? null,
+      circuit_state: tStats?.circuit_state ?? 'closed',
       avg_latency_ms: tStats?.avg_latency_ms ?? null,
       detail: m.detail,
     });

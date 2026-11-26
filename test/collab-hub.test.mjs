@@ -24,6 +24,7 @@ import { runPlaybook } from '../src/playbooks.mjs';
 import { planDispatch, probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, probeCustomAgent, registerAgent, removeAgent } from '../src/registry.mjs';
+import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import { convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep } from '../src/toolkit.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
@@ -400,8 +401,8 @@ test('Muse outer identity verification, monotonic generation, ACK-only rejection
   }
 });
 
-test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 34 MCP tools', async () => {
-  assert.equal(TOOLS.length, 34);
+test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 37 MCP tools', async () => {
+  assert.equal(TOOLS.length, 37);
   const sse = parseSseEvents('event: message\ndata: {"jsonrpc":"2.0",\ndata: "id":1}\n\ndata: {"id":2}\n\n');
   assert.equal(sse.length, 2);
   assert.deepEqual(JSON.parse(sse[0]), { jsonrpc: '2.0', id: 1 });
@@ -1798,8 +1799,8 @@ test('v1.3: Codex P1 fixes — dispatch-token race guard, DSH ok:false cancel re
   const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
 
   try {
-    // 1. PRAGMA user_version migrated atomically to 130
-    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 130);
+    // 1. PRAGMA user_version migrated atomically to 140
+    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 140);
 
     // 2. Dispatch-token race: if task is failed/cancelled while awaiting reserveMailPaths, external bridge MUST NOT be called!
     let dshCalled = false;
@@ -1888,6 +1889,205 @@ test('v1.3: Codex P1 fixes — dispatch-token race guard, DSH ok:false cancel re
   } finally {
     slowDshResolve?.();
     try { await server.shutdown({ drainMs: 500 }); } catch {}
+    env.cleanup();
+  }
+});
+
+test('v1.4: per-channel telemetry isolation, stalled denominator fix, self-diagnosis, safe auto-heal & learned guardrail injection', async () => {
+  const env = makeTempEnv();
+  try {
+    const now = new Date().toISOString();
+    // 1. Per-channel isolation: Claude Desktop success MUST NOT be penalized by Claude CLI 429s!
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, created_at, updated_at, completed_at)
+      VALUES ('cl-desk-1', ?, 'claude', 'reviewer', 'desktop-native', 'Desktop OK', 'p', 'completed', ?, ?, ?)
+    `).run(env.proj, now, now, now);
+    for (let i = 1; i <= 2; i++) {
+      env.db.prepare(`
+        INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, error_code, created_at, updated_at)
+        VALUES (?, ?, 'claude', 'reviewer', 'claude-cli', 'CLI 429', 'p', 'failed', 'CLAUDE_UPSTREAM_429', ?, ?)
+      `).run(`cl-cli-429-${i}`, env.proj, now, now);
+    }
+
+    // 2. Stalled denominator fix: Muse 1 completed + 3 stalled => success_rate 0.25 (NOT 1.0!) and circuit_state === 'open'
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, created_at, updated_at, completed_at)
+      VALUES ('muse-ok-1', ?, 'muse', 'researcher', 'muse-tailnet', 'OK', 'p', 'completed', '2026-11-25T00:00:00.000Z', '2026-11-25T00:01:00.000Z', '2026-11-25T00:01:00.000Z')
+    `).run(env.proj);
+    for (let i = 1; i <= 3; i++) {
+      env.db.prepare(`
+        INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, created_at, updated_at)
+        VALUES (?, ?, 'muse', 'researcher', 'muse-tailnet', 'Stalled', 'p', 'stalled', ?, ?)
+      `).run(`muse-stall-${i}`, env.proj, now, now);
+    }
+
+    const tele = computeAgentTelemetry(env.db, { days: 30 });
+    assert.equal(tele.channels['claude::desktop-native'].success_rate, 1);
+    assert.ok(tele.channels['claude::desktop-native'].reliability_delta >= 0, 'CLI 429 must never penalize Desktop reliability');
+    assert.equal(tele.agents.muse.success_rate, 0.25);
+    assert.equal(tele.agents.muse.circuit_state, 'open');
+
+    // 3. Seed runtime anomalies: dead-owner orphan + expired cooldown + missing worktree + repeating errors
+    env.db.prepare(`
+      INSERT INTO tasks (task_id, project_dir, member, role, channel, title, prompt, state, owner_pid, created_at, updated_at)
+      VALUES ('v14-orphan-1', ?, 'dsh', 'implementer', 'generic-cli', 'Orphan', 'p', 'running', 999999, ?, ?)
+    `).run(env.proj, now, now);
+    env.db.prepare(`
+      UPDATE member_status SET state = 'cooldown', cooldown_until = '2020-01-01T00:00:00.000Z', cooldown_reason = 'old', cooldown_channel = 'claude-cli'
+      WHERE member = 'claude'
+    `).run();
+    env.db.prepare(`
+      INSERT INTO worktrees (task_id, repo_dir, worktree_path, wsl_path, branch_name, base_ref, member, state, created_at, updated_at)
+      VALUES ('wt-gone', ?, ?, '/mnt/d/gone', 'collab/dsh/wt-gone', 'main', 'dsh', 'active', ?, ?)
+    `).run(env.proj, path.join(env.wts, 'does-not-exist'), now, now);
+
+    const diagBefore = diagnoseSystem(env.db, { worktreeDir: env.wts });
+    assert.ok(diagBefore.findings.some((f) => f.id === 'dead_owner_orphans'));
+    assert.ok(diagBefore.findings.some((f) => f.id === 'expired_cooldowns'));
+    assert.ok(diagBefore.findings.some((f) => f.id === 'missing_worktrees'));
+    assert.ok(diagBefore.findings.some((f) => f.id === 'repeating_error_clusters'));
+
+    // Dry-run MUST NOT mutate DB
+    const preview = applySelfHeal(env.db, { apply: false, worktreeDir: env.wts, memoryDir: env.mem });
+    assert.equal(preview.applied, false);
+    assert.equal(env.db.prepare("SELECT state FROM tasks WHERE task_id = 'v14-orphan-1'").get().state, 'running');
+
+    // Apply safe auto-heal -> improves score, marks orphan uncertain, clears expired cooldown, marks missing worktree, extracts lessons
+    const healed = applySelfHeal(env.db, { apply: true, recordLessons: true, worktreeDir: env.wts, memoryDir: env.mem });
+    assert.equal(healed.applied, true);
+    assert.ok(healed.after_score > healed.before_score);
+    assert.equal(env.db.prepare("SELECT state FROM tasks WHERE task_id = 'v14-orphan-1'").get().state, 'uncertain');
+    assert.equal(env.db.prepare("SELECT cooldown_until FROM member_status WHERE member = 'claude'").get().cooldown_until, null);
+    assert.equal(env.db.prepare("SELECT state FROM worktrees WHERE task_id = 'wt-gone'").get().state, 'missing');
+    assert.ok(healed.recorded_lessons >= 1);
+
+    // 4. Learned guardrail injection into dispatch prompt + toggle pause
+    registerAgent(env.db, {
+      agentId: 'guard-cli', name: 'Guard CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'process.stdout.write(process.argv[1])', '{{prompt}}'], prompt_mode: 'arg', timeout_s: 20 },
+    });
+    const lesson = saveIncidentLesson(env.db, {
+      project: 'demo-proj', member: 'guard-cli', role: 'implementer', errorCode: 'GUARD_TEST',
+      pattern: 'Guard test pattern', guardrail: 'ALWAYS_VERIFY_CONTRACT_V14',
+    });
+    const tWithGuard = await dispatchBackgroundTask(env.db, {
+      taskId: 'v14-guard-on', member: 'guard-cli', role: 'implementer', projectDir: env.proj, prompt: 'BASE-PROMPT',
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.match(tWithGuard.result_text, /ALWAYS_VERIFY_CONTRACT_V14/);
+    assert.deepEqual(tWithGuard.meta.applied_lesson_ids, [lesson.id]);
+
+    toggleIncidentLesson(env.db, lesson.id, false);
+    const tWithPaused = await dispatchBackgroundTask(env.db, {
+      taskId: 'v14-guard-off', member: 'guard-cli', role: 'implementer', projectDir: env.proj, prompt: 'BASE-PROMPT-2',
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.equal(tWithPaused.result_text.includes('ALWAYS_VERIFY_CONTRACT_V14'), false);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v1.4: opt-in closed-loop auto_repair DAG (redacts secrets, stops on duplicate fingerprint) + dashboard self-check/self-heal/lessons APIs', async () => {
+  const env = makeTempEnv();
+  const flagFile = path.join(env.dir, 'repair-pass.flag');
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], worktreeRoot: env.wts, memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
+
+  try {
+    // 1. Flaky agent fails once (emitting a fake sk- secret in stderr), succeeds when diagnostic block is present
+    registerAgent(env.db, {
+      agentId: 'repair-cli', name: 'Repair CLI', driver: 'generic-cli', roles: ['implementer', 'synthesizer'],
+      config: {
+        command: process.execPath,
+        args: [
+          '-e',
+          `const p = process.argv[1] || ''; if (!p.includes('CLOSED-LOOP REPAIR DIAGNOSTIC')) { console.error('FAIL token sk-SECRET1234567890ABCDEF'); process.exit(2); } process.stdout.write('REPAIRED-OK:' + (p.includes('sk-SECRET') ? 'LEAKED' : 'REDACTED'));`,
+          '{{prompt}}',
+        ],
+        prompt_mode: 'arg',
+        timeout_s: 20,
+      },
+    });
+    // Always-same-error agent to prove duplicate fingerprint halts repair loop immediately
+    registerAgent(env.db, {
+      agentId: 'stuck-fail-cli', name: 'Stuck Fail CLI', driver: 'generic-cli', roles: ['implementer'],
+      config: { command: process.execPath, args: ['-e', 'console.error("IDENTICAL-ERR-42"); process.exit(3);'], timeout_s: 20 },
+    });
+
+    const wfOk = await runDagWorkflow(env.db, {
+      name: 'auto-repair-demo',
+      batchId: 'wf-v14-rep',
+      projectDir: env.proj,
+      steps: [
+        { id: 'build', member: 'repair-cli', role: 'implementer', prompt: 'BUILD-STEP', auto_repair: { enabled: true, max_repairs: 2 } },
+        { id: 'synth', member: 'repair-cli', role: 'synthesizer', depends_on: ['build'], prompt: 'SYNTH-STEP [CLOSED-LOOP REPAIR DIAGNOSTIC]' },
+      ],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+    assert.equal(wfOk.all_completed, true);
+    assert.equal(wfOk.repairs.length, 1);
+    assert.equal(wfOk.repairs[0].repair_task_id, 'wf-v14-rep_build_r2');
+    const r2Row = env.db.prepare("SELECT result_text FROM tasks WHERE task_id = 'wf-v14-rep_build_r2'").get();
+    assert.equal(r2Row.result_text, 'REPAIRED-OK:REDACTED');
+    assert.ok(listIncidentLessons(env.db).some((l) => l.auto_learned));
+
+    // Duplicate failure fingerprint stops after 1 repair attempt (does NOT waste max_repairs=2!)
+    const wfLoop = await runDagWorkflow(env.db, {
+      name: 'anti-loop',
+      batchId: 'wf-v14-loop',
+      projectDir: env.proj,
+      steps: [
+        { id: 'broken', member: 'stuck-fail-cli', role: 'implementer', prompt: 'LOOP', auto_repair: { enabled: true, max_repairs: 2 } },
+      ],
+    }, { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem });
+    assert.equal(wfLoop.all_completed, false);
+    assert.equal(wfLoop.repairs.length, 1, 'Identical repeating error fingerprint must stop auto-repair loop');
+
+    // 2. Dashboard v1.4.0 APIs + CSRF guard + MCP tools #35-37
+    const sc = await rawHttpRequest({ port, pathName: '/api/system/self-check', headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(sc.status, 200);
+    assert.equal(typeof JSON.parse(sc.body).health_score, 'number');
+
+    const noCsrf = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/system/self-heal',
+      headers: { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json' },
+      body: '{"apply":true}',
+    });
+    assert.equal(noCsrf.status, 403);
+
+    const sh = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/system/self-heal', headers: hdrs,
+      body: JSON.stringify({ apply: false }),
+    });
+    assert.equal(sh.status, 200);
+    assert.equal(JSON.parse(sh.body).applied, false);
+
+    const lsSave = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/lessons/save', headers: hdrs,
+      body: JSON.stringify({ project: 'demo-proj', member: 'dsh', role: 'tester', error_code: 'E_UI', pattern: 'UI pattern', guardrail: 'Check CSP' }),
+    });
+    assert.equal(lsSave.status, 200);
+    const savedId = JSON.parse(lsSave.body).lesson.id;
+
+    const lsTog = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/lessons/toggle', headers: hdrs,
+      body: JSON.stringify({ id: savedId, active: false }),
+    });
+    assert.equal(lsTog.status, 200);
+    assert.equal(JSON.parse(lsTog.body).lesson.active, false);
+
+    const ov = JSON.parse((await rawHttpRequest({ port, pathName: '/api/overview', headers: { Host: `127.0.0.1:${port}` } })).body);
+    assert.equal(typeof ov.self_improve.health_score, 'number');
+
+    const mcpSelf = await handleToolCall(env.db, 'collab_self_check', {});
+    assert.equal(typeof mcpSelf.health_score, 'number');
+    assert.equal(TOOLS.length, 37);
+  } finally {
+    try { await server.shutdown({ drainMs: 500 }); } catch {}
+    if (fs.existsSync(flagFile)) fs.unlinkSync(flagFile);
     env.cleanup();
   }
 });

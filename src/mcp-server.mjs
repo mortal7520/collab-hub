@@ -16,6 +16,7 @@ import { runPlaybook } from './playbooks.mjs';
 import { planDispatch, probeAllMembers } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from './registry.mjs';
+import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from './self-improve.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep, searchSessionsCass,
@@ -519,6 +520,41 @@ export const TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'collab_self_check',
+    description: 'Run CollabHub runtime self-diagnosis (0-100 health score, dead-owner orphans, stuck tasks, expired cooldowns, missing worktrees, repeating error clusters, circuit-breaker alerts, WAL size, learned guardrails, and recent self-heal runs).',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'collab_self_heal',
+    description: 'Preview (apply=false, default) or execute (apply=true) safe, zero-risk operational self-healing: sweep dead-owner orphans to uncertain, conditionally clear expired cooldowns, reconcile missing worktrees, extract deduplicated incident lessons, and run non-blocking WAL PASSIVE checkpoint.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        apply: { type: 'boolean', description: 'Default false (dry-run preview). Set true to execute safe operational heals.' },
+        record_lessons: { type: 'boolean', description: 'Extract repeating failure clusters into incident_lessons and shared memory (default true).' },
+      },
+    },
+  },
+  {
+    name: 'collab_lessons',
+    description: 'Manage learned runtime incident guardrails injected as bounded advisory context into future agent prompts (list, save, or toggle active/paused).',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'save', 'toggle'] },
+        id: { type: 'integer', description: 'Lesson id (required for toggle).' },
+        active: { type: 'boolean', description: 'Active flag (for toggle or save).' },
+        project: { type: 'string', description: 'Project basename or * (default *).' },
+        member: { type: 'string', description: 'Agent id or * (default *).' },
+        role: { type: 'string', description: 'Role or * (default *).' },
+        error_code: { type: 'string' },
+        pattern: { type: 'string' },
+        guardrail: { type: 'string' },
+      },
+    },
+  },
 ]);
 
 export async function handleToolCall(db, name, args = {}) {
@@ -729,6 +765,36 @@ export async function handleToolCall(db, name, args = {}) {
         waitSec: args.wait_sec ?? 15,
         saveReportToMemory: args.save_report_to_memory !== false,
       });
+    case 'collab_self_check':
+      return diagnoseSystem(db);
+    case 'collab_self_heal':
+      return applySelfHeal(db, {
+        apply: Boolean(args.apply),
+        recordLessons: args.record_lessons !== false,
+      });
+    case 'collab_lessons': {
+      if (args.action === 'list') {
+        return { lessons: listIncidentLessons(db, { member: args.member || null }) };
+      }
+      if (args.action === 'save') {
+        return {
+          lesson: saveIncidentLesson(db, {
+            project: args.project || '*',
+            member: args.member || '*',
+            role: args.role || '*',
+            errorCode: args.error_code || '',
+            pattern: args.pattern,
+            guardrail: args.guardrail,
+            active: args.active !== false,
+            autoLearned: false,
+          }),
+        };
+      }
+      if (args.action === 'toggle') {
+        return { lesson: toggleIncidentLesson(db, args.id, Boolean(args.active)) };
+      }
+      throw new Error(`Unsupported collab_lessons action: ${args.action}`);
+    }
     default:
       throw new Error(`Unknown collab-hub tool: ${name}`);
   }

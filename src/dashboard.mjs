@@ -17,6 +17,9 @@ import { runPlaybook } from './playbooks.mjs';
 import { probeAllMembers, probeMailHub } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { getAgent, probeCustomAgent, registerAgent, removeAgent } from './registry.mjs';
+import {
+  applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson,
+} from './self-improve.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
@@ -528,6 +531,14 @@ function buildDemoOverview() {
         ].join('\n'),
       },
     ],
+    self_improve: {
+      health_score: 84,
+      overall: 'degraded',
+      findings_count: 2,
+      healable_count: 2,
+      active_lessons: 2,
+      last_heal_at: at(30),
+    },
   };
 }
 
@@ -851,6 +862,53 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         sendJson(res, 200, await runSystemDoctor(db));
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/system/self-check') {
+        sendJson(res, 200, diagnoseSystem(db, { worktreeDir: dispatchDeps.worktreeRoot }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/system/self-heal') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, applySelfHeal(db, {
+            apply: Boolean(parsed.apply),
+            recordLessons: parsed.record_lessons !== false,
+            worktreeDir: dispatchDeps.worktreeRoot,
+            memoryDir: dispatchDeps.memoryDir,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/lessons') {
+        const member = url.searchParams.get('member') || null;
+        const activeOnly = url.searchParams.get('active') === '1';
+        sendJson(res, 200, { lessons: listIncidentLessons(db, { member, activeOnly }) });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/lessons/save') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            lesson: saveIncidentLesson(db, {
+              project: parsed.project || '*',
+              member: parsed.member || '*',
+              role: parsed.role || '*',
+              errorCode: parsed.error_code || '',
+              pattern: parsed.pattern,
+              guardrail: parsed.guardrail,
+              active: parsed.active !== false,
+              autoLearned: false,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/lessons/toggle') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, { lesson: toggleIncidentLesson(db, parsed.id, Boolean(parsed.active)) });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/system/backup') {
         await readBoundedJson(req);
         try {
@@ -879,7 +937,8 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const notesCount = Number(db.prepare('SELECT COUNT(*) AS c FROM memory_notes').get()?.c || notes.length);
         const metrics = buildMetrics(members, tasks, worktrees, notesCount, cassStats);
         const telemetry = computeAgentTelemetry(db, { days: 30 });
-        sendJson(res, 200, { generated_at: new Date().toISOString(), mail_hub: mail, toolkit: getToolkitStatus(), metrics, telemetry, members, batches, tasks, worktrees, notes });
+        const selfImprove = getSelfImproveSummary(db, { worktreeDir: dispatchDeps.worktreeRoot });
+        sendJson(res, 200, { generated_at: new Date().toISOString(), mail_hub: mail, toolkit: getToolkitStatus(), metrics, telemetry, self_improve: selfImprove, members, batches, tasks, worktrees, notes });
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/agents/discover') {
