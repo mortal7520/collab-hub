@@ -1,4 +1,4 @@
-/* CollabHub v1.3 — app shell controller (zero dependencies, bilingual EN / ZH).
+/* CollabHub v1.4 — app shell controller (zero dependencies, bilingual EN / ZH).
  *
  * Scaffolding contract:
  *   - No inline <script>/<style> is ever generated; CSP stays `script-src 'self'`.
@@ -127,8 +127,8 @@ const I18N = {
     'nav.worktreesAlt': '分支隔离',
     'nav.toolkit': 'Toolkit & Memory',
     'nav.toolkitAlt': '工具箱与记忆',
-    'nav.ops': 'Ops & Doctor',
-    'nav.opsAlt': '审计与体检',
+    'nav.ops': 'System & Doctor',
+    'nav.opsAlt': '系统与体检',
     'side.probe': 'Probe all agents',
 
     'topbar.nav': 'Toggle navigation',
@@ -175,7 +175,7 @@ const I18N = {
     'view.toolkit.title': 'Toolkit & Memory',
     'view.toolkit.sub': 'ast-grep · repomix · markitdown · beads · cass · FTS5',
     'view.ops.title': 'Ops & Doctor',
-    'view.ops.sub': 'Live audit events, 8-point doctor, hot backup',
+    'view.ops.sub': 'Self-improve & auto-heal, live audit events, 8-point doctor, hot backup',
 
     'kpi.agents': 'Agents online / registered',
     'kpi.agentsSub': 'online + idle, live probe',
@@ -489,6 +489,112 @@ const I18N = {
     'ops.backup.fail': 'Backup failed: {error}',
     'ops.backup.done': 'Hot backup finished.',
     'ops.backup.demo': 'Demo preview is read-only: hot backup is disabled.',
+
+    /* v1.4 — self-improvement & auto-heal */
+    'self.title': 'Self-Improvement & Auto-Heal',
+    'self.sub': 'Diagnose runtime findings, preview a safe heal, then apply it — every run lands in the audit trail.',
+    'self.btnCheck': 'Run self-diagnosis',
+    'self.btnDry': 'Preview auto-heal',
+    'self.btnApply': 'Apply safe auto-heal',
+    'self.of100': '/ 100',
+    'self.statusIdle': 'Awaiting diagnosis',
+    'self.statusHealthy': 'Healthy',
+    'self.statusDegraded': 'Degraded',
+    'self.statusUnhealthy': 'Unhealthy',
+    'self.summaryIdle': 'No diagnosis yet — run a self-check to inspect findings and learned guardrails.',
+    'self.summaryNone': 'All checks passed — nothing to heal.',
+    'self.statFindings': 'Findings',
+    'self.statHealable': 'Auto-healable',
+    'self.statLessons': 'Active guardrails',
+    'self.statLastHeal': 'Last heal',
+    'self.lastHealNever': 'never',
+    'self.findingsTitle': 'Findings',
+    'self.lessonsTitle': 'Learned guardrails',
+    'self.runsTitle': 'Recent self-heal audit trail',
+    'self.findingsEmpty': 'No findings loaded yet.',
+    'self.lessonsEmpty': 'No learned guardrails yet.',
+    'self.runsEmpty': 'No self-heal runs recorded yet.',
+    'self.lProject': 'Project',
+    'self.lMember': 'Member',
+    'self.lRole': 'Role',
+    'self.lError': 'Error code',
+    'self.lPattern': 'Pattern',
+    'self.lGuardrail': 'Guardrail',
+    'self.lProjectPh': 'collab-hub',
+    'self.lMemberPh': 'codex',
+    'self.lRolePh': 'reviewer',
+    'self.lErrorPh': 'harness_down',
+    'self.lPatternPh': 'timeout|ECONNRESET',
+    'self.lGuardrailPh': 'Retry once with a 30s backoff before escalating.',
+    'self.btnAddGuardrail': '+ Add guardrail',
+    'self.lessonHint': 'Injected into future agent prompts.',
+    'self.healAuto': 'Auto-healable',
+    'self.healManual': 'Operator review',
+    'self.actionLabel': 'Recommended',
+    'self.checkedAt': 'Checked {time}',
+    'self.lessonActive': 'Active',
+    'self.lessonPaused': 'Paused',
+    'self.hits': '{n} hits',
+    'self.autoLearned': 'auto',
+    'self.modeApply': 'apply',
+    'self.modeDry': 'dry-run',
+    'self.runHealed': '{n} healed',
+    'self.runFindings': '{n} findings',
+    'self.previewTitle': 'Dry-run preview',
+    'self.previewApplied': 'Applied',
+    'self.previewDelta': '{before} → {after}',
+    'self.previewCount': '×{n}',
+    'self.previewEmpty': 'Nothing to heal right now.',
+    'self.sev.high': 'high',
+    'self.sev.medium': 'medium',
+    'self.sev.low': 'low',
+    'self.sev.info': 'info',
+    'self.toastCheckDemo': 'Self-diagnosis refreshed from the demo fixture.',
+    'self.toastCheckOk': 'Self-diagnosis complete · health {score}/100.',
+    'self.toastCheckFail': 'Self-diagnosis failed: {error}',
+    'self.toastDryDemo': 'Dry-run preview: {n} findings could be healed (demo, nothing applied).',
+    'self.toastDryOk': 'Dry-run preview: {n} findings could be healed.',
+    'self.toastDryFail': 'Dry-run failed: {error}',
+    'self.toastNoHealable': 'Nothing is auto-healable right now — operator review required.',
+    'self.toastApplyDemo': 'Demo auto-heal applied: {before} → {after} (in-memory only).',
+    'self.toastApplyOk': 'Auto-heal applied: {healed} healed, health {before} → {after}.',
+    'self.toastApplyFail': 'Auto-heal failed: {error}',
+    'self.toastToggleDemo': 'Guardrail toggled in demo memory: {state}.',
+    'self.toastToggleOk': 'Guardrail {state}.',
+    'self.toastToggleFail': 'Could not toggle the guardrail: {error}',
+    'self.toastLessonDemo': 'Guardrail added to the demo memory only.',
+    'self.toastLessonSaved': 'Guardrail saved · it will be injected into future prompts.',
+    'self.toastLessonFail': 'Could not save the guardrail: {error}',
+    'self.toastLessonRequired': 'Guardrail text is required.',
+    'self.active': 'Active',
+    'self.paused': 'Paused',
+    'self.pillLabel': 'Self-improve',
+    'self.pillMeta': '{findings} findings · {lessons} guardrails',
+    'self.pillAria': 'Self-improvement health {score} of 100, {overall}. Open the System self-heal console.',
+    'self.demo.summary': '{healable} of {findings} findings are auto-healable; the rest need an operator decision.',
+    'self.demo.summaryHealed': 'Auto-heal applied: {before} → {after}. {remaining} findings still need an operator.',
+    'self.demo.f1.title': 'Stalled task demo-stall-01 holds a dead harness pid 4512',
+    'self.demo.f1.detail': 'Heartbeat missing for 26 minutes; the child process is gone but the task row is still dispatched.',
+    'self.demo.f1.action': 'kill_orphan_process',
+    'self.demo.f2.title': 'Orphaned worktree branch collab/demo/verify-gate left by a failed verify',
+    'self.demo.f2.detail': 'The worktree directory is gone while the branch still reserves the merge gate.',
+    'self.demo.f2.action': 'release_worktree',
+    'self.demo.f3.title': 'FTS5 memory index drifted from 128 to 116 rows',
+    'self.demo.f3.detail': 'Twelve notes exist in the ledger but not in the index; a rebuild is required before search trusts it.',
+    'self.demo.f3.action': 'rebuild_fts_index',
+    'self.demo.f4.title': 'toolkit.repomix missing on PATH (falls back to git squash)',
+    'self.demo.f4.detail': 'Pack reports lose per-file provenance until repomix is installed on the host.',
+    'self.demo.f4.action': 'install_repomix',
+    'self.demo.l1.guardrail': 'Retry once with a 30s backoff, then reroute to a healthy member instead of waiting on the harness.',
+    'self.demo.l2.guardrail': 'Always attach the receipt id to the completion message; never close a review without one.',
+    'self.demo.l3.guardrail': 'Declare the touched paths before editing; stop and ask when the diff grows past them.',
+    'self.demo.run1.summary': 'Restarted delta and released one orphan worktree.',
+    'self.demo.run2.summary': 'Preview only — no changes applied.',
+    'self.demo.runNew': 'Auto-heal: restarted the stalled member and released the orphan worktree.',
+    'self.demo.action1': 'restart_member',
+    'self.demo.action2': 'release_worktree',
+    'self.demo.lessonNew.pattern': 'stalled task with a dead child process',
+    'self.demo.lessonNew.guardrail': 'When a task stalls with no child process, kill the orphan row and reroute instead of retrying blindly.',
 
     'health.version': 'Version',
     'health.uptime': 'Uptime',
@@ -819,8 +925,8 @@ const I18N = {
     'nav.worktreesAlt': 'Worktrees',
     'nav.toolkit': '工具箱与记忆',
     'nav.toolkitAlt': 'Toolkit & Memory',
-    'nav.ops': '审计与体检',
-    'nav.opsAlt': 'Ops & Doctor',
+    'nav.ops': '系统与体检',
+    'nav.opsAlt': 'System & Doctor',
     'side.probe': '探活所有 Agent',
 
     'topbar.nav': '切换导航',
@@ -867,7 +973,7 @@ const I18N = {
     'view.toolkit.title': '工具箱与记忆',
     'view.toolkit.sub': 'ast-grep · repomix · markitdown · beads · cass · FTS5',
     'view.ops.title': '审计与体检',
-    'view.ops.sub': '实时审计事件、8 项体检、热备份',
+    'view.ops.sub': '自我改进与自愈、实时审计事件、8 项体检、热备份',
 
     'kpi.agents': '在线 / 注册 Agent',
     'kpi.agentsSub': 'online + idle 实时探活',
@@ -1181,6 +1287,112 @@ const I18N = {
     'ops.backup.fail': '备份失败：{error}',
     'ops.backup.done': '热备份完成。',
     'ops.backup.demo': '演示预览为只读模式，热备份已禁用。',
+
+    /* v1.4 — 自我改进与自动自愈 */
+    'self.title': '自我改进与自动自愈',
+    'self.sub': '诊断运行时问题、预览安全自愈方案，再一键应用；每次执行都会写入审计轨迹。',
+    'self.btnCheck': '运行自诊断',
+    'self.btnDry': '预览自愈方案',
+    'self.btnApply': '一键安全自愈',
+    'self.of100': '/ 100',
+    'self.statusIdle': '等待诊断',
+    'self.statusHealthy': '健康',
+    'self.statusDegraded': '降级',
+    'self.statusUnhealthy': '不健康',
+    'self.summaryIdle': '尚未诊断 —— 运行一次自诊断，查看问题清单与已学习的护栏。',
+    'self.summaryNone': '全部检查通过 —— 当前没有需要自愈的问题。',
+    'self.statFindings': '问题数',
+    'self.statHealable': '可自动修复',
+    'self.statLessons': '生效护栏',
+    'self.statLastHeal': '上次自愈',
+    'self.lastHealNever': '从未',
+    'self.findingsTitle': '问题清单',
+    'self.lessonsTitle': '经验护栏库',
+    'self.runsTitle': '最近自愈审计轨迹',
+    'self.findingsEmpty': '尚未载入问题清单。',
+    'self.lessonsEmpty': '尚未记录任何经验护栏。',
+    'self.runsEmpty': '尚未记录任何自愈执行。',
+    'self.lProject': '项目',
+    'self.lMember': '成员',
+    'self.lRole': '角色',
+    'self.lError': '错误码',
+    'self.lPattern': '触发模式',
+    'self.lGuardrail': '护栏内容',
+    'self.lProjectPh': 'collab-hub',
+    'self.lMemberPh': 'codex',
+    'self.lRolePh': 'reviewer',
+    'self.lErrorPh': 'harness_down',
+    'self.lPatternPh': 'timeout|ECONNRESET',
+    'self.lGuardrailPh': '升级前先退避 30 秒重试一次。',
+    'self.btnAddGuardrail': '+ 新增护栏',
+    'self.lessonHint': '会自动注入后续 Agent 的提示词。',
+    'self.healAuto': '可自动修复',
+    'self.healManual': '需人工确认',
+    'self.actionLabel': '建议动作',
+    'self.checkedAt': '检查于 {time}',
+    'self.lessonActive': '启用',
+    'self.lessonPaused': '已暂停',
+    'self.hits': '命中 {n} 次',
+    'self.autoLearned': '自动学习',
+    'self.modeApply': '已应用',
+    'self.modeDry': '预演',
+    'self.runHealed': '修复 {n} 项',
+    'self.runFindings': '{n} 个问题',
+    'self.previewTitle': '预演结果',
+    'self.previewApplied': '已应用',
+    'self.previewDelta': '{before} → {after}',
+    'self.previewCount': '×{n}',
+    'self.previewEmpty': '当前没有可自愈的问题。',
+    'self.sev.high': '高',
+    'self.sev.medium': '中',
+    'self.sev.low': '低',
+    'self.sev.info': '提示',
+    'self.toastCheckDemo': '已从演示样本刷新自诊断结果。',
+    'self.toastCheckOk': '自诊断完成 · 健康度 {score}/100。',
+    'self.toastCheckFail': '自诊断失败：{error}',
+    'self.toastDryDemo': '预演结果：可自愈 {n} 个问题（演示模式，未实际执行）。',
+    'self.toastDryOk': '预演结果：可自愈 {n} 个问题。',
+    'self.toastDryFail': '预演失败：{error}',
+    'self.toastNoHealable': '当前没有可自动修复的问题 —— 需要人工确认。',
+    'self.toastApplyDemo': '演示自愈已应用：{before} → {after}（仅内存）。',
+    'self.toastApplyOk': '自愈已应用：修复 {healed} 项，健康度 {before} → {after}。',
+    'self.toastApplyFail': '自愈失败：{error}',
+    'self.toastToggleDemo': '演示内存中已切换护栏：{state}。',
+    'self.toastToggleOk': '护栏已{state}。',
+    'self.toastToggleFail': '切换护栏失败：{error}',
+    'self.toastLessonDemo': '护栏已加入演示内存。',
+    'self.toastLessonSaved': '护栏已保存 · 后续提示词会自动注入。',
+    'self.toastLessonFail': '保存护栏失败：{error}',
+    'self.toastLessonRequired': '请填写护栏内容。',
+    'self.active': '启用',
+    'self.paused': '暂停',
+    'self.pillLabel': '自我改进',
+    'self.pillMeta': '{findings} 个问题 · {lessons} 条护栏',
+    'self.pillAria': '自我改进健康度 {score} / 100，{overall}。打开系统自愈控制台。',
+    'self.demo.summary': '{findings} 个问题中有 {healable} 个可自动修复，其余需要人工确认。',
+    'self.demo.summaryHealed': '自愈已应用：{before} → {after}。仍有 {remaining} 个问题需要人工处理。',
+    'self.demo.f1.title': '任务 demo-stall-01 卡在已退出的 harness 进程 pid 4512 上',
+    'self.demo.f1.detail': '心跳缺失 26 分钟；子进程已不存在，但任务行仍停留在 dispatched。',
+    'self.demo.f1.action': 'kill_orphan_process',
+    'self.demo.f2.title': '验收失败遗留的孤立 worktree 分支 collab/demo/verify-gate',
+    'self.demo.f2.detail': 'worktree 目录已不存在，分支却仍占着合并闸门。',
+    'self.demo.f2.action': 'release_worktree',
+    'self.demo.f3.title': 'FTS5 记忆索引从 128 行漂移到 116 行',
+    'self.demo.f3.detail': '账本里有 12 条笔记不在索引中；重建之前搜索结果不可信。',
+    'self.demo.f3.action': 'rebuild_fts_index',
+    'self.demo.f4.title': 'PATH 上缺少 toolkit.repomix（回退到 git squash）',
+    'self.demo.f4.detail': '在主机安装 repomix 之前，打包报告会丢失逐文件溯源信息。',
+    'self.demo.f4.action': 'install_repomix',
+    'self.demo.l1.guardrail': '先退避 30 秒重试一次，仍失败就改派健康成员，不要一直等 harness。',
+    'self.demo.l2.guardrail': '完成消息必须带上回执 id；没有回执不要关闭审查。',
+    'self.demo.l3.guardrail': '编辑前先声明要改的路径；diff 超出范围就停下来问。',
+    'self.demo.run1.summary': '重启了 delta，并释放了一个孤立 worktree。',
+    'self.demo.run2.summary': '仅预演 —— 未做任何改动。',
+    'self.demo.runNew': '自愈：重启了卡住的成员，并释放了孤立 worktree。',
+    'self.demo.action1': 'restart_member',
+    'self.demo.action2': 'release_worktree',
+    'self.demo.lessonNew.pattern': '任务卡住且子进程已消失',
+    'self.demo.lessonNew.guardrail': '任务卡住且没有子进程时，清理孤立任务行并改派，不要盲目重试。',
 
     'health.version': '版本',
     'health.uptime': '运行时长',
@@ -1553,8 +1765,21 @@ const state = {
   events: [],
   health: null,
   doctor: null,
+  /* v1.4 self-improvement console: overview KPI mirror + full self-check payload. */
+  selfImprove: null,
+  selfCheck: null,
+  selfFindings: [],
+  selfLessons: [],
+  selfRuns: [],
+  selfScore: null,
+  selfOverall: null,
+  selfCheckedAt: null,
+  selfPreview: null,
+  selfBusy: '',
+  selfAnim: null,
+  selfDemo: null,
   palette: { items: [], index: 0 },
-  flags: { eventsLoaded: false, doctorLoaded: false, healthLoaded: false, sseConnected: false },
+  flags: { eventsLoaded: false, doctorLoaded: false, healthLoaded: false, selfLoaded: false, sseConnected: false },
   timers: { reload: null, dag: null, poll: null, sse: null, filter: null },
 };
 
@@ -1573,7 +1798,7 @@ const VIEWS = {
   dag: { titleKey: 'nav.dag', subKey: 'view.dag.sub' },
   worktrees: { titleKey: 'nav.worktrees', subKey: 'view.worktrees.sub' },
   toolkit: { titleKey: 'nav.toolkit', subKey: 'view.toolkit.sub' },
-  ops: { titleKey: 'nav.ops', subKey: 'view.ops.sub' },
+  system: { titleKey: 'nav.ops', subKey: 'view.ops.sub' },
 };
 
 const KANBAN_COLUMNS = [
@@ -1762,6 +1987,8 @@ function refreshDynamicI18n() {
   if (state.flags.eventsLoaded) renderEvents();
   if (state.flags.doctorLoaded) renderDoctor(state.doctor, Boolean(state.demo));
   if (state.flags.healthLoaded) renderHealth();
+  if (state.flags.selfLoaded && state.demo && state.selfDemo) applySelfCheck(state.selfDemo);
+  else renderSelfPanel();
   if (state.sim.running || state.sim.batchId) renderDagBatchSelect();
   refreshDrawer();
 }
@@ -1776,13 +2003,23 @@ function refreshDrawer() {
 /* Views                                                               */
 /* ------------------------------------------------------------------ */
 
+/* v1.3 shipped this panel as `#ops`; v1.4 renames it to `#system` (System &
+ * Doctor) and keeps the old hash resolving, so bookmarks and the v1.3 quick-links
+ * do not silently fall back to the overview. */
+const VIEW_ALIASES = { ops: 'system' };
+
+function normalizeViewId(id) {
+  const raw = String(id || '').replace(/^#\/?/, '');
+  const hit = VIEW_ALIASES[raw] || raw;
+  return Object.prototype.hasOwnProperty.call(VIEWS, hit) ? hit : 'overview';
+}
+
 function viewFromHash() {
-  const id = location.hash.replace(/^#\/?/, '');
-  return Object.prototype.hasOwnProperty.call(VIEWS, id) ? id : 'overview';
+  return normalizeViewId(location.hash);
 }
 
 function setView(id, { silent = false, focus = false } = {}) {
-  const key = Object.prototype.hasOwnProperty.call(VIEWS, id) ? id : 'overview';
+  const key = normalizeViewId(id);
   state.view = key;
   $$('.nav-item').forEach((btn) => {
     const active = btn.dataset.view === key;
@@ -1798,10 +2035,12 @@ function setView(id, { silent = false, focus = false } = {}) {
   if (sub) sub.textContent = t(meta.subKey);
   if (!silent) history.replaceState(null, '', `#${key}`);
   if (key === 'dag') { refreshDagAgentOptions(); renderDagBatchSelect(); renderDagCanvas(); }
-  if (key === 'ops') {
+  if (key === 'system') {
     if (!state.flags.eventsLoaded) loadEvents();
     if (!state.flags.doctorLoaded) loadDoctor();
     if (!state.flags.healthLoaded) loadHealth();
+    if (!state.flags.selfLoaded) loadSelfCheck({ quiet: true });
+    else renderSelfPanel();
   }
   if (key === 'toolkit') {
     renderNotes(state.notes);
@@ -1831,7 +2070,7 @@ function paletteSources() {
     { group: t('palette.groupActions'), icon: '◐', label: t('palette.theme'), sub: t('palette.themeSub'), kind: t('palette.kindAction'), run: toggleTheme },
     { group: t('palette.groupActions'), icon: '⌘', label: t('palette.lang'), sub: t('palette.langSub'), kind: t('palette.kindAction'), run: () => setLang(LANG === 'zh' ? 'en' : 'zh', { announce: true }) },
     { group: t('palette.groupActions'), icon: '↻', label: t('palette.reindex'), sub: t('palette.reindexSub'), kind: t('palette.kindAction'), run: () => reindexCass() },
-    { group: t('palette.groupActions'), icon: '✚', label: t('palette.doctor'), sub: t('palette.doctorSub'), kind: t('palette.kindAction'), run: () => { setView('ops'); loadDoctor(true); } },
+    { group: t('palette.groupActions'), icon: '✚', label: t('palette.doctor'), sub: t('palette.doctorSub'), kind: t('palette.kindAction'), run: () => { setView('system'); loadDoctor(true); } },
   ];
   const views = Object.entries(VIEWS).map(([id, meta]) => ({
     group: t('palette.groupViews'),
@@ -2042,6 +2281,11 @@ function buildDemoFixture() {
       tasks_stalled: 2, tasks_failed: 1, active_worktrees: 1, memory_notes: 2,
       cass_conversations: 128, cass_messages: 4310,
     },
+    /* v1.4 demo KPI mirror: 84/100 with two healable findings — Apply jumps it to 98. */
+    self_improve: {
+      health_score: 84, overall: 'degraded', findings_count: 4, healable_count: 2,
+      active_lessons: 2, last_heal_at: at(26 * 60),
+    },
     telemetry: {
       agents: {
         atlas: { total: 24, completed: 22, success_rate: 0.917, avg_latency_ms: 5200, total_tokens: 214000 },
@@ -2197,6 +2441,9 @@ function enterStaticDemo() {
   stopSse();
   applyDemoFixture(buildDemoFixture());
   renderAll();
+  state.selfDemo = null;
+  state.selfPreview = null;
+  if (state.view === 'system') loadSelfCheck({ quiet: true });
   setLastUpdated(new Date().toISOString());
 }
 
@@ -2384,6 +2631,7 @@ function renderOverviewWorktrees() {
 
 function renderAllQuiet() {
   renderKpis(state.metrics);
+  renderSelfStrip();
   renderToolkitStrip(state.toolkit);
   renderBanner(state.tasks);
   renderAgentFilter();
@@ -2418,6 +2666,7 @@ function applyOverviewData(data) {
   state.worktrees = data.worktrees || [];
   state.notes = data.notes || [];
   state.toolkit = data.toolkit || {};
+  state.selfImprove = data.self_improve || null;
   renderMail(data.mail_hub);
   setLastUpdated(data.generated_at);
 }
@@ -2433,6 +2682,7 @@ function applyDemoFixture(fixture) {
   state.worktrees = fixture.worktrees || [];
   state.notes = fixture.notes || [];
   state.toolkit = fixture.toolkit || {};
+  state.selfImprove = fixture.self_improve || null;
   renderMail(fixture.mail_hub);
 }
 
@@ -2455,6 +2705,9 @@ function overviewSignature() {
     JSON.stringify(state.metrics || {}),
     JSON.stringify(state.telemetry || {}),
     JSON.stringify(state.toolkit || {}),
+    /* v1.4: the health pill is part of the overview paint, so its signature
+     * fields gate the rebuild too — unchanged polls must mutate nothing. */
+    JSON.stringify(state.selfImprove || null),
   ].join('|');
 }
 
@@ -2490,7 +2743,7 @@ async function loadOverview({ quiet = false } = {}) {
     if (seq !== state.overviewSeq) return;
     applyOverviewData(data);
     renderOverviewIfDirty();
-    if (state.view === 'ops' && state.flags.eventsLoaded) loadEvents({ quiet: true });
+    if (state.view === 'system' && state.flags.eventsLoaded) loadEvents({ quiet: true });
   } catch (err) {
     if (state.demo) {
       enterStaticDemo();
@@ -3975,6 +4228,576 @@ async function hotBackup() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Self-improvement & auto-heal (v1.4)                                 */
+/* ------------------------------------------------------------------ */
+
+/* The gauge is one SVG circle: circumference drives both the empty track and
+ * the animated offset, so a score change is a single style write, not a reflow. */
+const SELF_RING_C = 2 * Math.PI * 52;
+const SELF_SEV_ORDER = { high: 0, medium: 1, low: 2, info: 3 };
+let selfRefreshTimer = null;
+
+function clampSelfScore(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function selfToneOf(overall, score) {
+  if (overall === 'healthy' || overall === 'degraded' || overall === 'unhealthy') return overall;
+  const s = clampSelfScore(score);
+  if (s == null) return 'degraded';
+  if (s >= 90) return 'healthy';
+  return s >= 70 ? 'degraded' : 'unhealthy';
+}
+
+function selfOverallLabel(tone) {
+  if (tone === 'healthy') return t('self.statusHealthy');
+  if (tone === 'unhealthy') return t('self.statusUnhealthy');
+  return t('self.statusDegraded');
+}
+
+function setSelfText(selector, value) {
+  const el = $(selector);
+  if (el) el.textContent = value;
+}
+
+function setSelfGauge(score) {
+  const s = clampSelfScore(score);
+  setSelfText('#selfScore', s == null ? '—' : String(s));
+  const fill = $('#selfGaugeFill');
+  if (!fill) return;
+  fill.style.strokeDasharray = String(SELF_RING_C);
+  fill.style.strokeDashoffset = String(SELF_RING_C * (1 - (s == null ? 0 : s) / 100));
+}
+
+function animateSelfScore(from, to) {
+  const target = clampSelfScore(to);
+  if (target == null) return;
+  const start = clampSelfScore(from);
+  if (state.selfAnim) { cancelAnimationFrame(state.selfAnim); state.selfAnim = null; }
+  if (start == null || start === target) { setSelfGauge(target); return; }
+  let reduced = false;
+  try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { reduced = false; }
+  if (reduced || typeof requestAnimationFrame !== 'function') { setSelfGauge(target); return; }
+  const startedAt = performance.now();
+  const duration = 900;
+  const step = (now) => {
+    const p = Math.min(1, (now - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);
+    setSelfGauge(start + (target - start) * eased);
+    if (p < 1) state.selfAnim = requestAnimationFrame(step);
+    else state.selfAnim = null;
+  };
+  state.selfAnim = requestAnimationFrame(step);
+}
+
+function lastSelfHealAt() {
+  if (state.selfImprove && state.selfImprove.last_heal_at) return state.selfImprove.last_heal_at;
+  const applied = state.selfRuns
+    .filter((run) => run && run.mode === 'apply' && run.created_at)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  return applied.length ? applied[0].created_at : null;
+}
+
+/* Overview chip: score + guardrail count, one click into #system. */
+function renderSelfStrip() {
+  const box = $('#selfStrip');
+  if (!box) return;
+  const si = state.selfImprove;
+  const score = si ? clampSelfScore(si.health_score) : null;
+  if (score == null) {
+    box.hidden = true;
+    if (box.innerHTML) box.innerHTML = '';
+    return;
+  }
+  const tone = selfToneOf(si.overall, score);
+  const findings = Number(si.findings_count || 0);
+  const lessons = Number(si.active_lessons || 0);
+  const aria = t('self.pillAria', { score, overall: selfOverallLabel(tone) });
+  box.hidden = false;
+  box.innerHTML = `
+    <button type="button" class="self-pill ${esc(tone)}" data-goto-view="system" aria-label="${esc(aria)}" title="${esc(aria)}">
+      <span class="self-pill-dot" aria-hidden="true"></span>
+      <span class="self-pill-score">${esc(String(score))}</span><span class="self-pill-den">${esc(t('self.of100'))}</span>
+      <span class="self-pill-label">${esc(t('self.pillLabel'))}</span>
+      <span class="self-pill-meta">${esc(t('self.pillMeta', { findings, lessons }))}</span>
+      <span class="self-pill-arrow" aria-hidden="true">→</span>
+    </button>`;
+}
+
+/* Full console: gauge, findings, learned guardrails, audit trail. */
+function renderSelfPanel() {
+  const panel = $('#selfPanel');
+  if (!panel) return;
+  const hasData = Boolean(state.selfCheck || state.selfImprove);
+  const score = state.selfScore != null ? state.selfScore : (state.selfImprove ? state.selfImprove.health_score : null);
+  const overall = state.selfOverall || (state.selfImprove ? state.selfImprove.overall : null);
+  const tone = selfToneOf(overall, score);
+
+  const gauge = $('#selfGauge');
+  if (gauge) gauge.className = `self-gauge ${hasData ? tone : ''}`.trim();
+  setSelfGauge(hasData ? score : null);
+
+  const status = $('#selfOverall');
+  if (status) {
+    status.className = hasData ? `self-status ${tone}` : 'self-status';
+    status.textContent = hasData ? selfOverallLabel(tone) : t('self.statusIdle');
+  }
+  setSelfText('#selfCheckedAt', state.selfCheckedAt ? t('self.checkedAt', { time: fmtTimeShort(state.selfCheckedAt) }) : '');
+
+  const summary = $('#selfSummary');
+  if (summary) {
+    const c = state.selfCheck || {};
+    const text = c.summaryKey ? t(c.summaryKey, c.summaryVars || {}) : (c.summary || '');
+    summary.textContent = text || (state.selfFindings.length ? t('self.summaryIdle') : t('self.summaryNone'));
+  }
+
+  const findings = Array.isArray(state.selfFindings) ? state.selfFindings : [];
+  const lessons = Array.isArray(state.selfLessons) ? state.selfLessons : [];
+  const healable = findings.filter((f) => f && f.auto_healable).length;
+  const activeLessons = lessons.filter((l) => l && l.active).length;
+  const lastHeal = lastSelfHealAt();
+  setSelfText('#selfStatFindings', String(findings.length));
+  setSelfText('#selfStatHealable', String(healable));
+  setSelfText('#selfStatLessons', String(activeLessons));
+  setSelfText('#selfStatLastHeal', lastHeal ? fmtTimeShort(lastHeal) : t('self.lastHealNever'));
+
+  renderSelfFindings();
+  renderSelfLessons();
+  renderSelfRuns();
+  renderSelfPreview();
+}
+
+function renderSelfPreview() {
+  const box = $('#selfPreview');
+  if (!box) return;
+  const p = state.selfPreview;
+  if (!p) {
+    box.hidden = true;
+    if (box.innerHTML) box.innerHTML = '';
+    return;
+  }
+  const actions = Array.isArray(p.actions_taken) ? p.actions_taken : [];
+  const head = p.applied ? t('self.previewApplied') : t('self.previewTitle');
+  const delta = t('self.previewDelta', { before: p.before_score ?? '—', after: p.after_score ?? '—' });
+  const rows = actions.map((a) => `
+    <div class="self-preview-row">
+      <code>${esc(a.actionKey ? t(a.actionKey) : (a.action || ''))}</code>
+      <span class="meta">${esc(t('self.previewCount', { n: a.count ?? 0 }))}</span>
+      <span>${esc(a.detail || '')}</span>
+    </div>`).join('');
+  box.hidden = false;
+  box.innerHTML = `<div class="self-preview-head">${esc(head)} · ${esc(delta)}</div>${rows || `<div class="self-preview-row"><span class="meta">${esc(t('self.previewEmpty'))}</span></div>`}`;
+}
+
+function selfFindingCard(finding) {
+  const f = finding || {};
+  const sev = Object.prototype.hasOwnProperty.call(SELF_SEV_ORDER, f.severity) ? f.severity : 'info';
+  /* Demo fixtures carry i18n keys so a language switch re-localizes them
+   * in place; live API payloads carry plain strings. */
+  const title = f.titleKey ? t(f.titleKey) : (f.title || '');
+  const detail = f.detailKey ? t(f.detailKey) : (f.detail || '');
+  const action = f.actionKey ? t(f.actionKey) : (f.recommended_action || '');
+  return `
+    <article class="find-card ${esc(sev)}" data-finding-id="${esc(f.id || '')}">
+      <div class="find-top">
+        <span class="sev-pill">${esc(t(`self.sev.${sev}`))}</span>
+        <span class="find-cat">${esc(f.category || '')}</span>
+        <span class="find-title">${esc(title)}</span>
+      </div>
+      ${detail ? `<p class="find-detail">${esc(detail)}</p>` : ''}
+      <div class="find-foot">
+        <span class="heal-badge ${f.auto_healable ? 'auto' : 'manual'}">${esc(t(f.auto_healable ? 'self.healAuto' : 'self.healManual'))}</span>
+        ${action ? `<span class="find-action">${esc(t('self.actionLabel'))}: <strong>${esc(action)}</strong></span>` : ''}
+      </div>
+    </article>`;
+}
+
+function renderSelfFindings() {
+  const box = $('#selfFindings');
+  if (!box) return;
+  const findings = (Array.isArray(state.selfFindings) ? state.selfFindings : [])
+    .slice()
+    .sort((a, b) => (SELF_SEV_ORDER[a && a.severity] ?? 9) - (SELF_SEV_ORDER[b && b.severity] ?? 9));
+  setSelfText('#selfFindingCount', String(findings.length));
+  box.innerHTML = findings.length
+    ? findings.map(selfFindingCard).join('')
+    : `<div class="self-empty">${esc(t('self.findingsEmpty'))}</div>`;
+}
+
+function selfLessonRow(lesson) {
+  const l = lesson || {};
+  const active = Boolean(l.active);
+  const id = esc(l.id || '');
+  const guardrail = l.guardrailKey ? t(l.guardrailKey) : (l.guardrail || '');
+  return `
+    <article class="lesson-row${active ? '' : ' paused'}" data-lesson-id="${id}">
+      <div class="lesson-top">
+        <div class="lesson-key">
+          <code>${esc(l.member || '—')}</code>
+          <span>${esc(l.role || '—')}</span>
+          <code>${esc(l.error_code || '—')}</code>
+          ${l.auto_learned ? `<span class="lesson-src">${esc(t('self.autoLearned'))}</span>` : ''}
+        </div>
+        <button type="button" class="lesson-toggle ${active ? 'on' : 'off'}" data-lesson-toggle="${id}" data-lesson-active="${active ? '1' : '0'}" aria-pressed="${active ? 'true' : 'false'}" title="${esc(t('self.lessonHint'))}">${esc(active ? t('self.lessonActive') : t('self.lessonPaused'))}</button>
+      </div>
+      <p class="lesson-guardrail">${esc(guardrail)}</p>
+      <div class="lesson-meta">
+        <span>${esc(l.project || '—')}</span>
+        <span class="lesson-hit">${esc(t('self.hits', { n: Number(l.hits || 0) }))}</span>
+        ${l.pattern ? `<span>${esc(l.pattern)}</span>` : ''}
+        <span>${esc(fmtTimeShort(l.updated_at))}</span>
+      </div>
+    </article>`;
+}
+
+function renderSelfLessons() {
+  const box = $('#lessonList');
+  if (!box) return;
+  const lessons = (Array.isArray(state.selfLessons) ? state.selfLessons : []).slice()
+    .sort((a, b) => Number(Boolean(b && b.active)) - Number(Boolean(a && a.active))
+      || Number((b && b.hits) || 0) - Number((a && a.hits) || 0));
+  setSelfText('#selfLessonCount', String(lessons.length));
+  box.innerHTML = lessons.length
+    ? lessons.map(selfLessonRow).join('')
+    : `<div class="self-empty">${esc(t('self.lessonsEmpty'))}</div>`;
+}
+
+function selfRunRow(run) {
+  const r = run || {};
+  const isApply = r.mode === 'apply';
+  const actions = Array.isArray(r.actions) ? r.actions : [];
+  const actionText = actions.map((a) => `${a.actionKey ? t(a.actionKey) : (a.action || '')} ×${a.count ?? 0}`).join(' · ');
+  const summary = r.summaryKey ? t(r.summaryKey) : (r.summary || '');
+  return `
+    <article class="self-run">
+      <div class="self-run-top">
+        <span class="self-run-mode ${isApply ? 'apply' : 'dry'}">${esc(isApply ? t('self.modeApply') : t('self.modeDry'))}</span>
+        <span class="self-run-score">${esc(String(r.before_score ?? '—'))}</span>
+        <span class="self-run-arrow" aria-hidden="true">→</span>
+        <span class="self-run-score">${esc(String(r.after_score ?? '—'))}</span>
+        <span class="self-run-meta">${esc(t('self.runHealed', { n: Number(r.healed_count || 0) }))} · ${esc(t('self.runFindings', { n: Number(r.findings_count || 0) }))}</span>
+        <span class="self-run-time">${esc(fmtTimeShort(r.created_at))}</span>
+      </div>
+      ${actionText || summary ? `<div class="self-run-actions">${esc(actionText || summary)}</div>` : ''}
+    </article>`;
+}
+
+function renderSelfRuns() {
+  const box = $('#selfRuns');
+  if (!box) return;
+  const runs = (Array.isArray(state.selfRuns) ? state.selfRuns : []).slice()
+    .sort((a, b) => String((b && b.created_at) || '').localeCompare(String((a && a.created_at) || '')));
+  box.innerHTML = runs.length
+    ? runs.map(selfRunRow).join('')
+    : `<div class="self-empty">${esc(t('self.runsEmpty'))}</div>`;
+}
+
+/* ------------------------------- demo world ------------------------- */
+
+/* One mutable in-memory world so toggles and heals survive re-renders without
+ * a single /api call. Reset on language switch so the fixture is bilingual. */
+function demoSelfWorld() {
+  if (state.selfDemo) return state.selfDemo;
+  const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60000).toISOString();
+  /* Fixture copy is stored as i18n keys (not rendered strings) so flipping the
+   * language re-localizes the demo in place instead of resetting a healed world. */
+  state.selfDemo = {
+    checked_at: new Date().toISOString(),
+    health_score: 84,
+    overall: 'degraded',
+    summaryKey: 'self.demo.summary',
+    summaryVars: { findings: 4, healable: 2 },
+    findings: [
+      { id: 'find-401', severity: 'high', category: 'runtime', titleKey: 'self.demo.f1.title', detailKey: 'self.demo.f1.detail', actionKey: 'self.demo.f1.action', auto_healable: true, target_ids: ['demo-stall-01'] },
+      { id: 'find-402', severity: 'medium', category: 'worktree', titleKey: 'self.demo.f2.title', detailKey: 'self.demo.f2.detail', actionKey: 'self.demo.f2.action', auto_healable: true, target_ids: ['demo-run-01'] },
+      { id: 'find-403', severity: 'medium', category: 'database', titleKey: 'self.demo.f3.title', detailKey: 'self.demo.f3.detail', actionKey: 'self.demo.f3.action', auto_healable: false },
+      { id: 'find-404', severity: 'low', category: 'config', titleKey: 'self.demo.f4.title', detailKey: 'self.demo.f4.detail', actionKey: 'self.demo.f4.action', auto_healable: false },
+    ],
+    lessons: [
+      { id: 'lesson-201', project: 'collab-hub', member: 'delta', role: 'tester', error_code: 'harness_down', pattern: 'heartbeat timeout > 180s', guardrailKey: 'self.demo.l1.guardrail', hits: 7, active: true, auto_learned: true, updated_at: at(6 * 60) },
+      { id: 'lesson-202', project: 'collab-hub', member: 'cipher', role: 'reviewer', error_code: 'receipt_missing', pattern: 'no receipt within 2 polls', guardrailKey: 'self.demo.l2.guardrail', hits: 3, active: true, auto_learned: true, updated_at: at(20 * 60) },
+      { id: 'lesson-203', project: 'collab-hub', member: 'beacon', role: 'implementer', error_code: 'scope_rejected', pattern: 'diff outside declared scope', guardrailKey: 'self.demo.l3.guardrail', hits: 1, active: false, auto_learned: false, updated_at: at(44 * 60) },
+    ],
+    recent_runs: [
+      { id: 12, mode: 'apply', before_score: 79, after_score: 88, healed_count: 2, findings_count: 5, summaryKey: 'self.demo.run1.summary', actions: [{ actionKey: 'self.demo.action1', count: 1, detail: 'delta' }, { actionKey: 'self.demo.action2', count: 1, detail: 'collab/demo/verify-gate' }], created_at: at(26 * 60) },
+      { id: 11, mode: 'dry_run', before_score: 88, after_score: 88, healed_count: 0, findings_count: 4, summaryKey: 'self.demo.run2.summary', actions: [{ actionKey: 'self.demo.action1', count: 1, detail: 'delta' }], created_at: at(31 * 60) },
+    ],
+    seq: 12,
+  };
+  return state.selfDemo;
+}
+
+function demoToggleLesson(id, active) {
+  const world = demoSelfWorld();
+  const lesson = world.lessons.find((l) => String(l.id) === String(id));
+  if (!lesson) throw new Error('lesson not found');
+  lesson.active = Boolean(active);
+  lesson.updated_at = new Date().toISOString();
+  return { lesson };
+}
+
+function demoAddLesson(payload) {
+  const world = demoSelfWorld();
+  world.seq += 1;
+  const lesson = {
+    id: `demo-lesson-${world.seq}`, project: payload.project, member: payload.member,
+    role: payload.role, error_code: payload.error_code, pattern: payload.pattern,
+    guardrail: payload.guardrail, hits: 0, active: true, auto_learned: false,
+    updated_at: new Date().toISOString(),
+  };
+  world.lessons = [lesson, ...world.lessons];
+  return { lesson };
+}
+
+function demoSelfHeal(apply) {
+  const world = demoSelfWorld();
+  const before = clampSelfScore(world.health_score) ?? 0;
+  const healable = world.findings.filter((f) => f && f.auto_healable);
+  const actions = healable.map((f) => ({
+    action: f.recommended_action || (f.actionKey ? t(f.actionKey) : 'auto_heal'),
+    actionKey: f.actionKey || null,
+    count: 1,
+    detail: f.titleKey ? t(f.titleKey) : (f.title || ''),
+  }));
+  const projected = healable.length ? Math.min(100, before + 14 * (healable.length / 2)) : before;
+  if (!apply) {
+    return {
+      ok: true, applied: false, before_score: before, after_score: projected,
+      actions_taken: actions, remaining_findings: world.findings.slice(),
+      recorded_lessons: 0, run_id: world.seq + 1,
+    };
+  }
+  world.seq += 1;
+  const run = {
+    id: world.seq, mode: 'apply', before_score: before, after_score: projected,
+    healed_count: healable.length, findings_count: world.findings.length - healable.length,
+    summaryKey: 'self.demo.runNew', actions, created_at: new Date().toISOString(),
+  };
+  world.findings = world.findings.filter((f) => !(f && f.auto_healable));
+  world.health_score = projected;
+  world.overall = projected >= 90 ? 'healthy' : (projected >= 70 ? 'degraded' : 'unhealthy');
+  world.summaryKey = 'self.demo.summaryHealed';
+  world.summaryVars = { before, after: projected, remaining: world.findings.length };
+  delete world.summary;
+  world.recent_runs = [run, ...world.recent_runs].slice(0, 8);
+  world.lessons = [{
+    id: `demo-lesson-${world.seq}`, project: 'collab-hub', member: 'delta', role: 'tester',
+    error_code: 'orphan_task', pattern: t('self.demo.lessonNew.pattern'),
+    guardrailKey: 'self.demo.lessonNew.guardrail', hits: 1, active: true,
+    auto_learned: true, updated_at: new Date().toISOString(),
+  }, ...world.lessons];
+  return {
+    ok: true, applied: true, before_score: before, after_score: projected,
+    actions_taken: actions, remaining_findings: world.findings.slice(),
+    recorded_lessons: 1, run_id: run.id,
+  };
+}
+
+/* ------------------------------- loading ---------------------------- */
+
+function applySelfCheck(data) {
+  const d = data || {};
+  state.selfCheck = d;
+  state.selfFindings = Array.isArray(d.findings) ? d.findings : [];
+  state.selfLessons = Array.isArray(d.lessons) ? d.lessons : [];
+  state.selfRuns = Array.isArray(d.recent_runs) ? d.recent_runs : [];
+  state.selfScore = clampSelfScore(d.health_score);
+  state.selfOverall = d.overall || null;
+  state.selfCheckedAt = d.checked_at || null;
+  const applied = state.selfRuns.filter((r) => r && r.mode === 'apply' && r.created_at)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  state.selfImprove = {
+    health_score: state.selfScore == null ? 0 : state.selfScore,
+    overall: state.selfOverall || 'degraded',
+    findings_count: state.selfFindings.length,
+    healable_count: state.selfFindings.filter((f) => f && f.auto_healable).length,
+    active_lessons: state.selfLessons.filter((l) => l && l.active).length,
+    last_heal_at: applied.length ? applied[0].created_at : (state.selfImprove ? state.selfImprove.last_heal_at : null),
+  };
+  state.flags.selfLoaded = true;
+  renderSelfPanel();
+  renderSelfStrip();
+}
+
+async function loadSelfCheck({ quiet = false } = {}) {
+  if (state.selfBusy) return;
+  if (state.demo) { applySelfCheck(demoSelfWorld()); return; }
+  try {
+    const data = await apiGet('/api/system/self-check');
+    applySelfCheck(data);
+  } catch (err) {
+    if (!quiet) toast(t('self.toastCheckFail', { error: err.message }), 'error');
+    else renderSelfPanel();
+  }
+}
+
+function setSelfBusy(mode) {
+  state.selfBusy = mode || '';
+  const busy = Boolean(state.selfBusy);
+  for (const id of ['#btnSelfCheck', '#btnSelfDry', '#btnSelfApply']) {
+    const btn = $(id);
+    if (btn) btn.disabled = busy;
+  }
+  const panel = $('#selfPanel');
+  if (panel) panel.setAttribute('aria-busy', busy ? 'true' : 'false');
+}
+
+function scheduleSelfRefresh(delay = 1100) {
+  if (state.demo) return;
+  clearTimeout(selfRefreshTimer);
+  selfRefreshTimer = setTimeout(() => {
+    selfRefreshTimer = null;
+    loadSelfCheck({ quiet: true });
+  }, delay);
+}
+
+/* ------------------------------- actions ---------------------------- */
+
+async function runSelfCheck({ quiet = false } = {}) {
+  if (state.selfBusy) return;
+  setSelfBusy('check');
+  state.selfPreview = null;
+  try {
+    if (state.demo) {
+      /* Re-diagnosis must not undo a demo heal that is already in memory. */
+      applySelfCheck(demoSelfWorld());
+      if (!quiet) toast(t('self.toastCheckDemo'), 'info', 3000);
+    } else {
+      const data = await apiGet('/api/system/self-check');
+      applySelfCheck(data);
+      if (!quiet) toast(t('self.toastCheckOk', { score: data.health_score ?? '—' }), 'success');
+    }
+  } catch (err) {
+    toast(t('self.toastCheckFail', { error: err.message }), 'error');
+  } finally {
+    setSelfBusy('');
+  }
+}
+
+async function previewSelfHeal() {
+  if (state.selfBusy) return;
+  setSelfBusy('dry');
+  try {
+    const res = state.demo
+      ? demoSelfHeal(false)
+      : await apiPost('/api/system/self-heal', { apply: false });
+    state.selfPreview = res;
+    renderSelfPreview();
+    const n = Array.isArray(res.actions_taken) ? res.actions_taken.length : 0;
+    if (!n) toast(t('self.toastNoHealable'), 'warn');
+    else toast(t(state.demo ? 'self.toastDryDemo' : 'self.toastDryOk', { n }), 'info', 4200);
+    if (!state.demo) scheduleSelfRefresh(700);
+  } catch (err) {
+    toast(t('self.toastDryFail', { error: err.message }), 'error');
+  } finally {
+    setSelfBusy('');
+  }
+}
+
+async function applySelfHeal() {
+  if (state.selfBusy) return;
+  if (state.demo && !demoSelfWorld().findings.some((f) => f && f.auto_healable)) {
+    toast(t('self.toastNoHealable'), 'warn');
+    return;
+  }
+  setSelfBusy('apply');
+  try {
+    const res = state.demo
+      ? demoSelfHeal(true)
+      : await apiPost('/api/system/self-heal', { apply: true, record_lessons: true });
+    const before = clampSelfScore(res.before_score);
+    const after = clampSelfScore(res.after_score);
+    const healed = Number(res.healed_count ?? (Array.isArray(res.actions_taken) ? res.actions_taken.length : 0));
+    state.selfPreview = null;
+    renderSelfPreview();
+    if (after != null) {
+      state.selfScore = after;
+      state.selfOverall = after >= 90 ? 'healthy' : (after >= 70 ? 'degraded' : 'unhealthy');
+      animateSelfScore(before == null ? after : before, after);
+      setSelfText('#selfStatFindings', String(Array.isArray(res.remaining_findings) ? res.remaining_findings.length : state.selfFindings.length));
+    }
+    if (state.demo) {
+      applySelfCheck(demoSelfWorld());
+      toast(t('self.toastApplyDemo', { before: res.before_score ?? before, after: res.after_score ?? after }), 'success', 5200);
+    } else {
+      toast(t('self.toastApplyOk', { healed, before: res.before_score ?? before, after: res.after_score ?? after }), 'success', 5200);
+      scheduleSelfRefresh(1300);
+    }
+  } catch (err) {
+    toast(t('self.toastApplyFail', { error: err.message }), 'error');
+  } finally {
+    setSelfBusy('');
+  }
+}
+
+async function toggleSelfLesson(id, nextActive) {
+  if (!id || state.selfBusy) return;
+  const active = Boolean(nextActive);
+  try {
+    const res = state.demo
+      ? demoToggleLesson(id, active)
+      : await apiPost('/api/lessons/toggle', { id, active });
+    const lesson = res && res.lesson ? res.lesson : null;
+    if (lesson) {
+      const idx = state.selfLessons.findIndex((l) => String(l.id) === String(lesson.id));
+      if (idx >= 0) state.selfLessons.splice(idx, 1, lesson);
+      else state.selfLessons.unshift(lesson);
+    } else {
+      const local = state.selfLessons.find((l) => String(l.id) === String(id));
+      if (local) local.active = active;
+    }
+    const stateLabel = active ? t('self.active') : t('self.paused');
+    toast(t(state.demo ? 'self.toastToggleDemo' : 'self.toastToggleOk', { state: stateLabel }), 'success', 3200);
+    renderSelfLessons();
+    renderSelfPanel();
+  } catch (err) {
+    toast(t('self.toastToggleFail', { error: err.message }), 'error');
+  }
+}
+
+function lessonFormPayload() {
+  const read = (id) => String(document.getElementById(id)?.value || '').trim();
+  return {
+    project: read('lsProject'),
+    member: read('lsMember'),
+    role: read('lsRole'),
+    error_code: read('lsErrorCode'),
+    pattern: read('lsPattern'),
+    guardrail: read('lsGuardrail'),
+  };
+}
+
+function resetLessonForm() {
+  const form = $('#lessonForm');
+  if (form && typeof form.reset === 'function') form.reset();
+}
+
+async function saveSelfLesson(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  const payload = lessonFormPayload();
+  if (!payload.guardrail) { toast(t('self.toastLessonRequired'), 'warn'); return; }
+  try {
+    const res = state.demo
+      ? demoAddLesson(payload)
+      : await apiPost('/api/lessons/save', payload);
+    const lesson = res && res.lesson ? res.lesson : null;
+    if (lesson) {
+      const idx = state.selfLessons.findIndex((l) => String(l.id) === String(lesson.id));
+      if (idx >= 0) state.selfLessons.splice(idx, 1, lesson);
+      else state.selfLessons.unshift(lesson);
+    }
+    resetLessonForm();
+    toast(t(state.demo ? 'self.toastLessonDemo' : 'self.toastLessonSaved'), 'success', 4000);
+    renderSelfLessons();
+    renderSelfPanel();
+  } catch (err) {
+    toast(t('self.toastLessonFail', { error: err.message }), 'error');
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Drawer                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -4880,13 +5703,19 @@ async function handleActionClick(event) {
   const goto = closest('[data-goto-view]');
   if (goto) { setView(goto.getAttribute('data-goto-view')); return; }
 
+  const lessonToggle = closest('[data-lesson-toggle]');
+  if (lessonToggle) {
+    const next = lessonToggle.getAttribute('data-lesson-active') !== '1';
+    return toggleSelfLesson(lessonToggle.getAttribute('data-lesson-toggle'), next);
+  }
+
   const action = closest('[data-action]');
   if (action) {
     const name = action.getAttribute('data-action');
     if (name === 'probe') return probeAll();
     if (name === 'agent') return openAgentModal();
     if (name === 'memory') return openMemoryModal();
-    if (name === 'events') { setView('ops'); return loadEvents(true); }
+    if (name === 'events') { setView('system'); return loadEvents(true); }
     if (name === 'theme') return toggleTheme();
     if (name === 'lang') return setLang(LANG === 'zh' ? 'en' : 'zh', { announce: true });
     return;
@@ -5029,6 +5858,12 @@ function bindStaticEvents() {
   });
   $('#btnViewTable')?.addEventListener('click', () => setTaskView('table'));
   $('#btnViewKanban')?.addEventListener('click', () => setTaskView('kanban'));
+
+  /* v1.4 self-improve console */
+  $('#btnSelfCheck')?.addEventListener('click', () => runSelfCheck());
+  $('#btnSelfDry')?.addEventListener('click', () => previewSelfHeal());
+  $('#btnSelfApply')?.addEventListener('click', () => applySelfHeal());
+  $('#lessonForm')?.addEventListener('submit', (event) => saveSelfLesson(event));
 
   $('#btnAddDagStep')?.addEventListener('click', addDagStep);
   $('#btnRunDag')?.addEventListener('click', runDag);
