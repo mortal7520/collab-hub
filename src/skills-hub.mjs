@@ -93,7 +93,7 @@ export function parseFrontmatter(markdownText) {
   return { frontmatter: fm, body: m[2] };
 }
 
-function bufferHasInlineSecret(buf) {
+export function bufferHasInlineSecret(buf) {
   if (!Buffer.isBuffer(buf) || buf.length === 0) return false;
   if (detectInlineSecret(buf.toString('utf8'))) return true;
   if (buf.includes(0)) {

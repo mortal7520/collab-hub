@@ -1,6 +1,6 @@
 {
   "name": "collab-hub",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "files": [
     "bin/",
     "public/",
@@ -10,7 +10,7 @@
     "README.zh-CN.md",
     "LICENSE"
   ],
-  "description": "Zero-dependency, local-first multi-agent Mission Control (45 MCP tools) with host-native 60fps SEP-1865 MCP App Cockpit (Antigravity, Claude Desktop, Codex Desktop), 24-bit TrueColor animated TUI & StatusLine HUD (Claude Code, Codex CLI, WSL DSH), All-Agent MCP Hub & Meta-MCP router, Skills/Rules sync, and Worktree Merge Queue.",
+  "description": "Zero-dependency, local-first multi-agent Mission Control (51 MCP tools) with host-native 60fps 6-Tab SEP-1865 MCP App Cockpit (Antigravity, Claude Desktop, Codex Desktop), Interactive Command TUI v2 & Live Snapshot HUD (Claude Code, Codex CLI, WSL DSH), Living Shared Rooms, Artifact Vault, Consensus, Budgets & Safe Triggers.",
   "type": "module",
   "license": "MIT",
   "author": "Mortal",

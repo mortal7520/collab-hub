@@ -7,7 +7,20 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { APP_VERSION, assertValidGitRef, assertValidTaskId, resolveProjectDir, toWslPath } from '../src/config.mjs';
-import { clearMemberCooldown, getMemberStatuses, isProcessAlive, openHubDb, pruneRetentionTables, setMemberCooldown, upsertMemberStatus } from '../src/db.mjs';
+import {
+  clearMemberCooldown, getMemberStatuses, isProcessAlive, openHubDb, openHubDbReadOnly, parseTaskRow,
+  pruneRetentionTables, setMemberCooldown, touchPassiveDesktopHeartbeat, upsertMemberStatus,
+} from '../src/db.mjs';
+import { deleteArtifact, getArtifact, listArtifacts, pruneExpiredArtifacts, putArtifact } from '../src/artifacts.mjs';
+import { deleteBudgetPolicy, evaluateBudget, setBudgetPolicy } from '../src/budget.mjs';
+import { createConsensusRound, recordConsensusVote, synthesizeConsensus } from '../src/consensus.mjs';
+import { buildHandoffPack } from '../src/handoff-pack.mjs';
+import { saveTrigger, listTriggers, runTriggerNow } from '../src/triggers.mjs';
+import {
+  appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, promoteInboxFile,
+  reconcileStaleClaimsInAllRooms, releaseRoomClaim, renewRoomClaim,
+} from '../src/workspace-room.mjs';
+import { I18N } from '../public/i18n.js';
 import { createDashboardServer } from '../src/dashboard.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
@@ -26,7 +39,7 @@ import {
   registerMcpServer, resolveSafePlaceholders, syncMcpToClient,
 } from '../src/mcp-hub.mjs';
 import { MCP_APP_RESOURCES, TOOLS, handleToolCall } from '../src/mcp-server.mjs';
-import { collectHudSnapshot, detectColorSupport, renderStatusLine } from '../src/hud.mjs';
+import { collectHudSnapshot, detectColorSupport, renderStatusLine, sanitizeTerminalText } from '../src/hud.mjs';
 import { TUI_TABS, collectTuiData, renderTuiFrame } from '../src/tui.mjs';
 import {
   addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
@@ -36,7 +49,7 @@ import { runPlaybook } from '../src/playbooks.mjs';
 import { planDispatch, probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, probeCustomAgent, registerAgent, removeAgent } from '../src/registry.mjs';
-import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
+import { applySelfHeal, diagnoseSystem, listIncidentLessons, reconcileStaleTasks, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
 import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from '../src/skills-hub.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import { convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep } from '../src/toolkit.mjs';
@@ -414,8 +427,8 @@ test('Muse outer identity verification, monotonic generation, ACK-only rejection
   }
 });
 
-test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 45 MCP tools', async () => {
-  assert.equal(TOOLS.length, 45);
+test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 51 MCP tools', async () => {
+  assert.equal(TOOLS.length, 51);
   const sse = parseSseEvents('event: message\ndata: {"jsonrpc":"2.0",\ndata: "id":1}\n\ndata: {"id":2}\n\n');
   assert.equal(sse.length, 2);
   assert.deepEqual(JSON.parse(sse[0]), { jsonrpc: '2.0', id: 1 });
@@ -1217,7 +1230,7 @@ test('v1.0: Real token usage telemetry aggregation + Kanban board HTML & /api/wo
     const html = (await rawHttpRequest({ port, pathName: '/', headers: { Host: `127.0.0.1:${port}` } })).body;
     assert.match(html, /tasksKanbanWrap/);
     assert.match(html, /btnViewKanban/);
-    assert.match(html, /CollabHub v2\.0/);
+    assert.match(html, /CollabHub v2\.2/);
   } finally {
     server.close();
     env.cleanup();
@@ -1812,8 +1825,8 @@ test('v1.3: Codex P1 fixes — dispatch-token race guard, DSH ok:false cancel re
   const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
 
   try {
-    // 1. PRAGMA user_version migrated atomically to 150
-    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 150);
+    // 1. PRAGMA user_version migrated atomically to 220
+    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 220);
 
     // 2. Dispatch-token race: if task is failed/cancelled while awaiting reserveMailPaths, external bridge MUST NOT be called!
     let dshCalled = false;
@@ -2134,7 +2147,7 @@ test('v1.4: opt-in closed-loop auto_repair DAG (redacts secrets, stops on duplic
 
     const mcpSelf = await handleToolCall(env.db, 'collab_self_check', {});
     assert.equal(typeof mcpSelf.health_score, 'number');
-    assert.equal(TOOLS.length, 45);
+    assert.equal(TOOLS.length, 51);
   } finally {
     try { await server.shutdown({ drainMs: 500 }); } catch {}
     if (fs.existsSync(flagFile)) fs.unlinkSync(flagFile);
@@ -2384,7 +2397,7 @@ test('v2.0: SEP-1865 MCP App Cockpit, DSH audit security fixes (IPv6 SSRF, sub-f
 
   try {
     // 1. SEP-1865 MCP Apps metadata, resources, and self-contained HTML cockpit
-    assert.equal(TOOLS.length, 45);
+    assert.equal(TOOLS.length, 51);
     const cockpitTool = TOOLS.find((t) => t.name === 'collab_cockpit');
     assert.equal(cockpitTool._meta.ui.resourceUri, COCKPIT_RESOURCE_URI);
     assert.ok(cockpitTool._meta['com.google.antigravity/ui'].entrypoints.some((e) => e.type === 'aux_pane'));
@@ -2619,6 +2632,164 @@ test('v2.1.0: 5-agent adversarial fixes (DNS loopback SSRF, Meta-MCP cache-miss 
     });
     assert.ok(Array.isArray(dryPlan.files_plan) && dryPlan.files_plan.some((f) => f.file === 'CLAIMS.md' && f.action === 'write'));
   } finally {
+    env.cleanup();
+  }
+});
+
+test('v2.2.0: Living Shared Rooms dual-layer leases, Artifact Vault, Handoff Pack, Consensus veto, Budgets, Triggers, Heartbeat, Stale Reconcile, i18n.js & 6-Tab Cockpit', async () => {
+  const env = makeTempEnv();
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1',
+    port: 0,
+    worktreeRoot: env.wts,
+    memoryDir: env.mem,
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  try {
+    // 1. Living Shared Room dual-layer leases + inbox promotion
+    const roomRes = await createCollabRoom(env.db, {
+      name: 'room-v22',
+      goal: 'Ship v2.2.0 safely',
+      createGitRepo: false,
+      workspaceRoot: env.ws,
+      confirmed: true,
+      discoverDeps: { probeLocalEndpoint: async (e) => ({ ...e, reachable: false, models: [] }), locateBinary: async () => null },
+    });
+    assert.equal(roomRes.ok, true);
+    assert.ok(fs.existsSync(path.join(roomRes.room_dir, 'CLAIMS.md')));
+    assert.ok(fs.existsSync(path.join(roomRes.room_dir, 'ROOM-LOG.md')));
+
+    const claim1 = claimRoomPath(env.db, { roomId: roomRes.room_id, pathGlob: 'src/api/*', ownerAgent: 'codex', ttlMinutes: 20 });
+    assert.equal(claim1.status, 'active');
+    assert.throws(() => claimRoomPath(env.db, { roomId: roomRes.room_id, pathGlob: 'src/api/routes.mjs', ownerAgent: 'claude' }), /CLAIM_CONFLICT/);
+    const renewed = renewRoomClaim(env.db, { claimId: claim1.claim_id, ownerAgent: 'codex', ttlMinutes: 45 });
+    assert.equal(renewed.status, 'active');
+    const claimsMd = fs.readFileSync(path.join(roomRes.room_dir, 'CLAIMS.md'), 'utf8');
+    assert.match(claimsMd, /src\/api\/\*/);
+    assert.match(claimsMd, /codex/);
+
+    // Stage file into inbox/codex and reject secret, reject conflict for claude, allow confirmed codex promote
+    const codexInbox = path.join(roomRes.room_dir, 'inbox', 'codex');
+    fs.mkdirSync(codexInbox, { recursive: true });
+    fs.writeFileSync(path.join(codexInbox, 'clean.md'), '# Clean Deliverable\nReady for merge.\n');
+    fs.writeFileSync(path.join(codexInbox, 'leak.md'), 'token=sk-proj-1234567890abcdefghijklmnop\n');
+    assert.throws(() => promoteInboxFile(env.db, { roomId: roomRes.room_id, agent: 'codex', relPath: 'leak.md', destRelPath: 'src/api/leak.md', confirmed: true }), /inline secret/i);
+
+    const claudeInbox = path.join(roomRes.room_dir, 'inbox', 'claude');
+    fs.mkdirSync(claudeInbox, { recursive: true });
+    fs.writeFileSync(path.join(claudeInbox, 'overlap.md'), 'blocked by codex claim');
+    assert.throws(() => promoteInboxFile(env.db, { roomId: roomRes.room_id, agent: 'claude', relPath: 'overlap.md', destRelPath: 'src/api/overlap.md', confirmed: true }), /CLAIM_CONFLICT/);
+
+    const dryProm = promoteInboxFile(env.db, { roomId: roomRes.room_id, agent: 'codex', relPath: 'clean.md', destRelPath: 'src/api/clean.md', confirmed: false });
+    assert.equal(dryProm.dry_run, true);
+    const liveProm = promoteInboxFile(env.db, { roomId: roomRes.room_id, agent: 'codex', relPath: 'clean.md', destRelPath: 'src/api/clean.md', confirmed: true });
+    assert.equal(liveProm.dry_run, false);
+    assert.ok(fs.existsSync(path.join(roomRes.room_dir, 'src', 'api', 'clean.md')));
+    // Missing/wrong owner_agent rejected on renew/release
+    assert.throws(() => renewRoomClaim(env.db, { claimId: claim1.claim_id }), /owner_agent is required/i);
+    assert.throws(() => releaseRoomClaim(env.db, { claimId: claim1.claim_id, ownerAgent: 'claude' }), /CLAIM_CONFLICT/);
+    releaseRoomClaim(env.db, { claimId: claim1.claim_id, ownerAgent: 'codex' });
+    env.db.prepare("UPDATE room_claims SET lease_expires_at = '2020-01-01T00:00:00.000Z', status = 'active' WHERE claim_id = ?").run(claim1.claim_id);
+    const recClaims = reconcileStaleClaimsInAllRooms(env.db);
+    assert.equal(recClaims.expired, 1);
+
+    // 2. Shared Artifact Vault (redaction of API keys + PEM private keys)
+    const art = putArtifact(env.db, {
+      roomId: roomRes.room_id,
+      name: 'audit.md',
+      content: 'Key sk-proj-1234567890abcdefghijklmnop ok\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAK\n-----END RSA PRIVATE KEY-----\n',
+      author: 'muse',
+    });
+    assert.equal(art.secrets_redacted, true);
+    const gotArt = getArtifact(env.db, art.artifact_id);
+    assert.match(gotArt.content, /\[REDACTED_KEY\]/);
+    assert.match(gotArt.content, /\[REDACTED_PRIVATE_KEY\]/);
+    assert.equal(gotArt.content.includes('sk-proj-'), false);
+    assert.equal(gotArt.content.includes('BEGIN RSA PRIVATE KEY'), false);
+    assert.equal(listArtifacts(env.db, { roomId: roomRes.room_id }).length, 1);
+
+    // 3. Context Handoff Pack & project jail enforcement
+    assert.throws(() => buildHandoffPack(env.db, { projectDir: path.join(env.dir, 'outside-jail'), workspaceRoot: env.ws, extraRoots: [env.wts] }));
+    const pack = buildHandoffPack(env.db, { projectDir: env.proj, roomId: roomRes.room_id, targetMember: 'claude', saveArtifact: true, workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.ok(pack.bytes > 80 && pack.artifact?.artifact_id);
+    assert.match(pack.markdown, /room-v22/);
+
+    // 4. Multi-Agent Consensus with P0 blocker veto & string auto_dispatch rejection
+    await assert.rejects(() => handleToolCall(env.db, 'collab_consensus', { action: 'create', topic: 'bad bool', auto_dispatch: 'false' }), /strict boolean/i);
+    const { round } = await createConsensusRound(env.db, { roomId: roomRes.room_id, topic: 'Approve v2.2 release?', members: ['agy', 'codex', 'claude', 'muse'] });
+    recordConsensusVote(env.db, { roundId: round.round_id, member: 'agy', stance: 'approve', confidence: 0.95 });
+    recordConsensusVote(env.db, { roundId: round.round_id, member: 'codex', stance: 'approve', confidence: 0.9, blockers: ['P0: fix leak'] });
+    const synth = synthesizeConsensus(env.db, round.round_id);
+    assert.equal(synth.status, 'synthesized');
+    assert.equal(synth.verdict.decision, 'needs_modification');
+    assert.equal(synth.verdict.hard_blockers.length, 1);
+
+    // 5. Budget Guardrail blocks over-quota call limit AND total_tokens usage
+    setBudgetPolicy(env.db, { policyId: 'bud_tok', scopeType: 'agent', scopeId: 'dsh', dailyTokenLimit: 100, onExceed: 'block' });
+    const oldIso = new Date().toISOString();
+    env.db.prepare(`INSERT INTO tasks (task_id, member, role, channel, project_dir, title, prompt, state, evidence_json, created_at, updated_at, completed_at) VALUES ('bud_t1', 'dsh', 'reviewer', 'dsh-baton', ?, 't', 'p', 'completed', ?, ?, ?, ?)`).run(
+      env.proj, JSON.stringify({ model: 'm', usage: { total_tokens: 500 } }), oldIso, oldIso, oldIso,
+    );
+    const bEval = evaluateBudget(env.db, { member: 'dsh', projectDir: env.proj });
+    assert.equal(bEval.action, 'block');
+    await assert.rejects(
+      () => dispatchBackgroundTask(env.db, { member: 'dsh', role: 'reviewer', projectDir: env.proj, title: 'blocked', prompt: 'blocked' }, { workspaceRoot: env.ws, extraRoots: [env.wts] }),
+      /BUDGET_EXCEEDED/,
+    );
+    deleteBudgetPolicy(env.db, 'bud_tok');
+
+    // 6. Safe Triggers allowlist + 60s min clamp + runTriggerNow
+    assert.throws(() => saveTrigger(env.db, { name: 'bad', action: 'shell_exec' }), /Disallowed trigger action/);
+    const trg = saveTrigger(env.db, { name: 'Health Check', action: 'self_check', intervalSec: 5 });
+    assert.equal(trg.interval_sec, 60);
+    const trgRun = runTriggerNow(env.db, trg.trigger_id);
+    assert.equal(trgRun.status, 'ok');
+    assert.ok(listTriggers(env.db).length >= 1);
+
+    // 7. Passive Desktop Heartbeat + Batch Stale Task Reconcile (age cutoff + empty taskIds safety)
+    assert.equal(touchPassiveDesktopHeartbeat(env.db, 'codex', 'Codex Desktop'), true);
+    assert.equal(touchPassiveDesktopHeartbeat(env.db, 'codex', 'Codex Desktop'), false); // throttled 60s
+    const staleAt = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const freshAt = new Date().toISOString();
+    env.db.prepare(`INSERT INTO tasks (task_id, member, role, channel, project_dir, title, prompt, state, created_at, updated_at) VALUES ('stale_t1', 'muse', 'reviewer', 'muse-tailnet', ?, 'old', 'old', 'needs_input', ?, ?)`).run(env.proj, staleAt, staleAt);
+    env.db.prepare(`INSERT INTO tasks (task_id, member, role, channel, project_dir, title, prompt, state, created_at, updated_at) VALUES ('fresh_t1', 'muse', 'reviewer', 'muse-tailnet', ?, 'live', 'live', 'needs_input', ?, ?)`).run(env.proj, freshAt, freshAt);
+    const emptyStale = reconcileStaleTasks(env.db, { taskIds: [], confirmed: true });
+    assert.equal(emptyStale.reconciled_count, 0);
+    const dryStale = reconcileStaleTasks(env.db, { confirmed: false });
+    assert.ok(dryStale.count === 1 && dryStale.candidates[0].task_id === 'stale_t1');
+    const doneStale = reconcileStaleTasks(env.db, { taskIds: ['stale_t1'], resolution: 'cancelled', confirmed: true });
+    assert.equal(doneStale.reconciled_count, 1);
+    assert.equal(env.db.prepare('SELECT state FROM tasks WHERE task_id = ?').get('fresh_t1').state, 'needs_input');
+
+    // 8. Modular public/i18n.js + HTTP allowlist + 6-Tab Cockpit HTML & vm.Script + terminal escape sanitizer
+    assert.equal(sanitizeTerminalText('ok\x1b]52;c;AAAA\x07\x1b[2J!'), 'ok!');
+    assert.equal(env.db.prepare('PRAGMA user_version').get().user_version, 220);
+    assert.ok(I18N.en && I18N.zh && I18N.en['brand.upgrade'].includes('51 MCP tools'));
+    assert.equal(typeof collectHudSnapshot(env.db).rooms?.active_claims, 'number');
+    const tuiSnap = collectTuiData(env.db);
+    assert.ok(Array.isArray(tuiSnap.agents) && tuiSnap.rooms?.available === true);
+    const i18nResp = await fetch(`${baseUrl}/assets/i18n.js`);
+    assert.equal(i18nResp.status, 200);
+    const roomsResp = await fetch(`${baseUrl}/api/rooms`);
+    assert.equal(roomsResp.status, 200);
+    const cockpitHtml = buildCockpitAppHtml();
+    assert.ok(
+      cockpitHtml.includes('data-tab="rooms"')
+      && cockpitHtml.includes('id="btnMcpImportAll"')
+      && cockpitHtml.includes('id="btnTdLogs"')
+      && cockpitHtml.includes('id="btnMqProcess"')
+      && cockpitHtml.includes('qdProj.options')
+      && cockpitHtml.includes('Confirm Room?')
+      && cockpitHtml.includes('task_ids: idsToClean'),
+    );
+    const { Script } = await import('node:vm');
+    for (const m of cockpitHtml.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)) new Script(m[1]);
+    deleteArtifact(env.db, art.artifact_id);
+    assert.ok(pruneExpiredArtifacts(env.db).checked_at);
+  } finally {
+    await server.shutdown();
     env.cleanup();
   }
 });

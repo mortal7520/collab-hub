@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.2.0 (2026-11-27)
+
+**Full-Loop Autonomous Multi-Agent Collaboration OS (`51 MCP tools`), Living Shared Rooms, 6-Tab SEP-1865 Cockpit, Interactive Command TUI v2 & 5-Agent Red-Team Hardening — built & adversarially audited concurrently by `AGY` + `WSL DSH` (`02bb489`) + `Cloud Muse` (`v22_muse_protocol`) + `Codex Desktop` (`01a21e03`) + `Claude Desktop` (`d4296042`).**
+
+### New Capabilities (#46–#51, DB Schema v220)
+- **Living Shared Collaboration Rooms (`collab_room`, `src/workspace-room.mjs`)**: Dual-layer SQLite (`BEGIN IMMEDIATE` lease locks + append-only `room_log`) synced atomically to `CLAIMS.md` and `ROOM-LOG.md`, TTL expiry & `CLAIM_CONFLICT` overlap detection, caller-bound lease renew/release, and safe `inbox/<agent>/` promotion (`promoteInboxFile`) with parent-chain symlink checks and atomic rename under transaction.
+- **Shared Artifact Vault (`collab_artifacts`, `src/artifacts.mjs`)**: 256 KB per-artifact store with SHA-256 verification, TTL pruning, and automatic redaction of inline API tokens & PEM/PGP private key blocks.
+- **Context Handoff Pack (`collab_handoff_pack`, `src/handoff-pack.mjs`)**: Single-call workspace-jailed Markdown handoff generator bundling Git branch/status/diffstat, recent tasks, open diff comments, active room claims/logs, runtime guardrails, and project memory notes (optionally persisted into Artifact Vault).
+- **Multi-Agent Consensus & Arbitration (`collab_consensus`, `src/consensus.mjs`)**: Heterogeneous agent voting (`approve`/`reject`/`modify`/`abstain`, `abstain` excluded from quorum ratio), P0 hard-blocker veto, transactional vote upsert, optional `auto_dispatch` for background agents, and verdict synthesis to SQLite + Memory + `ROOM-LOG.md`.
+- **Token & Call Budget Guardrails (`collab_budget`, `src/budget.mjs`, `src/prober.mjs`, `src/executors.mjs`)**: Global/agent/project daily call & token limits (`warn | downgrade | block`) enforced transactionally at dispatch admission and factored into adaptive `planDispatch` routing.
+- **Safe Automation Triggers (`collab_triggers`, `src/triggers.mjs`)**: Strictly allowlisted operational routines (`self_check`, `self_heal_preview`, `hot_backup`, `skills_drift_check`, `prune_artifacts`, `reconcile_stale_claims`) with 60s minimum interval cooldowns.
+- **Zero-Friction Auto-Healing (`src/db.mjs`, `src/self-improve.mjs`)**: Passive Desktop MCP heartbeat (`touchPassiveDesktopHeartbeat`, 60s throttle) and age-guarded batch stale task archiving (`reconcileStaleTasks`).
+
+### Cockpit, CLI, Modular Refactor & Security Fixes
+- **6-Tab SEP-1865 Cockpit (`src/mcp-app-ui.mjs`)**: Added **Rooms & Ops** 6th tab, one-click **Import All Local MCPs**, **Live Logs** inspection, **Handoff Pack**, and 400ms-debounced two-step confirmations across **Heal**, **Create Room**, **Clean Stale** (pinned `task_ids`), **Process Queue**, and **Cancel**; fixed Quick Dispatch Windows path selector escaping.
+- **Interactive Command TUI v2 & Live HUD Snapshot Refresh (`src/tui.mjs`, `src/hud.mjs`, by WSL DSH)**: Added `Enter` Task Detail & Live Log Drawer overlay, two-step `x` Cancel, `h`/`Shift+H` Diagnose & two-step Heal, `m` Merge Queue check, optional `room_claims`/`budget_policies` stats bar, `reopenDb` handle rotation for frozen WSL `immutable=1` snapshots, bracketed-paste drop, and `sanitizeTerminalText` stripping untrusted OSC 52/CSI terminal escapes.
+- **Modular Extraction & Docs**: Extracted HTTP/CLI/Baton/Muse drivers into `src/executor-drivers.mjs` and bilingual dictionaries into `public/i18n.js`; updated `redirect: 'error'` on `openai-http` completions and strict boolean validation on `auto_dispatch`.
+
 ## v2.1.0 (2026-11-27)
 
 **5-Agent Concurrent Adversarial Security Hardening, Shared Collaboration Room Protocol & Host-Native UX Fixes — audited jointly by `Claude Desktop` (`d4296042`), `Codex Desktop` (`01a21e03`), `WSL DSH` (`hrun-mwzct42f-e35eb5`), `Cloud Muse` (`5de9ea83dcf0196250f6`), and `AGY`.**

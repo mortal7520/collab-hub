@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { evaluateBudget } from './budget.mjs';
 import { INTEGRATIONS, MAIL_BASE_URL, VALID_ROLES } from './config.mjs';
 import { getMemberStatuses, logEvent, upsertMemberStatus } from './db.mjs';
 import { listAgents, probeCustomAgent } from './registry.mjs';
@@ -332,6 +333,13 @@ export function planDispatch(db, {
     if (tStats?.reliability_delta) score += tStats.reliability_delta;
     // Soft circuit-breaker penalty on >=3 consecutive recent non-429, non-needs_input failures/stalls on THIS channel
     if (tStats?.circuit_state === 'open') score -= 8;
+
+    const budgetCheck = evaluateBudget(db, { member: m.member });
+    if (budgetCheck.action === 'block') {
+      skipped.push({ member: m.member, reason: 'budget_exceeded_blocked', detail: budgetCheck.matched_policies });
+      continue;
+    }
+    if (budgetCheck.action === 'downgrade') score -= 25;
 
     const executionMode = (m.channel === 'desktop-native') ? 'desktop_native_bridge' : 'background_auto';
     eligible.push({

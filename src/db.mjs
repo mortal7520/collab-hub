@@ -70,7 +70,7 @@ function ensureColumn(db, table, column, definition) {
   }
 }
 
-const SCHEMA_VERSION = 150;
+const SCHEMA_VERSION = 220;
 
 function initSchema(db) {
   db.exec('BEGIN IMMEDIATE;');
@@ -266,6 +266,96 @@ function initSchema(db) {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_merge_queue_order ON merge_queue(status, priority ASC, id ASC);
+
+    CREATE TABLE IF NOT EXISTS collab_rooms (
+      room_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      room_dir TEXT NOT NULL,
+      goal TEXT,
+      agents_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS room_claims (
+      claim_id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL,
+      path_glob TEXT NOT NULL,
+      owner_agent TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_claims_room_status ON room_claims(room_id, status);
+
+    CREATE TABLE IF NOT EXISTS room_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'note',
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_room_log_room ON room_log(room_id, id DESC);
+
+    CREATE TABLE IF NOT EXISTS shared_artifacts (
+      artifact_id TEXT PRIMARY KEY,
+      room_id TEXT,
+      project TEXT,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'text/plain',
+      sha256 TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      author TEXT NOT NULL,
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      expires_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_shared_artifacts_created ON shared_artifacts(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS budget_policies (
+      policy_id TEXT PRIMARY KEY,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      daily_token_limit INTEGER,
+      daily_call_limit INTEGER,
+      soft_warn_pct INTEGER NOT NULL DEFAULT 80,
+      on_exceed TEXT NOT NULL DEFAULT 'warn',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS automation_triggers (
+      trigger_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'interval',
+      action TEXT NOT NULL,
+      interval_sec INTEGER,
+      event_match TEXT,
+      config_json TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_run_at TEXT,
+      last_status TEXT,
+      last_summary TEXT,
+      run_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS consensus_rounds (
+      round_id TEXT PRIMARY KEY,
+      room_id TEXT,
+      topic TEXT NOT NULL,
+      members_json TEXT NOT NULL DEFAULT '[]',
+      votes_json TEXT NOT NULL DEFAULT '[]',
+      verdict_json TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   // Safe forward-compatible migrations for existing hub.db
@@ -506,6 +596,35 @@ export function setMemberCooldown(db, member, seconds, reason, channel = null) {
   });
   logEvent(db, { eventType: 'member.cooldown_set', actor: member, payload: { seconds: boundedSec, until, channel: scopedChannel, reason } });
   return { member, channel: scopedChannel, cooldown_until: until, seconds: boundedSec, reason };
+}
+
+const PASSIVE_HEARTBEAT_LAST = new Map();
+
+/**
+ * Passively refresh an active Desktop host member (`agy` | `codex` | `claude`) when
+ * its MCP client communicates with CollabHub, preventing artificial `stale` drift.
+ * Throttled to once every 60s per member and never overwrites active cooldowns.
+ */
+export function touchPassiveDesktopHeartbeat(db, memberId, clientName = '') {
+  if (!db || !['agy', 'codex', 'claude'].includes(memberId)) return false;
+  const nowMs = Date.now();
+  const prevMs = PASSIVE_HEARTBEAT_LAST.get(memberId) || 0;
+  if (nowMs - prevMs < 60000) return false;
+  if (!isRegisteredAgent(db, memberId)) return false;
+  const existing = db.prepare('SELECT * FROM member_status WHERE member = ?').get(memberId);
+  if (existing?.cooldown_until && Date.parse(existing.cooldown_until) > nowMs && existing.state === 'cooldown') {
+    return false;
+  }
+  PASSIVE_HEARTBEAT_LAST.set(memberId, nowMs);
+  upsertMemberStatus(db, {
+    member: memberId,
+    channel: 'desktop-native',
+    state: 'online',
+    detail: clientName
+      ? `Active Desktop MCP session (${String(clientName).slice(0, 60)})`
+      : 'Active Desktop MCP session (passive heartbeat)',
+  });
+  return true;
 }
 
 export function clearMemberCooldown(db, member) {

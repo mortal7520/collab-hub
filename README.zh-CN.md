@@ -14,7 +14,7 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-45%20Tools%20%2B%20Apps-8b5cf6" alt="MCP 45 Tools + SEP-1865 Apps" />
+  <img src="https://img.shields.io/badge/MCP-51%20Tools%20%2B%20Apps-8b5cf6" alt="MCP 51 Tools + SEP-1865 Apps" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="零 npm 依赖" />
 </p>
 
@@ -26,16 +26,17 @@
 
 ---
 
-> **不用切浏览器 —— 四端宿主原生炫酷动效驾驶舱（`v2.0`）：**
-> - **Antigravity (AGY) · Claude Desktop · Codex Desktop**：直接调用 `collab_cockpit`（或在 Antigravity 左侧全局栏 / 右侧 `+` 侧栏点击 **CollabHub**），宿主内原生渲染 **60fps SEP-1865 MCP App 神经拓扑驾驶舱**（`ui://collab-hub/cockpit.html`）！
-> - **Claude Code CLI · Codex CLI · WSL DSH 终端**：运行 `node bin/collab-hub.mjs tui` 启动 **24-bit 真彩动态终端指挥舱**；在 Claude Code 底部接入 `node bin/collab-hub.mjs hud --format statusline`（实测 `<10ms` 读取 SQLite 零阻塞）！
+> **不用切浏览器 —— 四端宿主原生炫酷动效驾驶舱（`v2.2.0`）：**
+> - **Antigravity (AGY) · Claude Desktop · Codex Desktop**：直接调用 `collab_cockpit`（或在 Antigravity 左侧全局栏 / 右侧 `+` 侧栏点击 **CollabHub**），宿主内原生渲染 **6 页签 60fps SEP-1865 MCP App 神经拓扑驾驶舱**（`ui://collab-hub/cockpit.html`）！
+> - **Claude Code CLI · Codex CLI · WSL DSH 终端**：运行 `node bin/collab-hub.mjs tui` 启动 **交互式命令 TUI v2**（`Enter` 任务日志抽屉、防误触 `x` 两步中止、`h`/`H` 体检自愈、`m` 队列预演、WSL 快照自动刷新）；在 Claude Code 底部接入 `node bin/collab-hub.mjs hud --format statusline`（实测 `<10ms` 读取 SQLite 零阻塞）！
 > - **在线浏览器交互演示**：[**点击即刻体验 →**](https://mortal7520.github.io/collab-hub/)
 
-- **四端原生 60fps SEP-1865 MCP App 驾驶舱（`v2.0`）** —— 自包含单文件 `ui://collab-hub/cockpit.html`（`text/html;profile=mcp-app`），内置 60fps Canvas 神经舰队拓扑雷达、5 个高密度交互页签（舰队雷达 / 看板日志 / MCP 中心 / 技能规范 / 合并队列）、双向 `tools/call` + `ui/message` + AGY `toggle-aux-pane`、离屏自动停帧零耗电与纯文本 Cyber-HUD 渐进降级（借鉴 `modelcontextprotocol/ext-apps`）。
-- **24-bit 真彩动态终端 TUI & `<10ms` StatusLine HUD（`v2.0`）** —— 键盘驱动的动态终端指挥舱（`collab-hub tui`）与实时底部状态栏（`collab-hub hud`），严格遵循 `NO_COLOR`/`TERM=dumb`/TTY 降级与崩溃自动恢复终端状态（借鉴 `asheshgoplani/agent-deck` 与 `sirmalloc/ccstatusline`）。
+- **活的共享协作房间与六大全新闭环引擎（`v2.2.0`）** —— SQLite + Markdown 双层安全共享协作房（`collab_room`：`CLAIMS.md` / `ROOM-LOG.md` 原子租约与 `inbox/<agent>/` 安全晋升）、自动脱敏 **Artifact Vault**（`collab_artifacts`）、沙箱隔离 **上下文交接包**（`collab_handoff_pack`）、P0 一票否决 **多 Agent 共识裁决**（`collab_consensus`）、原子事务 **Token/调用预算熔断**（`collab_budget`）与白名单 **定时巡检触发器**（`collab_triggers`），外加被动桌面心跳与带时效保护的滞留任务清理。
+- **四端原生 6 页签 60fps SEP-1865 MCP App 驾驶舱（`v2.2.0`）** —— 自包含单文件 `ui://collab-hub/cockpit.html`（`text/html;profile=mcp-app`），内置 60fps Canvas 神经舰队拓扑雷达、6 个高密度交互页签（舰队雷达 / 看板日志 / MCP 中心 / 技能规范 / 合并队列 / **协作房间**）、一键导入本机 MCP、400ms 防抖两步确认与双向 `tools/call` + `ui/message` + AGY `toggle-aux-pane`（借鉴 `modelcontextprotocol/ext-apps`）。
+- **命令式交互 TUI v2 & `<10ms` StatusLine HUD（`v2.2.0`）** —— 键盘驱动的交互终端指挥舱（`collab-hub tui`）与实时底部状态栏（`collab-hub hud`），内置防 OSC 52/CSI 终端转义注入清洗、Bracketed Paste 防粘贴误触与 WSL 只读快照轮换刷新（借鉴 `asheshgoplani/agent-deck` 与 `sirmalloc/ccstatusline`）。
 - **全 Agent MCP 中心 + Meta-MCP 懒加载路由** —— 跨 Antigravity / Codex / Claude / Cursor / Windsurf / VS Code 零密钥漂移对比、fail-closed IPv6 SSRF 防护、按需工具路由与 Dry-Run + `.bak` 安全写回。
 - **跨 Agent Skills / Rules 同步中心 & Worktree 串行合并队列** —— 全子文件哈希与密钥扫描、原子目录替换、行级 Diff 批注打回返工，以及零副作用 `git merge-tree` 累计冲突预演 + 原子队列抢占合并。
-- **零 npm 运行依赖 · 45 个 MCP 工具 · 39 项端到端测试** —— 全部开源复用 Commit 与协议完整记录于 [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md)。
+- **零 npm 运行依赖 · 51 个 MCP 工具 · 42 项端到端测试** —— 全部开源复用 Commit 与协议完整记录于 [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md)。
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">

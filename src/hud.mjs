@@ -37,6 +37,20 @@ const P = HUD_PALETTE;
 const PULSE_FRAMES = Object.freeze(['◉', '◎', '●']);
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const ANSI_TOKEN_RE = /^\x1b\[[0-9;]*m/;
+const ESC_STRING_RE = /\x1b[\]PX^_][\s\S]*?(?:\x07|\x1b\\|$)/g;
+const NON_SGR_CSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+const CTRL_CHAR_RE = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
+
+/**
+ * Strip untrusted terminal control sequences (OSC 52/title/DCS/non-SGR CSI + C0/C1 controls)
+ * from DB/agent-supplied text before terminal rendering.
+ */
+export function sanitizeTerminalText(value) {
+  return String(value ?? '')
+    .replace(ESC_STRING_RE, '')
+    .replace(NON_SGR_CSI_RE, '')
+    .replace(CTRL_CHAR_RE, ' ');
+}
 
 const AGENT_GLYPHS = Object.freeze({
   agy: 'AGY',
@@ -120,9 +134,11 @@ export function displayWidth(value) {
   return width;
 }
 
-/** ANSI-aware truncation that always closes any open SGR sequence. */
+/** ANSI-aware truncation that always strips non-SGR control sequences and closes open SGR. */
 export function truncateAnsi(value, maxWidth, ellipsis = '') {
-  const str = String(value ?? '');
+  const str = String(value ?? '')
+    .replace(ESC_STRING_RE, '')
+    .replace(CTRL_CHAR_RE, ' ');
   const limit = Math.max(0, Math.floor(maxWidth));
   if (displayWidth(str) <= limit) return str;
   const ellipsisWidth = Math.min(limit, displayWidth(ellipsis));
@@ -366,6 +382,7 @@ export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
       tasks: { total: 0, active: 0, running: 0, queued: 0, stalled: 0, failed: 0, completed: 0, latest_age_ms: null, latest_age_human: '—', latest: null },
       worktrees: { active: 0, total: 0 },
       merge_queue: { queued: 0, ready: 0, validating: 0, conflict: 0, failed: 0, merged: 0 },
+      rooms: { active_claims: 0 },
       mcp: { registered: 0, healthy: 0, tools: 0 },
       lessons: { active: 0, total: 0 },
       health: { score: null, overall: 'no-db', findings: 0, healable: 0 },
@@ -478,6 +495,10 @@ export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
   }
   queue.mergeable = queue.ready;
 
+  /* ------------------------------ rooms -------------------------------- */
+  const claimAgg = safeGet(db, `SELECT COUNT(*) AS c FROM room_claims WHERE status = 'active' AND lease_expires_at > ?`, new Date(nowMs).toISOString()) || {};
+  const rooms = { active_claims: toInt(claimAgg.c) };
+
   /* ------------------------------- MCP --------------------------------- */
   const mcpAgg = safeGet(db, `
     SELECT COUNT(*) AS total,
@@ -526,6 +547,7 @@ export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
     tasks,
     worktrees,
     merge_queue: queue,
+    rooms,
     mcp,
     lessons,
     health,
@@ -694,7 +716,7 @@ function renderCard(snap, { width, level, frame }) {
 
   if (tasks.latest) {
     rows.push(cardRow(inner,
-      ` ${s('◆', P.indigo)} ${s('LATEST', P.slate)} ${s(String(tasks.latest.state || '').toUpperCase(), P.cyan)} ${truncateAnsi(String(tasks.latest.title || tasks.latest.task_id || ''), Math.max(4, inner - 24), '…')}`,
+      ` ${s('◆', P.indigo)} ${s('LATEST', P.slate)} ${s(sanitizeTerminalText(String(tasks.latest.state || '')).toUpperCase(), P.cyan)} ${truncateAnsi(sanitizeTerminalText(tasks.latest.title || tasks.latest.task_id || ''), Math.max(4, inner - 24), '…')}`,
       '', s));
   }
 
@@ -814,6 +836,7 @@ export function readStdinJson({ timeoutMs = 250, stream = process.stdin } = {}) 
  *   width?: number,
  *   stdinJson?: object|string|null,
  *   worktreeDir?: string,
+ *   reopenDb?: (() => import('node:sqlite').DatabaseSync|null)|null,
  *   stream?: NodeJS.WriteStream,
  *   env?: Record<string, string|undefined>,
  * }} [options]
@@ -826,9 +849,15 @@ export async function runHudCli(db, {
   width,
   stdinJson = null,
   worktreeDir,
+  reopenDb = null,
   stream = process.stdout,
   env = process.env,
 } = {}) {
+  // `db` is a parameter, so all reads go through a mutable handle. In watch mode
+  // `reopenDb` can hand us a fresh handle every ~4s (SQLite WAL rollover, a new
+  // snapshot file, …); `ownedDb` tracks the handle we opened and must close.
+  let activeDb = db;
+  let ownedDb = null;
   let context = stdinJson;
   if (typeof context === 'string') {
     try { context = JSON.parse(context); } catch { context = null; }
@@ -837,7 +866,7 @@ export async function runHudCli(db, {
     context = await readStdinJson();
   }
 
-  let snapshot = collectHudSnapshot(db, { worktreeDir });
+  let snapshot = collectHudSnapshot(activeDb, { worktreeDir });
   if (context && typeof context === 'object') snapshot.context = context;
 
   const colorLevel = detectColorSupport({ stream, env, allowPipedAnsi: Boolean(context) }).level;
@@ -855,6 +884,40 @@ export async function runHudCli(db, {
     format: format === 'card' ? 'card' : (format === 'json' ? 'json' : 'statusline'),
   });
 
+  // Swap in a fresh handle without ever dropping the one we still hold: any
+  // failure (throw, unusable handle, self-return) leaves `activeDb` untouched.
+  const tryReopen = () => {
+    if (!watch) return false;
+    if (typeof reopenDb !== 'function') return false;
+    // Gate on the CALLER's handle: that is the one that proved WSL could not open the
+    // live WAL. A later replacement may well come back without the flag (the plain
+    // read-only open succeeds once the lock clears) and must not kill the refresh loop.
+    if (db?.__collabHubSnapshot !== true) return false;
+    let next = null;
+    try {
+      next = reopenDb();
+    } catch {
+      return false;
+    }
+    if (!next || typeof next.prepare !== 'function') {
+      if (next) { try { if (typeof next.close === 'function') next.close(); } catch {} }
+      return false;
+    }
+    if (next === activeDb) return false;
+    const prev = activeDb;
+    activeDb = next;
+    ownedDb = next;
+    if (prev !== db && prev !== next) {
+      try { if (typeof prev.close === 'function') prev.close(); } catch {}
+    }
+    try {
+      const fresh = collectHudSnapshot(activeDb, { worktreeDir });
+      if (snapshot.context) fresh.context = snapshot.context;
+      snapshot = fresh;
+    } catch { /* keep the last good snapshot */ }
+    return true;
+  };
+
   const stop = () => {
     if (stopped) return;
     stopped = true;
@@ -870,6 +933,10 @@ export async function runHudCli(db, {
       process.off('SIGHUP', onSignal);
       process.off('exit', stop);
     } catch {}
+    if (ownedDb && ownedDb !== db && ownedDb === activeDb) {
+      try { if (typeof ownedDb.close === 'function') ownedDb.close(); } catch {}
+      ownedDb = null;
+    }
   };
 
   const onSignal = () => {
@@ -902,11 +969,14 @@ export async function runHudCli(db, {
     if (stopped) return;
     frame += 1;
     tickCount += 1;
+    // Re-open the SQLite handle about once per 4s (16 ticks at the default
+    // 250 ms cadence) so a rotating/rollover DB stays visible.
+    if (tickCount % 16 === 0) { tryReopen(); }
     // Refresh the SQLite snapshot about once per second (4 ticks at the default
     // 250 ms cadence) while keeping the animation at a full 4 fps.
     if (tickCount % 4 === 0) {
       try {
-        const fresh = collectHudSnapshot(db, { worktreeDir });
+        const fresh = collectHudSnapshot(activeDb, { worktreeDir });
         if (snapshot.context) fresh.context = snapshot.context;
         snapshot = fresh;
       } catch { /* keep the last good snapshot */ }

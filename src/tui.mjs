@@ -1,5 +1,5 @@
 /**
- * CollabHub v2.0 — Cyber-precision Animated Terminal Mission Control Cockpit.
+ * CollabHub v2.2 — Cyber-precision Animated Terminal Mission Control Cockpit.
  *
  * `collab-hub tui` (see startInteractiveTui) renders a full-width 24-bit TrueColor
  * dashboard for Windows Terminal (Codex CLI / Claude Code) and WSL DSH.
@@ -8,16 +8,28 @@
  *   - `renderTuiFrame(data, uiState)` is a PURE deterministic string renderer.
  *     Given the same data + uiState it always returns the same frame, so the whole
  *     visual layer is unit-testable without a TTY.
- *   - `startInteractiveTui(db, { demo, fps })` owns the terminal: alt-screen,
+ *   - `startInteractiveTui(db, { demo, fps, reopenDb })` owns the terminal: alt-screen,
  *     raw key handling, dirty-frame diffing, 4 s data refresh, clean restore.
+ *
+ * v2.2 — Interactive Command TUI v2:
+ *   - `Enter` toggles the bottom Task Detail & Live Log Drawer overlay (never changes
+ *     the frame height: it composites over the last content rows).
+ *   - `x` arms a 4 s two-step cancel, then calls `cancelTask` on a writable DB.
+ *   - `h` runs `diagnoseSystem` + a dry-run `applySelfHeal` preview, `Shift+H` applies.
+ *   - `m` validates the merge queue and reports the summary in the status toast.
+ *   - `r` forces a full refresh; `Esc` closes the drawer / dismisses the toast.
+ *   - Optional `reopenDb` callback lets a WSL `immutable=1` snapshot handle be swapped
+ *     for a fresh one on every ~4 s refresh (closing the previous handle safely).
  *
  * Rendering never touches SQLite, the network or subprocesses. Data collection
  * happens on refresh only (start + `r` + every 4 s), always outside the 8–10 fps
- * paint timer.
+ * paint timer. Optional `room_claims` / `budget_policies` lookups go through
+ * safe helpers, so pre-v2.2 databases render identically.
  */
 
 import path from 'node:path';
 
+import { cancelTask } from './executors.mjs';
 import {
   collectHudSnapshot,
   detectColorSupport,
@@ -26,9 +38,12 @@ import {
   gradientText,
   makePainter,
   padAnsi,
+  sanitizeTerminalText,
   truncateAnsi,
 } from './hud.mjs';
 import { buildMcpHubSnapshot } from './mcp-hub.mjs';
+import { validateMergeQueue } from './merge-queue.mjs';
+import { applySelfHeal, diagnoseSystem } from './self-improve.mjs';
 import { buildSkillsRulesSnapshot } from './skills-hub.mjs';
 
 /* -------------------------------------------------------------------------- */
@@ -49,6 +64,32 @@ const P = Object.freeze({
 });
 
 export const TUI_TABS = Object.freeze(['Radar', 'Kanban & Logs', 'MCP Hub', 'Skills & Rules', 'Merge Queue']);
+
+/**
+ * v2.2 keymap. Exported so the README, the CLI help and future tests can assert on
+ * the exact bindings without duplicating strings.
+ */
+export const TUI_KEYBINDINGS = Object.freeze([
+  Object.freeze({ key: '1-5 / Tab', action: 'switch', description: 'Switch between the five cockpit tabs' }),
+  Object.freeze({ key: '↑↓ / j k', action: 'navigate', description: 'Move the task selection' }),
+  Object.freeze({ key: 'Enter', action: 'detail', description: 'Toggle the Task Detail & Live Log Drawer for the selected task' }),
+  Object.freeze({ key: 'x', action: 'cancel', description: 'Two-step cancel: 1st press arms a 4 s window, 2nd press executes cancelTask' }),
+  Object.freeze({ key: 'h', action: 'health', description: 'diagnoseSystem + dry-run applySelfHeal preview (0 writes)' }),
+  Object.freeze({ key: 'Shift+H', action: 'heal', description: 'applySelfHeal({ apply: true }) on a writable DB' }),
+  Object.freeze({ key: 'm', action: 'merge', description: 'validateMergeQueue on a writable DB, summary in the status toast' }),
+  Object.freeze({ key: 'r', action: 'refresh', description: 'Force an immediate full data refresh' }),
+  Object.freeze({ key: 'Esc', action: 'close', description: 'Close the drawer / dismiss the status toast' }),
+  Object.freeze({ key: 'q / Ctrl+C', action: 'quit', description: 'Leave the cockpit and restore the terminal' }),
+]);
+
+/** How long the two-step cancel/heal arms stay active. */
+const CANCEL_CONFIRM_MS = 4000;
+/** Minimum dwell time before a 2nd key/click confirms an armed destructive action (blocks key-repeat & paste). */
+const ARM_MIN_AGE_MS = 400;
+/** Hard cap on the drawer overlay height (rows). */
+const DRAWER_MAX_LINES = 16;
+/** Task states `cancelTask` refuses to touch (mirrors executors.mjs TERMINAL_STATES). */
+const TERMINAL_TASK_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']);
 
 const PULSE_FRAMES = Object.freeze(['◉', '◎', '●']);
 
@@ -130,6 +171,72 @@ function safeAll(db, sql, ...params) {
   } catch {
     return [];
   }
+}
+
+/**
+ * Single-row optional probe. Returns null on ANY failure — missing table, missing
+ * column, read-only snapshot, closed handle — so pre-v2.2 DBs never break the TUI.
+ */
+function safeGet(db, sql, ...params) {
+  try {
+    return db.prepare(sql).get(...params) || null;
+  } catch {
+    return null;
+  }
+}
+
+function toCount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+/**
+ * Read-only detection for the TUI mutation affordances.
+ *
+ * `openHubDbReadOnly()` in db.mjs stamps `__collabHubSnapshot` on EVERY read-only
+ * handle: `false` for a plain `readOnly` handle and `true` for the `immutable=1`
+ * WSL fallback. Writable handles from `openHubDb()` carry no such property at all,
+ * so the mere presence of the own-property is the reliable read-only signal.
+ */
+function isReadOnlyDb(db) {
+  if (!db || typeof db.prepare !== 'function') return true;
+  if (db.__collabHubSnapshot === true) return true;
+  return Object.prototype.hasOwnProperty.call(db, '__collabHubSnapshot');
+}
+
+/** Exact banner strings surfaced by the status toast. */
+const READ_ONLY_SNAPSHOT_BANNER = 'Read-only snapshot DB — cannot mutate';
+const READ_ONLY_DB_BANNER = 'Read-only DB — cannot mutate';
+
+function readOnlyBanner(db) {
+  return db?.__collabHubSnapshot === true ? READ_ONLY_SNAPSHOT_BANNER : READ_ONLY_DB_BANNER;
+}
+
+function shortError(err) {
+  const text = String(err?.message || err || 'unknown error').replace(/\s+/g, ' ').trim();
+  return text.length > 72 ? `${text.slice(0, 69)}…` : text;
+}
+
+function isReadOnlyError(err) {
+  const text = String(err?.message || err || '');
+  return /readonly|read-only|attempt to write|SQLITE_READONLY/i.test(text);
+}
+
+const STATUS_TONES = Object.freeze({
+  info: { glyph: 'ℹ', color: P.cyan },
+  ok: { glyph: '✔', color: P.emerald },
+  warn: { glyph: '⚠', color: P.amber },
+  error: { glyph: '✖', color: P.rose },
+});
+
+/** Accepts `'text'` or `{ text, tone }` from both the CLI and future tests. */
+function normalizeStatus(status) {
+  if (!status) return null;
+  const raw = typeof status === 'string' ? { text: status } : status;
+  const text = String(raw?.text ?? raw?.message ?? '').trim();
+  if (!text) return null;
+  const tone = STATUS_TONES[String(raw?.tone || 'info').toLowerCase()] || STATUS_TONES.info;
+  return { text, tone, color: tone.color, glyph: tone.glyph };
 }
 
 function parseJsonArray(value) {
@@ -459,9 +566,9 @@ function renderKanbanTab(ctx) {
     const isSel = index === sel;
     const color = stateColor(task.state);
     const marker = isSel ? s('▶', P.amber, { bold: true }) : ' ';
-    const stateCell = s(plainFit(String(task.state || '?').toUpperCase(), stateW), color, { bold: isSel });
-    const memberCell = plainFit(s(String(task.member || '—'), P.indigo), memberW);
-    const titleCell = plainFit(s(truncateAnsi(String(task.title || task.task_id || ''), titleW), isSel ? P.white : P.slate, { bold: isSel }), titleW);
+    const stateCell = s(plainFit(sanitizeTerminalText(String(task.state || '?')).toUpperCase(), stateW), color, { bold: isSel });
+    const memberCell = plainFit(s(sanitizeTerminalText(task.member || '—'), P.indigo), memberW);
+    const titleCell = plainFit(s(truncateAnsi(sanitizeTerminalText(task.title || task.task_id || ''), titleW), isSel ? P.white : P.slate, { bold: isSel }), titleW);
     const ageCell = plainFit(s(ageOf(task.updated_at, d.generated_at), P.slate), ageW);
     lines.push(`${marker} ${stateCell} ${memberCell} ${titleCell} ${ageCell}`);
   });
@@ -481,9 +588,9 @@ function renderKanbanTab(ctx) {
     lines.push(fillLine(ctx, `  ${s('(no log lines yet — output streams here)', P.slate)}`));
   } else {
     for (const log of logs.slice(-logH)) {
-      const stream = String(log.stream || 'stdout').toLowerCase();
+      const stream = sanitizeTerminalText(String(log.stream || 'stdout')).toLowerCase();
       const streamColor = stream === 'stderr' ? P.rose : (stream === 'system' ? P.amber : P.cyan);
-      const text = String(log.text || '').replace(/\s+/g, ' ').trim();
+      const text = sanitizeTerminalText(log.text || '').replace(/\s+/g, ' ').trim();
       lines.push(fillLine(ctx, `  ${s(timeOf(log.created_at), P.slate)} ${plainFit(s(stream, streamColor), 7)} ${truncateAnsi(text, Math.max(4, inner - 20))}`));
     }
   }
@@ -688,6 +795,104 @@ function renderMergeTab(ctx) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* v2.2 — Task Detail & Live Log Drawer                                       */
+/* -------------------------------------------------------------------------- */
+
+function normalizeDrawer(drawer) {
+  if (!drawer) return null;
+  if (drawer === true) return {};
+  if (typeof drawer === 'string') return { task_id: drawer };
+  if (typeof drawer !== 'object') return null;
+  return drawer;
+}
+
+function resolveDrawerTask(data, drawer, selected) {
+  if (!drawer) return null;
+  if (drawer.task && typeof drawer.task === 'object') return drawer.task;
+  const tasks = orderedTasks(Array.isArray(data.tasks) ? data.tasks : []);
+  if (tasks.length === 0) return null;
+  const wanted = drawer.task_id ?? drawer.taskId ?? null;
+  if (wanted !== null && wanted !== undefined && wanted !== '') {
+    return tasks.find((task) => String(task.task_id) === String(wanted)) || null;
+  }
+  const index = Math.min(Math.max(0, Math.floor(Number(selected) || 0)), tasks.length - 1);
+  return tasks[index] || null;
+}
+
+/**
+ * PURE renderer for the bottom Task Detail & Live Log Drawer.
+ *
+ * Returns width-fitted lines (no trailing newline) capped to the visible content
+ * height; an empty array when the drawer is closed or no task is selected. Exported
+ * so the overlay stays unit-testable without a TTY.
+ *
+ * @param {object} data same payload as `renderTuiFrame`
+ * @param {{ drawer?: object|string|true, selected?: number, selectedIndex?: number,
+ *           width?: number, height?: number, colorLevel?: number }} [uiState]
+ * @returns {string[]}
+ */
+export function renderTaskDrawer(data, uiState = {}) {
+  const d = data || {};
+  const level = clampInt(uiState.colorLevel ?? d.color_level ?? d.colorLevel ?? 0, 0, 3, 0);
+  const s = makePainter(level);
+  const W = Math.max(20, Math.min(220, clampInt(uiState.width ?? d.width, 20, 221, 100) - 1));
+  const H = Math.max(4, Math.min(80, clampInt(uiState.height ?? d.height, 4, 80, 32)));
+  const inner = W - 2;
+  const contentH = Math.max(1, H - 9);
+  const selected = Math.max(0, Math.floor(Number(uiState.selected ?? uiState.selectedIndex ?? 0) || 0));
+  const drawer = normalizeDrawer(uiState.drawer ?? d.drawer);
+  const task = resolveDrawerTask(d, drawer, selected);
+  if (!task) return [];
+
+  const ctx = { d, s, inner, contentH, selected, level };
+  const ordered = orderedTasks(Array.isArray(d.tasks) ? d.tasks : []);
+  const position = ordered.findIndex((item) => String(item.task_id) === String(task.task_id));
+  const total = ordered.length || 1;
+  const state = String(task.state || 'unknown').toLowerCase();
+  const logs = Array.isArray(drawer?.logs)
+    ? drawer.logs
+    : (Array.isArray(d?.logs?.[task.task_id]) ? d.logs[task.task_id] : []);
+
+  const lines = [];
+  const push = (text) => { lines.push(fillLine(ctx, text)); };
+
+  push(sectionBar(ctx, `TASK DETAIL · ${sanitizeTerminalText(task.task_id)} · ${(position >= 0 ? position : selected) + 1}/${total}`));
+  push(
+    ` ${s('STATE', P.slate)} ${s(sanitizeTerminalText(state).toUpperCase(), stateColor(state), { bold: true })}`
+    + `   ${s('MEMBER', P.slate)} ${s(sanitizeTerminalText(task.member || '—'), P.indigo)}`
+    + `   ${s('CHANNEL', P.slate)} ${s(sanitizeTerminalText(task.channel || '—'), P.cyan)}`
+    + `   ${s('ROLE', P.slate)} ${s(sanitizeTerminalText(task.role || '—'), P.slate)}`,
+  );
+  push(
+    ` ${s('UPDATED', P.slate)} ${s(timeOf(task.updated_at), P.slate)}`
+    + `   ${s('AGE', P.slate)} ${s(ageOf(task.updated_at, d.generated_at), P.slate)}`
+    + `   ${s('TITLE', P.slate)} ${s(truncateAnsi(sanitizeTerminalText(task.title || '—'), Math.max(6, inner - 34)), P.white)}`,
+  );
+  if (task.error_code || task.error_message) {
+    push(` ${s('ERROR', P.slate)} ${s(sanitizeTerminalText(task.error_code || 'error'), P.rose, { bold: true })} ${s(truncateAnsi(sanitizeTerminalText(task.error_message || ''), Math.max(6, inner - 12)), P.rose)}`);
+  } else {
+    push(` ${s('ERROR', P.slate)} ${s('none', P.slate)}`);
+  }
+
+  push(sectionBar(ctx, `LIVE LOG · ${sanitizeTerminalText(task.task_id)} · ${logs.length} line${logs.length === 1 ? '' : 's'}`));
+  const maxLines = Math.min(contentH, DRAWER_MAX_LINES);
+  const budget = Math.max(1, maxLines - lines.length - 1);
+  const tail = logs.slice(-budget);
+  if (tail.length === 0) {
+    push(`  ${s('(no log lines captured yet — stream output appears here)', P.slate)}`);
+  } else {
+    for (const log of tail) {
+      const stream = sanitizeTerminalText(String(log.stream || 'stdout')).toLowerCase();
+      const streamColor = stream === 'stderr' ? P.rose : (stream === 'system' ? P.amber : P.cyan);
+      const text = sanitizeTerminalText(log.text || '').replace(/\s+/g, ' ').trim();
+      push(` ${s(timeOf(log.created_at), P.slate)} ${plainFit(s(stream, streamColor), 7)} ${s(truncateAnsi(text, Math.max(4, inner - 11)), P.slate)}`);
+    }
+  }
+  push(` ${s('Enter', P.cyan)} close · ${s('x', P.cyan)} cancel · ${s('h', P.cyan)}/${s('H', P.cyan)} health · ${s('m', P.cyan)} merge · ${s('esc', P.cyan)} close`);
+  return lines.slice(0, maxLines);
+}
+
+/* -------------------------------------------------------------------------- */
 /* Frame renderer                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -696,7 +901,9 @@ function renderMergeTab(ctx) {
  *
  * @param {object} data output of collectTuiData() (or any object with the same shape)
  * @param {{ width?: number, height?: number, colorLevel?: number, frame?: number,
- *           tab?: number, selected?: number, fps?: number }} [uiState]
+ *           tab?: number, selected?: number, selectedIndex?: number, fps?: number,
+ *           drawer?: object|string|true,
+ *           status?: string|{ text: string, tone?: 'info'|'ok'|'warn'|'error' } }} [uiState]
  * @returns {string} frame without trailing newline
  */
 export function renderTuiFrame(data, uiState = {}) {
@@ -709,7 +916,7 @@ export function renderTuiFrame(data, uiState = {}) {
   const inner = W - 2;
   const frame = Math.max(0, Math.floor(Number(uiState.frame) || 0));
   const tab = clampInt(uiState.tab, 0, TUI_TABS.length - 1, 0);
-  const selected = Math.max(0, Math.floor(Number(uiState.selected) || 0));
+  const selected = Math.max(0, Math.floor(Number(uiState.selected ?? uiState.selectedIndex) || 0));
   const fps = clampInt(uiState.fps ?? d.fps, 1, 10, 8);
   const stats = d.stats || taskStatsFrom(Array.isArray(d.tasks) ? d.tasks : []);
   const health = d.health || {};
@@ -717,6 +924,14 @@ export function renderTuiFrame(data, uiState = {}) {
   const hcolor = healthColor(score);
   const pulse = PULSE_FRAMES[mod(frame, PULSE_FRAMES.length)];
   const ctx = { d, s, inner, contentH: Math.max(1, H - 9), frame, tab, selected, level };
+  const status = normalizeStatus(uiState.status ?? d.status);
+  const drawer = normalizeDrawer(uiState.drawer ?? d.drawer);
+  const claimsRaw = d.rooms?.active_claims ?? stats.rooms_claims;
+  const activeClaims = claimsRaw === null || claimsRaw === undefined || !Number.isFinite(Number(claimsRaw))
+    ? null
+    : Math.max(0, Math.round(Number(claimsRaw)));
+  // Advertise ROOMS only when the schema supports it (or claims are genuinely live).
+  const roomsVisible = activeClaims !== null && (d.rooms?.available === true || activeClaims > 0);
 
   const lines = [];
   lines.push(`${s('╭', P.indigo)}${s('─'.repeat(W - 2), P.slate)}${s('╮', P.indigo)}`);
@@ -732,8 +947,12 @@ export function renderTuiFrame(data, uiState = {}) {
     + `   ${s('⏸', P.amber)} ${s(String(stats.stalled || 0), stats.stalled ? P.amber : P.slate)}`
     + `   ${s('▦', P.indigo)} ${s(String(stats.worktrees || 0), P.indigo)} ${s('wt', P.slate)}`
     + `   ${s('⧉', P.indigo)} ${s(String(stats.mq_ready || 0), stats.mq_ready ? P.emerald : P.slate)} ${s('ready', P.slate)}`;
+  const roomsChip = roomsVisible
+    ? `   ${s('ROOMS', P.slate)} ${s(String(activeClaims), activeClaims > 0 ? P.emerald : P.slate, { bold: activeClaims > 0 })} ${s('claims', P.slate)}`
+    : '';
   const statRight = `${s('MCP', P.slate)} ${s(String(stats.mcp_registered || 0), P.indigo)}`
     + `   ${s('SKILLS', P.slate)} ${s(String(stats.skills_total || 0), P.indigo)}`
+    + roomsChip
     + `   ${s(timeOf(d.generated_at), P.slate)} `;
   lines.push(boxRow(inner, statLeft, statRight, s));
 
@@ -761,10 +980,24 @@ export function renderTuiFrame(data, uiState = {}) {
     const line = i < content.length ? content[i] : '';
     fitted.push(fillLine(ctx, line));
   }
+
+  // v2.2 — the Command drawer composites over the LAST content rows, so the frame
+  // height is invariant (a 26-row cockpit stays exactly 26 rows, drawer open or shut).
+  if (drawer) {
+    const overlay = renderTaskDrawer(d, { width: W + 1, height: H, colorLevel: level, selected, drawer });
+    const limit = Math.min(overlay.length, fitted.length);
+    for (let i = 0; i < limit; i += 1) {
+      fitted[fitted.length - limit + i] = overlay[overlay.length - limit + i];
+    }
+  }
+
   for (const line of fitted) lines.push(`${s('│', P.slate)}${line}${s('│', P.slate)}`);
 
   lines.push(`${s('├', P.slate)}${s('─'.repeat(W - 2), P.slate)}${s('┤', P.slate)}`);
-  const keyLeft = ` ${s('1-5', P.cyan)}/${s('Tab', P.cyan)} switch   ${s('↑↓', P.cyan)}/${s('jk', P.cyan)} navigate   ${s('r', P.cyan)} refresh   ${s('q', P.cyan)} quit`;
+  // v2.2 — the status toast takes over the footer's left cell (never adds a row).
+  const keyLeft = status
+    ? ` ${s(status.glyph, status.color, { bold: true })} ${s(truncateAnsi(status.text, Math.max(8, inner - 18)), status.color, { bold: true })}`
+    : ` ${s('1-5', P.cyan)}/${s('Tab', P.cyan)} · ${s('↑↓', P.cyan)}/${s('jk', P.cyan)} · ${s('⏎', P.cyan)} detail · ${s('x', P.cyan)} cancel · ${s('h', P.cyan)}/${s('H', P.cyan)} health · ${s('m', P.cyan)} merge · ${s('r', P.cyan)} · ${s('q', P.cyan)} quit`;
   const keyRight = `${s(`frame ${String(frame).padStart(4, '0')}`, P.slate)} · ${s(`${fps}fps`, P.slate)} `;
   lines.push(boxRow(inner, keyLeft, keyRight, s));
   lines.push(`${s('╰', P.indigo)}${s('─'.repeat(W - 2), P.slate)}${s('╯', P.indigo)}`);
@@ -894,6 +1127,7 @@ export function collectTuiData(db, { demo = false, colorLevel = 0, width = 100, 
       logs: {},
       worktrees: [],
       merge_queue: [],
+      rooms: { available: false, active_claims: 0, budget_policies: 0 },
       mcp: { summary: emptyMcpSummary(), clients: [], servers: [] },
       skills: emptySkillsSnapshot(),
       health: { score: null, overall: 'unknown', findings: 0, healable: 0 },
@@ -949,6 +1183,23 @@ export function collectTuiData(db, { demo = false, colorLevel = 0, width = 100, 
   }
   for (const key of Object.keys(logs)) logs[key].reverse();
 
+  // v2.2 — optional Shared Room claims + budget policies. Both probes are wrapped in
+  // safe helpers, so a pre-v2.2 database (no `room_claims` / `budget_policies`) renders
+  // exactly as before with `active_claims: 0`.
+  const claimRow = safeGet(db, `
+    SELECT COUNT(*) AS c
+    FROM room_claims
+    WHERE status = 'active' AND lease_expires_at > ?
+  `, generatedAt);
+  const budgetRow = safeGet(db, 'SELECT COUNT(*) AS c FROM budget_policies');
+  const rooms = {
+    // `available` distinguishes "table exists, zero claims" from "pre-v2.2 DB"; the
+    // stats bar only advertises ROOMS when the schema actually supports it.
+    available: claimRow !== null || budgetRow !== null,
+    active_claims: toCount(claimRow?.c),
+    budget_policies: toCount(budgetRow?.c),
+  };
+
   const mergeQueue = queueRows.map((row) => ({
     id: row.id,
     task_id: row.task_id,
@@ -982,6 +1233,8 @@ export function collectTuiData(db, { demo = false, colorLevel = 0, width = 100, 
     mq_conflict: Number(hud.merge_queue?.conflict) || 0,
     mcp_registered: Number(mcp.summary?.registered_count) || 0,
     skills_total: Number(skills.summary?.skills_total) || 0,
+    rooms_claims: rooms.active_claims,
+    budget_policies: rooms.budget_policies,
   };
 
   return {
@@ -996,6 +1249,7 @@ export function collectTuiData(db, { demo = false, colorLevel = 0, width = 100, 
     logs,
     worktrees,
     merge_queue: mergeQueue,
+    rooms,
     mcp,
     skills,
     health: hud.health || { score: null, overall: 'unknown', findings: 0, healable: 0 },
@@ -1042,6 +1296,16 @@ function buildDemoData({ colorLevel = 0, width = 100, height = 32 } = {}) {
     created_at: iso(age + 60_000),
     updated_at: iso(age),
   }));
+
+  // v2.2 — the Task Detail drawer surfaces error_code/message, so the demo carries them.
+  const demoDiagnostics = {
+    'T-1036': { error_code: 'RELAY_TIMEOUT', error_message: 'DAG relay stopped responding after 300s; resume from the last checkpoint.' },
+    'T-1038': { error_code: 'INPUT_REQUIRED', error_message: 'Awaiting operator reconciliation of 2 diverged skill manifests.' },
+    'T-1033': { error_code: 'STATE_UNCERTAIN', error_message: 'Owner process vanished mid-run; task parked as uncertain to block blind retry.' },
+  };
+  for (const task of tasks) {
+    if (demoDiagnostics[task.task_id]) Object.assign(task, demoDiagnostics[task.task_id]);
+  }
 
   const logs = {
     'T-1042': [
@@ -1137,6 +1401,8 @@ function buildDemoData({ colorLevel = 0, width = 100, height = 32 } = {}) {
     mq_conflict: 1,
     mcp_registered: 4,
     skills_total: 9,
+    rooms_claims: 3,
+    budget_policies: 2,
   };
 
   return {
@@ -1165,6 +1431,7 @@ function buildDemoData({ colorLevel = 0, width = 100, height = 32 } = {}) {
       servers: mcpServers,
     },
     skills,
+    rooms: { available: true, active_claims: 3, budget_policies: 2 },
     health: { score: 92, overall: 'healthy', findings: 2, healable: 1, active_lessons: 3 },
     fps: 8,
   };
@@ -1178,23 +1445,66 @@ function buildDemoData({ colorLevel = 0, width = 100, height = 32 } = {}) {
  * Launch the animated cockpit. Falls back to a single clean snapshot when
  * stdin/stdout are not TTYs, and always restores alt-screen + cursor on exit.
  *
+ * v2.2 adds the Command & Task Log Drawer plus a live command bar:
+ *   Enter    toggle the Task Detail & Live Log Drawer for the selected task
+ *   x        two-step cancel — 1st press arms a 4 s window, 2nd press runs cancelTask
+ *   h        diagnoseSystem + applySelfHeal({ apply: false }) preview
+ *   Shift+H  applySelfHeal({ apply: true })  (writable DB only)
+ *   m        validateMergeQueue summary      (writable DB only)
+ *   r        immediate full refresh
+ *   Esc      close the drawer / dismiss the status toast
+ *
+ * `reopenDb` is invoked on every ~4 s refresh while the live handle is a read-only
+ * `immutable=1` snapshot (`db.__collabHubSnapshot === true`), so a long-running WSL
+ * cockpit never freezes on a stale memory image.
+ *
  * @param {import('node:sqlite').DatabaseSync|null} db
- * @param {{ demo?: boolean, fps?: number, width?: number, height?: number, projectDir?: string }} [options]
+ * @param {{ demo?: boolean, fps?: number, width?: number, height?: number,
+ *           projectDir?: string,
+ *           reopenDb?: (() => import('node:sqlite').DatabaseSync|null)|null }} [options]
+ * @returns {Promise<{ mode: 'snapshot', rendered: string }|{ mode: 'interactive', frames: number }>}
  */
-export async function startInteractiveTui(db, { demo = false, fps = 8, width, height, projectDir = process.cwd() } = {}) {
+export async function startInteractiveTui(db, {
+  demo = false,
+  fps = 8,
+  width,
+  height,
+  projectDir = process.cwd(),
+  reopenDb = null,
+} = {}) {
   const colorLevel = detectColorSupport({ stream: process.stdout, env: process.env }).level;
   let cols = Math.max(1, clampInt(width, 1, 400, process.stdout.columns || 100));
   let rows = Math.max(1, clampInt(height, 1, 100, process.stdout.rows || 32));
   const rate = clampInt(fps, 1, 10, 8);
   const interval = Math.max(100, Math.round(1000 / rate));
-  const state = { tab: 0, selected: 0, frame: 0 };
-  const collect = () => collectTuiData(db, { demo, colorLevel, width: cols, height: rows, projectDir });
+
+  // v2.2 — the DB handle is swappable. `ownedDb` is a handle THIS function opened
+  // through `reopenDb` and therefore must close; the caller's handle is never closed.
+  let currentDb = db;
+  let ownedDb = null;
+
+  const state = {
+    tab: 0, selected: 0, frame: 0,
+    drawer: null, status: null,
+    cancelArm: null, forceArm: null,
+  };
+  const collect = () => collectTuiData(currentDb, { demo, colorLevel, width: cols, height: rows, projectDir });
+
+  const closeHandle = (handle) => {
+    if (!handle || typeof handle.close !== 'function') return;
+    try { handle.close(); } catch { /* already closed */ }
+  };
+  const closeOwnedDb = () => {
+    if (ownedDb && ownedDb !== db) closeHandle(ownedDb);
+    ownedDb = null;
+  };
 
   let data = collect();
 
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     const rendered = renderTuiFrame(data, { ...state, width: cols, height: rows, colorLevel, fps: rate });
     process.stdout.write(`${rendered}\n`);
+    closeOwnedDb();
     return { mode: 'snapshot', rendered };
   }
 
@@ -1206,6 +1516,9 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
   let lastRefresh = Date.now();
 
   await new Promise((resolve) => {
+    let statusTimer = null;
+    let armTimer = null;
+
     const draw = (force = false) => {
       if (closed) return;
       const rendered = renderTuiFrame(data, { ...state, width: cols, height: rows, colorLevel, fps: rate });
@@ -1215,11 +1528,79 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       }
     };
 
+    /** Show a footer toast. `ttlMs: 0` pins it until the next toast replaces it. */
+    const setStatus = (text, tone = 'info', ttlMs = 6000) => {
+      state.status = { text: String(text), tone };
+      if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+      if (ttlMs > 0) {
+        statusTimer = setTimeout(() => {
+          statusTimer = null;
+          if (closed) return;
+          state.status = null;
+          draw(true);
+        }, Math.max(250, ttlMs));
+      }
+    };
+
+    const clearArm = () => {
+      if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+      state.cancelArm = null;
+      state.forceArm = null;
+      state.healArm = null;
+    };
+
+    const taskList = () => orderedTasks(Array.isArray(data.tasks) ? data.tasks : []);
+
+    const selectedTask = () => {
+      const list = taskList();
+      if (list.length === 0) return null;
+      return list[Math.min(Math.max(0, state.selected), list.length - 1)] || null;
+    };
+
+    /**
+     * Swap a read-only `immutable=1` snapshot for a fresh handle.
+     *
+     * The gate is evaluated once against the CALLER's handle (`db.__collabHubSnapshot`),
+     * because that is the handle that proved WSL cannot open the live WAL. Replacements
+     * are reopened unconditionally afterwards — a fresh `openHubDbReadOnly()` may well
+     * come back without the flag, and freezing on stale pages is the exact bug we fix.
+     */
+    const canReopen = () => typeof reopenDb === 'function' && db?.__collabHubSnapshot === true;
+
+    const reopen = () => {
+      if (!canReopen()) return false;
+      let next = null;
+      try {
+        next = reopenDb();
+      } catch {
+        return false;
+      }
+      if (!next || typeof next.prepare !== 'function' || next === currentDb) {
+        if (next && next !== currentDb) closeHandle(next);
+        return false;
+      }
+      const prev = currentDb;
+      currentDb = next;
+      ownedDb = next;
+      if (prev !== db) closeHandle(prev);
+      // Keep the MCP probe cache warm across handle swaps (it is keyed by handle).
+      const cache = HEAVY_CACHE.get(prev);
+      if (cache) HEAVY_CACHE.set(next, cache);
+      return true;
+    };
+
     const refresh = (force = false) => {
       if (closed) return;
+      reopen();
       try {
         data = collect();
       } catch { /* keep the last good frame */ }
+      // A drawer bound to a task that just disappeared falls back to "closed".
+      if (state.drawer && state.drawer.task_id) {
+        const alive = (Array.isArray(data.tasks) ? data.tasks : [])
+          .some((task) => String(task.task_id) === String(state.drawer.task_id));
+        if (!alive) state.drawer = null;
+      }
       const max = Math.max(0, (Array.isArray(data.tasks) ? data.tasks.length : 0) - 1);
       if (state.selected > max) state.selected = max;
       lastRefresh = Date.now();
@@ -1230,6 +1611,8 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       if (closed) return;
       closed = true;
       if (timer) clearInterval(timer);
+      if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+      if (armTimer) { clearTimeout(armTimer); armTimer = null; }
       try { input.off('data', onKey); } catch {}
       try { input.off('end', finish); } catch {}
       try { out.off('resize', onResize); } catch {}
@@ -1240,7 +1623,8 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       try { process.off('uncaughtException', onFatal); } catch {}
       try { input.setRawMode(false); } catch {}
       try { input.pause(); } catch {}
-      try { out.write('\x1b[0m\x1b[?25h\x1b[?1049l'); } catch {}
+      try { out.write('\x1b[?2004l\x1b[0m\x1b[?25h\x1b[?1049l'); } catch {}
+      closeOwnedDb();
     };
 
     const finish = () => {
@@ -1259,21 +1643,329 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       state.tab = mod(next, TUI_TABS.length);
     };
 
+    /* ---------------------- v2.2 command bar handlers --------------------- */
+
+    const hasDb = () => Boolean(currentDb) && typeof currentDb.prepare === 'function';
+    const readOnlyMessage = () => readOnlyBanner(currentDb);
+
+    /** Enter — toggle the Task Detail & Live Log Drawer for the selection. */
+    const toggleDrawer = () => {
+      const task = selectedTask();
+      if (!task) {
+        setStatus('No task selected — nothing to inspect', 'warn', 4000);
+        draw(true);
+        return;
+      }
+      const id = String(task.task_id);
+      if (state.drawer && String(state.drawer.task_id) === id) {
+        state.drawer = null;
+        setStatus(`Drawer closed · ${id}`, 'info', 2500);
+      } else {
+        state.drawer = { task_id: id };
+        setStatus(`Task detail · ${id} · Enter closes · x cancels`, 'info', 4000);
+      }
+      draw(true);
+    };
+
+    /**
+     * Execute a cancel and report the outcome in the toast.
+     *
+     * `force: false` first — every other call site (dashboard / CLI / MCP) defaults the
+     * same way, so the TUI never silently marks a still-running task cancelled. When the
+     * executor answers "Cannot confirm cancellation" (no live abort handle in THIS
+     * process, which is the normal case for a cockpit watching another dispatcher) a
+     * second 4 s window offers `force: true`, so the operator keeps an explicit step
+     * between the safe attempt and the blind one.
+     */
+    const runCancel = (id, force) => {
+      setStatus(`${force ? 'Forcing cancel' : 'Cancelling'} ${id}…`, 'warn', 0);
+      draw(true);
+      Promise.resolve()
+        .then(() => cancelTask(currentDb, id, {
+          reason: force ? 'Cancelled from interactive TUI (forced)' : 'Cancelled from interactive TUI',
+          force,
+        }))
+        .then((res) => {
+          if (closed) return;
+          if (res && res.cancelled === false) {
+            setStatus(`${id}: ${res.message || 'cancel not confirmed'}`, 'warn', 9000);
+          } else {
+            setStatus(`Cancelled ${id}${force ? ' (forced)' : ''}`, 'ok', 5000);
+          }
+          refresh(true);
+        })
+        .catch((err) => {
+          if (closed) return;
+          if (isReadOnlyError(err)) {
+            setStatus(readOnlyMessage(), 'error', 8000);
+            draw(true);
+            return;
+          }
+          const unconfirmed = /Cannot confirm cancellation/i.test(String(err?.message || err));
+          if (!force && unconfirmed) {
+            state.forceArm = { task_id: id, until: Date.now() + CANCEL_CONFIRM_MS, armedAt: Date.now() };
+            if (armTimer) clearTimeout(armTimer);
+            armTimer = setTimeout(() => {
+              armTimer = null;
+              state.forceArm = null;
+              if (closed) return;
+              draw(true);
+            }, CANCEL_CONFIRM_MS);
+            setStatus(`Cancel unconfirmed for ${id} — press x again within 4s to force`, 'error', CANCEL_CONFIRM_MS);
+          } else {
+            setStatus(`Cancel failed: ${shortError(err)}`, 'error', 8000);
+          }
+          draw(true);
+        });
+    };
+
+    /** x — two-step cancel. 1st press arms for 4 s, 2nd press executes. */
+    const handleCancel = () => {
+      const task = selectedTask();
+      if (!hasDb()) {
+        setStatus('Demo mode — nothing to cancel', 'warn', 4000);
+        draw(true);
+        return;
+      }
+      if (!task) {
+        setStatus('No task selected — nothing to cancel', 'warn', 4000);
+        draw(true);
+        return;
+      }
+      const id = String(task.task_id);
+      const now = Date.now();
+      const forcedMatch = Boolean(state.forceArm)
+        && state.forceArm.task_id === id
+        && now < state.forceArm.until;
+      const armedMatch = Boolean(state.cancelArm)
+        && state.cancelArm.task_id === id
+        && now < state.cancelArm.until;
+      const armStamp = forcedMatch ? state.forceArm.armedAt : (armedMatch ? state.cancelArm.armedAt : 0);
+      if ((forcedMatch || armedMatch) && now - armStamp < ARM_MIN_AGE_MS) {
+        return; // ignore key-repeat / fast double-tap within 400ms
+      }
+      const forced = forcedMatch;
+      const armed = armedMatch;
+
+      if (!forced && !armed) {
+        // A read-only handle can never honour the confirm, so answer immediately
+        // instead of arming a window that would fail on the second press.
+        if (isReadOnlyDb(currentDb)) {
+          clearArm();
+          setStatus(readOnlyMessage(), 'error', 6000);
+          draw(true);
+          return;
+        }
+        state.cancelArm = { task_id: id, until: now + CANCEL_CONFIRM_MS, armedAt: now };
+        if (armTimer) clearTimeout(armTimer);
+        armTimer = setTimeout(() => {
+          armTimer = null;
+          state.cancelArm = null;
+          if (closed) return;
+          draw(true);
+        }, CANCEL_CONFIRM_MS);
+        setStatus(`Confirm cancel ${id}? Press x again within 4s`, 'warn', CANCEL_CONFIRM_MS);
+        draw(true);
+        return;
+      }
+
+      clearArm();
+      if (isReadOnlyDb(currentDb)) {
+        setStatus(readOnlyMessage(), 'error', 6000);
+        draw(true);
+        return;
+      }
+      if (TERMINAL_TASK_STATES.has(String(task.state || '').toLowerCase())) {
+        setStatus(`${id} is already terminal (${String(task.state || '').toUpperCase()})`, 'info', 5000);
+        draw(true);
+        return;
+      }
+      runCancel(id, forced);
+    };
+
+    /** h / Shift+H — diagnose + dry-run preview, then optional real self-heal. */
+    const handleHealth = (apply = false) => {
+      if (!hasDb()) {
+        setStatus('Demo mode — health diagnostics need a live hub DB', 'warn', 5000);
+        draw(true);
+        return;
+      }
+      setStatus(apply ? 'Applying safe self-heal…' : 'Running health diagnostics…', 'info', 0);
+      draw(true);
+      setTimeout(() => {
+        if (closed) return;
+        let diag;
+        let preview = null;
+        try {
+          diag = diagnoseSystem(currentDb);
+        } catch (err) {
+          setStatus(`Health check failed: ${shortError(err)}`, 'error', 8000);
+          draw(true);
+          return;
+        }
+        try {
+          preview = applySelfHeal(currentDb, { apply: false });
+        } catch { /* dry-run preview is advisory only */ }
+
+        const score = Number.isFinite(diag?.health_score)
+          ? diag.health_score
+          : (Number.isFinite(diag?.score) ? diag.score : null);
+        const healable = Number.isFinite(diag?.counts?.healable)
+          ? diag.counts.healable
+          : (Array.isArray(diag?.findings) ? diag.findings.filter((f) => f?.auto_healable).length : 0);
+        // The dry-run preview is advisory: it tells us how many safe actions exist
+        // without writing anything, and is quoted back if the real apply fails.
+        const dryRunActions = Array.isArray(preview?.actions_taken) ? preview.actions_taken.length : 0;
+
+        if (!apply) {
+          setStatus(
+            `Health: ${score === null ? '—' : score} (${healable} healable) · Press Shift+H to apply`,
+            healable > 0 ? 'warn' : 'ok',
+            9000,
+          );
+          draw(true);
+          return;
+        }
+        if (isReadOnlyDb(currentDb)) {
+          setStatus(readOnlyMessage(), 'error', 7000);
+          draw(true);
+          return;
+        }
+        const now = Date.now();
+        const healArmed = Boolean(state.healArm) && now < state.healArm.until;
+        if (!healArmed) {
+          state.healArm = { until: now + CANCEL_CONFIRM_MS, armedAt: now };
+          if (armTimer) clearTimeout(armTimer);
+          armTimer = setTimeout(() => { armTimer = null; state.healArm = null; if (!closed) draw(true); }, CANCEL_CONFIRM_MS);
+          setStatus(`Confirm apply self-heal (${healable} healable)? Press Shift+H again within 4s`, 'warn', CANCEL_CONFIRM_MS);
+          draw(true);
+          return;
+        }
+        if (now - (state.healArm.armedAt || 0) < ARM_MIN_AGE_MS) {
+          return;
+        }
+        clearArm();
+        try {
+          const res = applySelfHeal(currentDb, { apply: true });
+          const healed = Number.isFinite(res?.healed_count) ? res.healed_count : 0;
+          const actions = Array.isArray(res?.actions_taken) ? res.actions_taken.length : 0;
+          setStatus(
+            `Healed ${healed} item(s) in ${actions} action(s) · health ${res?.before_score ?? '—'}→${res?.after_score ?? '—'}`,
+            'ok',
+            10000,
+          );
+        } catch (err) {
+          setStatus(
+            isReadOnlyError(err)
+              ? readOnlyMessage()
+              : `Self-heal failed: ${shortError(err)}${dryRunActions > 0 ? ` (dry-run proposed ${dryRunActions} action(s))` : ''}`,
+            'error',
+            9000,
+          );
+        }
+        refresh(true);
+        draw(true);
+      }, 0);
+    };
+
+    /** m — validate the merge queue and summarise it in the toast. */
+    const handleMerge = () => {
+      if (!hasDb()) {
+        setStatus('Demo mode — merge queue needs a live hub DB', 'warn', 5000);
+        draw(true);
+        return;
+      }
+      if (isReadOnlyDb(currentDb)) {
+        setStatus(
+          currentDb?.__collabHubSnapshot === true
+            ? READ_ONLY_SNAPSHOT_BANNER
+            : 'Read-only DB — cannot validate merge queue',
+          'error',
+          6000,
+        );
+        draw(true);
+        return;
+      }
+      setStatus('Validating merge queue…', 'info', 0);
+      draw(true);
+      setTimeout(() => {
+        if (closed) return;
+        try {
+          const res = validateMergeQueue(currentDb);
+          const results = Array.isArray(res?.results) ? res.results : [];
+          const ready = results.filter((row) => row?.status === 'ready').length;
+          const blocked = results.filter((row) => row?.status === 'conflict' || row?.status === 'failed').length;
+          const queued = Array.isArray(res?.queue) ? res.queue.length : results.length;
+          setStatus(
+            `Merge queue: ${queued} in queue · ${ready} ready · ${blocked} blocked · ${results.length} re-checked`,
+            blocked > 0 ? 'warn' : 'ok',
+            9000,
+          );
+        } catch (err) {
+          setStatus(
+            isReadOnlyError(err) ? 'Read-only DB — cannot validate merge queue' : `Merge validation failed: ${shortError(err)}`,
+            'error',
+            9000,
+          );
+        }
+        refresh(true);
+        draw(true);
+      }, 0);
+    };
+
+    /** Esc — close the drawer first, then dismiss the toast. */
+    const dismiss = () => {
+      if (state.drawer) {
+        state.drawer = null;
+        setStatus('Drawer closed', 'info', 2000);
+        draw(true);
+        return;
+      }
+      if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
+      if (state.status) {
+        state.status = null;
+        draw(true);
+      }
+    };
+
     const handle = (key) => {
       if (key === 'q' || key === '\x03') { finish(); return; }
+      if (key === 'esc') { dismiss(); return; }
+      if (key === '\r' || key === '\n' || key === 'enter') { toggleDrawer(); return; }
       if (key >= '1' && key <= '5') { setTab(Number(key) - 1); return; }
       if (key === '\t') { setTab(state.tab + 1); return; }
       if (key === 'up' || key === 'k') { move(-1); return; }
       if (key === 'down' || key === 'j') { move(1); return; }
       if (key === 'home' || key === 'g') { state.selected = 0; return; }
       if (key === 'end' || key === 'G') { state.selected = Math.max(0, (data.tasks?.length || 0) - 1); return; }
+      if (key === 'x') { handleCancel(); return; }
+      if (key === 'h') { handleHealth(false); return; }
+      if (key === 'H') { handleHealth(true); return; }
+      if (key === 'm') { handleMerge(); return; }
       if (key === 'r') { refresh(true); return; }
     };
 
+    let inBracketedPaste = false;
+    const MUTATING_KEYS = new Set(['x', 'H', 'm']);
     const onKey = (chunk) => {
       if (closed) return;
-      const str = String(chunk);
+      let rawStr = String(chunk);
+      // Strip bracketed-paste sequences (including across chunks) so pasted text never triggers actions
+      if (inBracketedPaste) {
+        const endIdx = rawStr.indexOf('\x1b[201~');
+        if (endIdx < 0) return;
+        rawStr = rawStr.slice(endIdx + 6);
+        inBracketedPaste = false;
+      }
+      rawStr = rawStr.replace(/\x1b\[200~[\s\S]*?\x1b\[201~/g, '');
+      const openPaste = rawStr.indexOf('\x1b[200~');
+      if (openPaste >= 0) {
+        rawStr = rawStr.slice(0, openPaste);
+        inBracketedPaste = true;
+      }
+      const str = rawStr;
       let i = 0;
+      let handledMutating = false;
       while (i < str.length && !closed) {
         if (str[i] === '\x1b') {
           // Generic CSI parser: consume the whole escape sequence so modified arrows
@@ -1291,11 +1983,17 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
             i = Math.min(str.length, j + 1);
             continue;
           }
+          // A lone ESC (no CSI/FN introducer) closes the drawer / dismisses the toast.
+          handle('esc');
           i += 1;
           continue;
         }
         const ch = str[i];
         i += 1;
+        if (MUTATING_KEYS.has(ch)) {
+          if (handledMutating) continue; // block multi-key paste/repeat bypass inside one chunk
+          handledMutating = true;
+        }
         handle(ch);
       }
       if (!closed) draw();
@@ -1318,7 +2016,7 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       throw err;
     };
 
-    out.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H');
+    out.write('\x1b[?1049h\x1b[?2004h\x1b[?25l\x1b[2J\x1b[H');
     input.on('data', onKey);
     input.once('end', finish);
     out.on('resize', onResize);
@@ -1342,7 +2040,9 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
 
 export default {
   renderTuiFrame,
+  renderTaskDrawer,
   startInteractiveTui,
   collectTuiData,
   TUI_TABS,
+  TUI_KEYBINDINGS,
 };

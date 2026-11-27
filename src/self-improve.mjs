@@ -605,3 +605,77 @@ export function applySelfHeal(db, {
     recent_runs: listRecentRuns(db, 10),
   };
 }
+
+/**
+ * Batch-reconcile stale/uncertain/needs_input legacy tasks so operators can restore
+ * a healthy operational baseline after inspecting original delivery receipts.
+ * Dry-run by default (`confirmed === true` strict boolean required).
+ */
+export function reconcileStaleTasks(db, {
+  taskIds = null,
+  resolution = 'cancelled',
+  note = 'Archived via batch reconcile after receipt inspection',
+  minAgeMinutes = 30,
+  confirmed = false,
+} = {}) {
+  const safeRes = resolution === 'completed' ? 'completed' : 'cancelled';
+  if (Array.isArray(taskIds) && taskIds.length === 0) {
+    return {
+      ok: true,
+      dry_run: confirmed !== true,
+      resolution: safeRes,
+      count: 0,
+      candidates: [],
+      ...(confirmed === true ? { reconciled_count: 0, reconciled_ids: [] } : { hint: 'Empty task_ids filter matched 0 tasks.' }),
+    };
+  }
+  const ageMin = Math.max(0, Math.min(24 * 60 * 30, Number(minAgeMinutes ?? 30)));
+  const cutoffIso = new Date(Date.now() - ageMin * 60000).toISOString();
+  const idFilter = Array.isArray(taskIds) ? new Set(taskIds.map(String)) : null;
+  const rows = db.prepare(`
+    SELECT task_id, member, state, title, error_code, updated_at
+    FROM tasks
+    WHERE state IN ('stalled', 'uncertain', 'needs_input') AND updated_at <= ?
+    ORDER BY updated_at ASC
+  `).all(cutoffIso).filter((r) => !idFilter || idFilter.has(r.task_id));
+
+  if (confirmed !== true) {
+    return {
+      ok: true,
+      dry_run: true,
+      resolution: safeRes,
+      min_age_minutes: ageMin,
+      count: rows.length,
+      candidates: rows,
+      hint: 'Pass confirmed=true to move these tasks to terminal state.',
+    };
+  }
+
+  const now = new Date().toISOString();
+  const safeNote = String(note || 'Batch reconciled').slice(0, 260);
+  const reconciled = [];
+  const stmt = db.prepare(`
+    UPDATE tasks
+    SET state = ?, error_code = COALESCE(error_code, ?), error_message = ?, completed_at = ?, updated_at = ?
+    WHERE task_id = ? AND state IN ('stalled', 'uncertain', 'needs_input') AND updated_at <= ?
+  `);
+  for (const r of rows) {
+    const upd = stmt.run(safeRes, 'OPERATOR_BATCH_RECONCILE', safeNote, now, now, r.task_id, cutoffIso);
+    if (upd.changes) {
+      reconciled.push(r.task_id);
+      logEvent(db, {
+        taskId: r.task_id,
+        eventType: 'task.reconciled_batch',
+        actor: 'operator',
+        payload: { previous_state: r.state, resolution: safeRes, note: safeNote },
+      });
+    }
+  }
+  return {
+    ok: true,
+    dry_run: false,
+    resolution: safeRes,
+    reconciled_count: reconciled.length,
+    reconciled_ids: reconciled,
+  };
+}

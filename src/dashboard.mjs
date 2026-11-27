@@ -2,15 +2,19 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs/promises';
+import { deleteArtifact, getArtifact, listArtifacts, pruneExpiredArtifacts, putArtifact } from './artifacts.mjs';
+import { deleteBudgetPolicy, evaluateBudget, listBudgetPolicies, setBudgetPolicy } from './budget.mjs';
 import {
   APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, DB_PATH,
   assertValidAgentId, assertValidTaskId, ensureRuntimeDirs,
 } from './config.mjs';
 import { clearMemberCooldown, getMemberStatuses, isRegisteredAgent, openHubDb, parseTaskRow, pruneRetentionTables, upsertMemberStatus } from './db.mjs';
+import { createConsensusRound, listConsensusRounds, recordConsensusVote, synthesizeConsensus } from './consensus.mjs';
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { hubBus } from './event-bus.mjs';
 import { awaitActiveRuns, cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
+import { buildHandoffPack } from './handoff-pack.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
 import { buildCockpitAppHtml } from './mcp-app-ui.mjs';
 import {
@@ -29,7 +33,7 @@ import { probeAllMembers, probeMailHub } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { getAgent, probeCustomAgent, registerAgent, removeAgent } from './registry.mjs';
 import {
-  applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson,
+  applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, reconcileStaleTasks, saveIncidentLesson, toggleIncidentLesson,
 } from './self-improve.mjs';
 import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from './skills-hub.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
@@ -37,7 +41,14 @@ import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from './toolkit.mjs';
+import {
+  ALLOWED_TRIGGER_ACTIONS, deleteTrigger, listTriggers, runTriggerNow, saveTrigger, startTriggerScheduler,
+} from './triggers.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from './workflows.mjs';
+import {
+  appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, listCollabRooms,
+  promoteInboxFile, reconcileStaleClaimsInAllRooms, releaseRoomClaim, renewRoomClaim,
+} from './workspace-room.mjs';
 import { cleanupWorktree, listWorktrees, mergeWorktree, reviewWorktree, verifyWorktree } from './worktree.mjs';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -54,6 +65,7 @@ const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..',
 const STATIC_ASSETS = new Map([
   ['index.html', 'text/html; charset=utf-8'],
   ['styles.css', 'text/css; charset=utf-8'],
+  ['i18n.js', 'text/javascript; charset=utf-8'],
   ['app.js', 'text/javascript; charset=utf-8'],
   ['studios.js', 'text/javascript; charset=utf-8'],
 ]);
@@ -1581,6 +1593,299 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         sendJson(res, 200, data);
         return;
       }
+      // ---- v2.2.0 Shared Rooms, Artifacts, Handoff Pack, Consensus, Budget, Triggers & Stale Task Reconcile ----
+      if (req.method === 'GET' && url.pathname === '/api/rooms') {
+        const roomId = url.searchParams.get('room_id');
+        if (roomId) {
+          try { sendJson(res, 200, { room: getRoomStatus(db, roomId) }); }
+          catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+          return;
+        }
+        sendJson(res, 200, { rooms: listCollabRooms(db) });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/create') {
+        const parsed = await readBoundedJson(req);
+        if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+          sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+          return;
+        }
+        try {
+          sendJson(res, 200, await createCollabRoom(db, {
+            name: parsed.name,
+            goal: parsed.goal || '',
+            agents: parsed.agents,
+            createGitRepo: parsed.create_git_repo !== false,
+            autoRegisterClis: parsed.auto_register_clis || [],
+            launchApps: parsed.launch_apps || [],
+            confirmed: parsed.confirmed === true,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/claim') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            claim: claimRoomPath(db, {
+              roomId: parsed.room_id || parsed.name,
+              pathGlob: parsed.path_glob,
+              ownerAgent: parsed.owner_agent,
+              ttlMinutes: parsed.ttl_minutes ?? 30,
+              notes: parsed.notes || '',
+            }),
+          });
+        } catch (err) {
+          const msg = String(err.message || err);
+          sendJson(res, msg.includes('CLAIM_CONFLICT') ? 409 : 400, { error: msg });
+        }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/renew') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            claim: renewRoomClaim(db, { claimId: parsed.claim_id, ownerAgent: parsed.owner_agent || null, ttlMinutes: parsed.ttl_minutes ?? 30 }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/release') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            claim: releaseRoomClaim(db, {
+              claimId: parsed.claim_id || null,
+              roomId: parsed.room_id || parsed.name || null,
+              pathGlob: parsed.path_glob || null,
+              ownerAgent: parsed.owner_agent || null,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/log') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            entry: appendRoomLog(db, { roomId: parsed.room_id || parsed.name, actor: parsed.actor || 'cockpit', kind: parsed.kind || 'note', message: parsed.message }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/promote') {
+        const parsed = await readBoundedJson(req);
+        if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+          sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+          return;
+        }
+        try {
+          sendJson(res, 200, promoteInboxFile(db, {
+            roomId: parsed.room_id || parsed.name,
+            agent: parsed.agent || parsed.owner_agent,
+            relPath: parsed.rel_path,
+            destRelPath: parsed.dest_rel_path || null,
+            confirmed: parsed.confirmed === true,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rooms/reconcile-stale') {
+        await readBoundedJson(req);
+        sendJson(res, 200, reconcileStaleClaimsInAllRooms(db));
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/artifacts') {
+        const id = url.searchParams.get('id');
+        if (id) {
+          const artifact = getArtifact(db, id);
+          if (!artifact) { sendJson(res, 404, { error: 'Artifact not found or expired' }); return; }
+          sendJson(res, 200, { artifact });
+          return;
+        }
+        sendJson(res, 200, {
+          artifacts: listArtifacts(db, {
+            roomId: url.searchParams.get('room_id') || null,
+            project: url.searchParams.get('project') || null,
+            limit: Number(url.searchParams.get('limit')) || 30,
+          }),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/artifacts/put') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            artifact: putArtifact(db, {
+              artifactId: parsed.artifact_id || null,
+              roomId: parsed.room_id || null,
+              project: parsed.project || null,
+              name: parsed.name,
+              content: parsed.content,
+              mimeType: parsed.mime_type || 'text/markdown',
+              author: parsed.author || 'cockpit',
+              tags: parsed.tags || [],
+              ttlHours: parsed.ttl_hours ?? 72,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/artifacts/delete') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, deleteArtifact(db, parsed.artifact_id || parsed.id)); }
+        catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/handoff-pack') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, buildHandoffPack(db, {
+            projectDir: parsed.project_dir || undefined,
+            roomId: parsed.room_id || null,
+            targetMember: parsed.target_member || null,
+            saveArtifact: Boolean(parsed.save_artifact),
+            maxBytes: parsed.max_bytes ?? 24000,
+            workspaceRoot: dispatchDeps.workspaceRoot,
+            extraRoots: dispatchDeps.extraRoots,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/consensus') {
+        sendJson(res, 200, {
+          rounds: listConsensusRounds(db, {
+            roomId: url.searchParams.get('room_id') || null,
+            limit: Number(url.searchParams.get('limit')) || 20,
+          }),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/consensus/create') {
+        const parsed = await readBoundedJson(req);
+        if (parsed.auto_dispatch !== undefined && typeof parsed.auto_dispatch !== 'boolean') {
+          sendJson(res, 400, { error: 'auto_dispatch must be a strict boolean' });
+          return;
+        }
+        try {
+          sendJson(res, 200, await createConsensusRound(db, {
+            roundId: parsed.round_id || null,
+            roomId: parsed.room_id || null,
+            topic: parsed.topic,
+            members: parsed.members,
+            projectDir: parsed.project_dir || undefined,
+            autoDispatch: parsed.auto_dispatch === true,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/consensus/vote') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            round: recordConsensusVote(db, {
+              roundId: parsed.round_id,
+              member: parsed.member,
+              stance: parsed.stance,
+              confidence: parsed.confidence ?? 0.85,
+              rationale: parsed.rationale || '',
+              blockers: parsed.blockers || [],
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/consensus/synthesize') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, { round: synthesizeConsensus(db, parsed.round_id) }); }
+        catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/budget') {
+        sendJson(res, 200, {
+          policies: listBudgetPolicies(db),
+          evaluation: evaluateBudget(db, {
+            member: url.searchParams.get('member') || null,
+            projectDir: url.searchParams.get('project_dir') || null,
+          }),
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/budget/policy') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            policy: setBudgetPolicy(db, {
+              policyId: parsed.policy_id || null,
+              scopeType: parsed.scope_type || 'agent',
+              scopeId: parsed.scope_id || '*',
+              dailyTokenLimit: parsed.daily_token_limit ?? null,
+              dailyCallLimit: parsed.daily_call_limit ?? null,
+              softWarnPct: parsed.soft_warn_pct ?? 80,
+              onExceed: parsed.on_exceed || 'warn',
+              enabled: parsed.enabled !== false,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/budget/delete') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, deleteBudgetPolicy(db, parsed.policy_id || parsed.id)); }
+        catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/triggers') {
+        sendJson(res, 200, {
+          triggers: listTriggers(db),
+          allowed_actions: [...ALLOWED_TRIGGER_ACTIONS],
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/triggers/save') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            trigger: saveTrigger(db, {
+              triggerId: parsed.trigger_id || null,
+              name: parsed.name,
+              kind: parsed.kind || 'interval',
+              action: parsed.action || parsed.trigger_action,
+              intervalSec: parsed.interval_sec ?? 900,
+              enabled: parsed.enabled !== false,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/triggers/delete') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, deleteTrigger(db, parsed.trigger_id || parsed.id)); }
+        catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/triggers/run') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, runTriggerNow(db, parsed.trigger_id || parsed.id)); }
+        catch (err) { sendJson(res, 404, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/tasks/reconcile-stale') {
+        const parsed = await readBoundedJson(req);
+        if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+          sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+          return;
+        }
+        try {
+          sendJson(res, 200, reconcileStaleTasks(db, {
+            taskIds: Array.isArray(parsed.task_ids) ? parsed.task_ids : null,
+            resolution: parsed.resolution || 'cancelled',
+            note: parsed.note || '',
+            confirmed: parsed.confirmed === true,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
       sendJson(res, 404, { error: 'Not found' });
     } catch (err) {
       sendJson(res, err.statusCode || 500, { error: String(err.message || err) });
@@ -1658,9 +1963,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   sweepOrphanTasks(db);
   const server = createDashboardServer(db);
   let poller = null;
+  let triggerSched = null;
   let cassTimer = null;
   const gracefulExit = async () => {
     poller?.stop();
+    triggerSched?.stop();
     if (cassTimer) clearInterval(cassTimer);
     await server.shutdown();
     try { db.close(); } catch {}
@@ -1672,6 +1979,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     console.log(JSON.stringify({ event: 'dashboard.listening', version: APP_VERSION, url: `http://${DASHBOARD_HOST}:${DASHBOARD_PORT}`, pid: process.pid }));
     probeAllMembers(db).catch(() => {});
     poller = startReadOnlyAutoPoller(db);
+    triggerSched = startTriggerScheduler(db);
     cassTimer = startPeriodicCassRefresh();
   });
 }

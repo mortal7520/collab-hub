@@ -3,8 +3,12 @@ import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { APP_VERSION, ensureRuntimeDirs, MAIL_BASE_URL, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT } from './config.mjs';
 import {
-  clearMemberCooldown, getMemberStatuses, openHubDb, parseTaskRow, setMemberCooldown,
+  clearMemberCooldown, getMemberStatuses, openHubDb, parseTaskRow, setMemberCooldown, touchPassiveDesktopHeartbeat,
 } from './db.mjs';
+import { deleteArtifact, getArtifact, listArtifacts, pruneExpiredArtifacts, putArtifact } from './artifacts.mjs';
+import { deleteBudgetPolicy, evaluateBudget, listBudgetPolicies, setBudgetPolicy } from './budget.mjs';
+import { createConsensusRound, listConsensusRounds, recordConsensusVote, synthesizeConsensus } from './consensus.mjs';
+import { buildHandoffPack } from './handoff-pack.mjs';
 import {
   cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff,
 } from './executors.mjs';
@@ -25,12 +29,19 @@ import { runPlaybook } from './playbooks.mjs';
 import { planDispatch, probeAllMembers } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from './registry.mjs';
-import { applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from './self-improve.mjs';
+import {
+  applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, reconcileStaleTasks, saveIncidentLesson, toggleIncidentLesson,
+} from './self-improve.mjs';
 import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from './skills-hub.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep, searchSessionsCass,
 } from './toolkit.mjs';
+import { deleteTrigger, listTriggers, runTriggerNow, saveTrigger } from './triggers.mjs';
+import {
+  appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, listCollabRooms,
+  promoteInboxFile, reconcileStaleClaimsInAllRooms, releaseRoomClaim, renewRoomClaim,
+} from './workspace-room.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from './workflows.mjs';
 import { cleanupWorktree, createWorktree, listWorktrees, mergeWorktree, reviewWorktree, verifyWorktree } from './worktree.mjs';
 
@@ -589,11 +600,16 @@ export const TOOLS = Object.freeze([
   },
   {
     name: 'collab_self_heal',
-    description: 'Preview (apply=false, default) or execute (apply=true) safe, zero-risk operational self-healing: sweep dead-owner orphans to uncertain, conditionally clear expired cooldowns, reconcile missing worktrees, extract deduplicated incident lessons, and run non-blocking WAL PASSIVE checkpoint.',
+    description: 'Preview (apply=false, default) or execute (apply=true) safe operational self-healing: sweep dead-owner orphans, clear expired cooldowns, reconcile missing worktrees, extract incident lessons, WAL checkpoint, or batch-reconcile stale tasks (action="reconcile_stale").',
     inputSchema: {
       type: 'object',
       properties: {
+        action: { type: 'string', enum: ['heal', 'reconcile_stale'], description: 'Default "heal". Use "reconcile_stale" to preview/archive aged non-terminal tasks.' },
         apply: { type: 'boolean', description: 'Default false (dry-run preview). Set true to execute safe operational heals.' },
+        confirmed: { type: 'boolean', description: 'Required true when action="reconcile_stale" to persist state changes.' },
+        task_ids: { type: 'array', items: { type: 'string' }, description: 'Optional specific stale task IDs to reconcile.' },
+        resolution: { type: 'string', enum: ['cancelled', 'completed'], description: 'Target state for reconciled stale tasks (default "cancelled").' },
+        note: { type: 'string', description: 'Optional reconciliation note recorded on each task.' },
         record_lessons: { type: 'boolean', description: 'Extract repeating failure clusters into incident_lessons and shared memory (default true).' },
       },
     },
@@ -725,6 +741,132 @@ export const TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'collab_room',
+    description: 'Living Shared Collaboration Room engine: create shared dual-layer rooms (SQLite + CLAIMS.md/ROOM-LOG.md), acquire/renew/release atomic path leases with TTL & overlap detection, append logs, promote inbox/<agent>/ drafts safely, and list/inspect rooms.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['create', 'list', 'status', 'log', 'claim', 'renew', 'release', 'reconcile_stale', 'promote'] },
+        room_id: { type: 'string' },
+        name: { type: 'string' },
+        goal: { type: 'string' },
+        agents: { type: 'array', items: { type: 'string' } },
+        create_git_repo: { type: 'boolean' },
+        auto_register_clis: { type: 'array', items: { type: 'string' } },
+        launch_apps: { type: 'array', items: { type: 'string' } },
+        confirmed: { type: 'boolean' },
+        path_glob: { type: 'string' },
+        owner_agent: { type: 'string' },
+        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+        claim_id: { type: 'string' },
+        notes: { type: 'string' },
+        actor: { type: 'string' },
+        kind: { type: 'string' },
+        message: { type: 'string' },
+        agent: { type: 'string' },
+        rel_path: { type: 'string' },
+        dest_rel_path: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'collab_handoff_pack',
+    description: 'Generate a single sanitized Markdown Handoff Pack (Git branch/status/diffstat, recent tasks, open diff comments, active room claims/log tail, guardrails, key memory notes) for instant cross-agent context handoff, optionally saving to the Artifact Vault.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_dir: { type: 'string' },
+        room_id: { type: 'string' },
+        target_member: { type: 'string' },
+        save_artifact: { type: 'boolean' },
+        max_bytes: { type: 'integer', minimum: 2048, maximum: 128000 },
+      },
+    },
+  },
+  {
+    name: 'collab_consensus',
+    description: 'Multi-Agent Consensus & Arbitration engine: open voting rounds across heterogeneous agents (optionally auto-dispatching DSH/Muse), submit stance/confidence/hard-blocker votes, synthesize final weighted verdict into SQLite + Memory + Room Log, and list rounds.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['create', 'vote', 'synthesize', 'list'] },
+        round_id: { type: 'string' },
+        room_id: { type: 'string' },
+        topic: { type: 'string' },
+        members: { type: 'array', items: { type: 'string' } },
+        project_dir: { type: 'string' },
+        auto_dispatch: { type: 'boolean' },
+        member: { type: 'string' },
+        stance: { type: 'string', enum: ['approve', 'reject', 'modify', 'abstain'] },
+        confidence: { type: 'number', minimum: 0.1, maximum: 1 },
+        rationale: { type: 'string' },
+        blockers: { type: 'array', items: { type: 'string' } },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+    },
+  },
+  {
+    name: 'collab_artifacts',
+    description: 'Shared Artifact Vault (256 KB cap, automatic secret redaction, SHA-256 verification, TTL expiration): put, get, list, delete, or prune cross-agent deliverable artifacts.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['put', 'get', 'list', 'delete', 'prune'] },
+        artifact_id: { type: 'string' },
+        room_id: { type: 'string' },
+        project: { type: 'string' },
+        name: { type: 'string' },
+        content: { type: 'string' },
+        mime_type: { type: 'string' },
+        author: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        ttl_hours: { type: 'number', minimum: 0, maximum: 2160 },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+    },
+  },
+  {
+    name: 'collab_budget',
+    description: 'Token & Call Budget Guardrail engine: configure daily_call_limit / daily_token_limit policies per global/agent/project scope (warn | downgrade | block), inspect policies, delete policies, or evaluate current 24h utilization.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['set', 'list', 'delete', 'evaluate'] },
+        policy_id: { type: 'string' },
+        scope_type: { type: 'string', enum: ['global', 'agent', 'project'] },
+        scope_id: { type: 'string' },
+        daily_token_limit: { type: 'integer', minimum: 100 },
+        daily_call_limit: { type: 'integer', minimum: 1 },
+        soft_warn_pct: { type: 'integer', minimum: 10, maximum: 99 },
+        on_exceed: { type: 'string', enum: ['warn', 'downgrade', 'block'] },
+        enabled: { type: 'boolean' },
+        member: { type: 'string' },
+        project_dir: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'collab_triggers',
+    description: 'Safe local automation triggers (strict allowlist: self_check | self_heal_preview | hot_backup | skills_drift_check | prune_artifacts | reconcile_stale_claims; 60s min cooldown): save, list, delete, or run immediately.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['save', 'list', 'delete', 'run'] },
+        trigger_id: { type: 'string' },
+        name: { type: 'string' },
+        kind: { type: 'string', enum: ['interval', 'manual'] },
+        trigger_action: { type: 'string', enum: ['self_check', 'self_heal_preview', 'hot_backup', 'skills_drift_check', 'prune_artifacts', 'reconcile_stale_claims'] },
+        interval_sec: { type: 'integer', minimum: 60, maximum: 86400 },
+        enabled: { type: 'boolean' },
+      },
+    },
+  },
 ]);
 
 function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT } = {}) {
@@ -736,6 +878,11 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
   const skills_hub = buildSkillsRulesSnapshot({ projectDir: projectDir || WORKSPACE_ROOT });
   const self_improve = getSelfImproveSummary(db);
   const workspaces = listWorkspaceProjects(WORKSPACE_ROOT).slice(0, 30);
+  const rooms = listCollabRooms(db);
+  const artifacts = listArtifacts(db, { limit: 20 });
+  const budget_summary = evaluateBudget(db, { projectDir: projectDir || WORKSPACE_ROOT });
+  const triggers = listTriggers(db);
+  const consensus = listConsensusRounds(db, { limit: 12 });
   return {
     version: APP_VERSION,
     initial_tab: tab || 'radar',
@@ -750,6 +897,11 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
     mcp_hub_summary: getMcpHubSummary(db),
     skills_hub,
     self_improve,
+    rooms,
+    artifacts,
+    budget_summary,
+    triggers,
+    consensus,
   };
 }
 
@@ -973,6 +1125,17 @@ export async function handleToolCall(db, name, args = {}, opts = {}) {
     case 'collab_self_check':
       return diagnoseSystem(db);
     case 'collab_self_heal': {
+      if (args.action === 'reconcile_stale') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') {
+          throw new Error('confirmed must be a strict boolean (true or false)');
+        }
+        return reconcileStaleTasks(db, {
+          taskIds: Array.isArray(args.task_ids) ? args.task_ids : null,
+          resolution: args.resolution || 'cancelled',
+          note: args.note || '',
+          confirmed: args.confirmed === true,
+        });
+      }
       if (args.apply !== undefined && typeof args.apply !== 'boolean') {
         throw new Error('apply must be a strict boolean (true or false)');
       }
@@ -1053,6 +1216,153 @@ export async function handleToolCall(db, name, args = {}, opts = {}) {
       }
       throw new Error(`Unsupported collab_merge_queue action: ${args.action}`);
     }
+    case 'collab_room': {
+      const act = args.action;
+      if (act === 'list') return { rooms: listCollabRooms(db) };
+      if (act === 'status') return { room: getRoomStatus(db, args.room_id || args.name) };
+      if (act === 'reconcile_stale') return reconcileStaleClaimsInAllRooms(db);
+      if (act === 'create') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') throw new Error('confirmed must be a strict boolean');
+        return createCollabRoom(db, {
+          name: args.name,
+          goal: args.goal || '',
+          agents: args.agents,
+          createGitRepo: args.create_git_repo !== false,
+          autoRegisterClis: args.auto_register_clis || [],
+          launchApps: args.launch_apps || [],
+          confirmed: args.confirmed === true,
+        });
+      }
+      if (act === 'log') {
+        return { entry: appendRoomLog(db, { roomId: args.room_id || args.name, actor: args.actor || 'collab-hub', kind: args.kind || 'note', message: args.message }) };
+      }
+      if (act === 'claim') {
+        return { claim: claimRoomPath(db, { roomId: args.room_id || args.name, pathGlob: args.path_glob, ownerAgent: args.owner_agent, ttlMinutes: args.ttl_minutes ?? 30, notes: args.notes || '' }) };
+      }
+      if (act === 'renew') {
+        return { claim: renewRoomClaim(db, { claimId: args.claim_id, ownerAgent: args.owner_agent || null, ttlMinutes: args.ttl_minutes ?? 30 }) };
+      }
+      if (act === 'release') {
+        return { claim: releaseRoomClaim(db, { claimId: args.claim_id || null, roomId: args.room_id || args.name || null, pathGlob: args.path_glob || null, ownerAgent: args.owner_agent || null }) };
+      }
+      if (act === 'promote') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') throw new Error('confirmed must be a strict boolean');
+        return promoteInboxFile(db, {
+          roomId: args.room_id || args.name,
+          agent: args.agent || args.owner_agent,
+          relPath: args.rel_path,
+          destRelPath: args.dest_rel_path || null,
+          confirmed: args.confirmed === true,
+        });
+      }
+      throw new Error(`Unsupported collab_room action: ${act}`);
+    }
+    case 'collab_handoff_pack':
+      return buildHandoffPack(db, {
+        projectDir: args.project_dir || WORKSPACE_ROOT,
+        roomId: args.room_id || null,
+        targetMember: args.target_member || null,
+        saveArtifact: Boolean(args.save_artifact),
+        maxBytes: args.max_bytes ?? 24000,
+      });
+    case 'collab_consensus': {
+      const act = args.action;
+      if (act === 'list') return { rounds: listConsensusRounds(db, { roomId: args.room_id || null, limit: args.limit ?? 20 }) };
+      if (act === 'create') {
+        if (args.auto_dispatch !== undefined && typeof args.auto_dispatch !== 'boolean') {
+          throw new Error('auto_dispatch must be a strict boolean');
+        }
+        return createConsensusRound(db, {
+          roundId: args.round_id || null,
+          roomId: args.room_id || null,
+          topic: args.topic,
+          members: args.members,
+          projectDir: args.project_dir || WORKSPACE_ROOT,
+          autoDispatch: args.auto_dispatch === true,
+        });
+      }
+      if (act === 'vote') {
+        return {
+          round: recordConsensusVote(db, {
+            roundId: args.round_id,
+            member: args.member,
+            stance: args.stance,
+            confidence: args.confidence ?? 0.85,
+            rationale: args.rationale || '',
+            blockers: args.blockers || [],
+          }),
+        };
+      }
+      if (act === 'synthesize') return { round: synthesizeConsensus(db, args.round_id) };
+      throw new Error(`Unsupported collab_consensus action: ${act}`);
+    }
+    case 'collab_artifacts': {
+      const act = args.action;
+      if (act === 'list') return { artifacts: listArtifacts(db, { roomId: args.room_id || null, project: args.project || null, limit: args.limit ?? 30 }) };
+      if (act === 'get') {
+        const artifact = getArtifact(db, args.artifact_id);
+        if (!artifact) throw new Error(`Artifact not found or expired: ${args.artifact_id}`);
+        return { artifact };
+      }
+      if (act === 'put') {
+        return {
+          artifact: putArtifact(db, {
+            artifactId: args.artifact_id || null,
+            roomId: args.room_id || null,
+            project: args.project || null,
+            name: args.name,
+            content: args.content,
+            mimeType: args.mime_type || 'text/markdown',
+            author: args.author || 'collab-hub',
+            tags: args.tags || [],
+            ttlHours: args.ttl_hours ?? 72,
+          }),
+        };
+      }
+      if (act === 'delete') return deleteArtifact(db, args.artifact_id);
+      if (act === 'prune') return pruneExpiredArtifacts(db);
+      throw new Error(`Unsupported collab_artifacts action: ${act}`);
+    }
+    case 'collab_budget': {
+      const act = args.action;
+      if (act === 'list') return { policies: listBudgetPolicies(db) };
+      if (act === 'evaluate') return evaluateBudget(db, { member: args.member || null, projectDir: args.project_dir || null });
+      if (act === 'set') {
+        return {
+          policy: setBudgetPolicy(db, {
+            policyId: args.policy_id || null,
+            scopeType: args.scope_type || 'agent',
+            scopeId: args.scope_id || '*',
+            dailyTokenLimit: args.daily_token_limit ?? null,
+            dailyCallLimit: args.daily_call_limit ?? null,
+            softWarnPct: args.soft_warn_pct ?? 80,
+            onExceed: args.on_exceed || 'warn',
+            enabled: args.enabled !== false,
+          }),
+        };
+      }
+      if (act === 'delete') return deleteBudgetPolicy(db, args.policy_id);
+      throw new Error(`Unsupported collab_budget action: ${act}`);
+    }
+    case 'collab_triggers': {
+      const act = args.action;
+      if (act === 'list') return { triggers: listTriggers(db) };
+      if (act === 'save') {
+        return {
+          trigger: saveTrigger(db, {
+            triggerId: args.trigger_id || null,
+            name: args.name,
+            kind: args.kind || 'interval',
+            action: args.trigger_action || args.operation,
+            intervalSec: args.interval_sec ?? 900,
+            enabled: args.enabled !== false,
+          }),
+        };
+      }
+      if (act === 'delete') return deleteTrigger(db, args.trigger_id);
+      if (act === 'run') return runTriggerNow(db, args.trigger_id);
+      throw new Error(`Unsupported collab_triggers action: ${act}`);
+    }
     default:
       throw new Error(`Unknown collab-hub tool: ${name}`);
   }
@@ -1060,9 +1370,19 @@ export async function handleToolCall(db, name, args = {}, opts = {}) {
 
 const SUPPORTED_MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
+function inferDesktopMemberFromClientName(clientName) {
+  const s = String(clientName || '').toLowerCase();
+  if (/antigravity|agy|gemini/.test(s)) return 'agy';
+  if (/codex/.test(s)) return 'codex';
+  if (/claude/.test(s)) return 'claude';
+  return null;
+}
+
 export function startMcpStdioServer() {
   ensureRuntimeDirs();
   const db = openHubDb();
+  let detectedHostMember = null;
+  let detectedClientName = '';
   const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
   const cancelledIds = new Set();
@@ -1113,6 +1433,11 @@ export function startMcpStdioServer() {
       if (method === 'initialize') {
         const reqVer = params?.protocolVersion;
         const negotiated = SUPPORTED_MCP_VERSIONS.includes(reqVer) ? reqVer : '2025-06-18';
+        detectedClientName = String(params?.clientInfo?.name || '');
+        detectedHostMember = inferDesktopMemberFromClientName(detectedClientName);
+        if (detectedHostMember) {
+          try { touchPassiveDesktopHeartbeat(db, detectedHostMember, detectedClientName); } catch {}
+        }
         send({
           jsonrpc: '2.0',
           id,
@@ -1155,6 +1480,9 @@ export function startMcpStdioServer() {
         activeControllers.set(reqKey, ac);
         try {
           if (cancelledIds.delete(reqKey)) return;
+          if (detectedHostMember) {
+            try { touchPassiveDesktopHeartbeat(db, detectedHostMember, detectedClientName); } catch {}
+          }
           const result = await handleToolCall(db, params?.name, params?.arguments || {}, { signal: ac.signal });
           if (ac.signal.aborted || cancelledIds.delete(reqKey)) return;
           const textContent = params?.name === 'collab_cockpit'

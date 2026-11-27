@@ -6,9 +6,12 @@ import {
 import { createDashboardServer, startReadOnlyAutoPoller } from '../src/dashboard.mjs';
 import { openHubDb, openHubDbReadOnly, parseTaskRow, pruneRetentionTables } from '../src/db.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
-import { createCollabRoom } from '../src/workspace-room.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
+import { deleteArtifact, getArtifact, listArtifacts, pruneExpiredArtifacts, putArtifact } from '../src/artifacts.mjs';
+import { deleteBudgetPolicy, evaluateBudget, listBudgetPolicies, setBudgetPolicy } from '../src/budget.mjs';
+import { createConsensusRound, listConsensusRounds, recordConsensusVote, synthesizeConsensus } from '../src/consensus.mjs';
 import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, sweepOrphanTasks } from '../src/executors.mjs';
+import { buildHandoffPack } from '../src/handoff-pack.mjs';
 import { runHudCli } from '../src/hud.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
 import { buildMcpHubSnapshot, findMcpTools, importDiscoveredMcpServers, probeMcpServer, syncMcpToClient } from '../src/mcp-hub.mjs';
@@ -18,15 +21,20 @@ import { runPlaybook } from '../src/playbooks.mjs';
 import { probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
-import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
+import { applySelfHeal, diagnoseSystem, listIncidentLessons, reconcileStaleTasks, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
 import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from '../src/skills-hub.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from '../src/toolkit.mjs';
+import { deleteTrigger, listTriggers, runTriggerNow, saveTrigger, startTriggerScheduler } from '../src/triggers.mjs';
 import { startInteractiveTui } from '../src/tui.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
+import {
+  appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, listCollabRooms,
+  promoteInboxFile, reconcileStaleClaimsInAllRooms, releaseRoomClaim, renewRoomClaim,
+} from '../src/workspace-room.mjs';
 import { verifyWorktree } from '../src/worktree.mjs';
 
 const [cmd, ...rawArgs] = process.argv.slice(2);
@@ -42,8 +50,10 @@ if (cmd === 'mcp') {
   const port = portIdx >= 0 && rawArgs[portIdx + 1] ? Number(rawArgs[portIdx + 1]) : DASHBOARD_PORT;
   const server = createDashboardServer(db, { host: DASHBOARD_HOST, port });
   let poller = null;
+  let triggerSched = null;
   const gracefulExit = async () => {
     poller?.stop();
+    triggerSched?.stop();
     await server.shutdown();
     try { db.close(); } catch {}
     process.exit(0);
@@ -61,6 +71,7 @@ if (cmd === 'mcp') {
     }));
     probeAllMembers(db).catch(() => {});
     poller = startReadOnlyAutoPoller(db);
+    triggerSched = startTriggerScheduler(db);
   });
 } else {
   const isReadOnlyUi = cmd === 'hud' || cmd === 'tui';
@@ -312,6 +323,7 @@ if (cmd === 'mcp') {
         width: flag('width') ? Number(flag('width')) : undefined,
         height: flag('height') ? Number(flag('height')) : undefined,
         projectDir: flag('dir') || WORKSPACE_ROOT,
+        reopenDb: () => openHubDbReadOnly(),
       });
     } else if (cmd === 'hud') {
       await runHudCli(db, {
@@ -319,9 +331,10 @@ if (cmd === 'mcp') {
         watch: Boolean(flags.watch),
         intervalMs: Number(flag('interval', '250')),
         width: flag('width') ? Number(flag('width')) : undefined,
+        reopenDb: () => openHubDbReadOnly(),
       });
     } else if (cmd === 'room') {
-      const sub = positionals[0] || 'create';
+      const sub = positionals[0] || 'list';
       if (sub === 'create') {
         console.log(JSON.stringify(await createCollabRoom(db, {
           name: positionals[1] || flag('name'),
@@ -333,9 +346,88 @@ if (cmd === 'mcp') {
           confirmed: flags.confirm === true,
           workspaceRoot: flag('root') || WORKSPACE_ROOT,
         }), null, 2));
+      } else if (sub === 'list') {
+        console.log(JSON.stringify({ rooms: listCollabRooms(db) }, null, 2));
+      } else if (sub === 'status') {
+        console.log(JSON.stringify({ room: getRoomStatus(db, positionals[1] || flag('room') || flag('id')) }, null, 2));
+      } else if (sub === 'claim') {
+        console.log(JSON.stringify({
+          claim: claimRoomPath(db, {
+            roomId: flag('room') || positionals[1],
+            pathGlob: flag('path') || positionals[2],
+            ownerAgent: flag('agent') || flag('owner') || positionals[3],
+            ttlMinutes: Number(flag('ttl', '30')),
+            notes: flag('notes', ''),
+          }),
+        }, null, 2));
+      } else if (sub === 'renew') {
+        console.log(JSON.stringify({
+          claim: renewRoomClaim(db, { claimId: flag('claim') || positionals[1], ownerAgent: flag('agent') || null, ttlMinutes: Number(flag('ttl', '30')) }),
+        }, null, 2));
+      } else if (sub === 'release') {
+        console.log(JSON.stringify({
+          claim: releaseRoomClaim(db, { claimId: flag('claim') || null, roomId: flag('room') || null, pathGlob: flag('path') || null, ownerAgent: flag('agent') || null }),
+        }, null, 2));
+      } else if (sub === 'log') {
+        console.log(JSON.stringify({
+          entry: appendRoomLog(db, { roomId: flag('room') || positionals[1], actor: flag('actor', 'cli'), kind: flag('kind', 'note'), message: flag('message') || positionals.slice(2).join(' ') }),
+        }, null, 2));
+      } else if (sub === 'promote') {
+        console.log(JSON.stringify(promoteInboxFile(db, {
+          roomId: flag('room') || positionals[1],
+          agent: flag('agent') || positionals[2],
+          relPath: flag('file') || positionals[3],
+          destRelPath: flag('dest') || null,
+          confirmed: flags.confirm === true,
+        }), null, 2));
+      } else if (sub === 'reconcile-stale') {
+        console.log(JSON.stringify(reconcileStaleClaimsInAllRooms(db), null, 2));
       } else {
-        throw new Error(`Unknown room subcommand "${sub}". Use: create <name> [--goal G --cli id1,id2 --launch app1 --confirm]`);
+        throw new Error(`Unknown room subcommand "${sub}". Use: create | list | status | claim | renew | release | log | promote | reconcile-stale`);
       }
+    } else if (cmd === 'handoff') {
+      console.log(JSON.stringify(buildHandoffPack(db, {
+        projectDir: flag('dir') || WORKSPACE_ROOT,
+        roomId: flag('room') || null,
+        targetMember: flag('member') || null,
+        saveArtifact: Boolean(flags.save),
+      }), null, 2));
+    } else if (cmd === 'consensus') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ rounds: listConsensusRounds(db, { roomId: flag('room') || null }) }, null, 2));
+      else if (sub === 'create') console.log(JSON.stringify(await createConsensusRound(db, { roomId: flag('room') || null, topic: flag('topic') || positionals.slice(1).join(' '), autoDispatch: Boolean(flags.dispatch) }), null, 2));
+      else if (sub === 'vote') console.log(JSON.stringify({ round: recordConsensusVote(db, { roundId: flag('round') || positionals[1], member: flag('member'), stance: flag('stance'), confidence: Number(flag('confidence', '0.85')), rationale: flag('rationale', '') }) }, null, 2));
+      else if (sub === 'synthesize') console.log(JSON.stringify({ round: synthesizeConsensus(db, flag('round') || positionals[1]) }, null, 2));
+      else throw new Error(`Unknown consensus subcommand "${sub}". Use: list | create | vote | synthesize`);
+    } else if (cmd === 'artifacts') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ artifacts: listArtifacts(db, { roomId: flag('room') || null }) }, null, 2));
+      else if (sub === 'get') console.log(JSON.stringify({ artifact: getArtifact(db, positionals[1] || flag('id')) }, null, 2));
+      else if (sub === 'put') console.log(JSON.stringify({ artifact: putArtifact(db, { roomId: flag('room') || null, name: flag('name') || positionals[1], content: flag('content') || fs.readFileSync(flag('file'), 'utf8'), author: flag('author', 'cli') }) }, null, 2));
+      else if (sub === 'delete') console.log(JSON.stringify(deleteArtifact(db, positionals[1] || flag('id')), null, 2));
+      else if (sub === 'prune') console.log(JSON.stringify(pruneExpiredArtifacts(db), null, 2));
+      else throw new Error(`Unknown artifacts subcommand "${sub}". Use: list | get | put | delete | prune`);
+    } else if (cmd === 'budget') {
+      const sub = positionals[0] || 'evaluate';
+      if (sub === 'list') console.log(JSON.stringify({ policies: listBudgetPolicies(db) }, null, 2));
+      else if (sub === 'evaluate') console.log(JSON.stringify(evaluateBudget(db, { member: flag('member') || null, projectDir: flag('dir') || null }), null, 2));
+      else if (sub === 'set') console.log(JSON.stringify({ policy: setBudgetPolicy(db, { scopeType: flag('scope', 'agent'), scopeId: flag('id', '*'), dailyCallLimit: flag('calls') ? Number(flag('calls')) : null, dailyTokenLimit: flag('tokens') ? Number(flag('tokens')) : null, onExceed: flag('on-exceed', 'warn') }) }, null, 2));
+      else if (sub === 'delete') console.log(JSON.stringify(deleteBudgetPolicy(db, positionals[1] || flag('id')), null, 2));
+      else throw new Error(`Unknown budget subcommand "${sub}". Use: list | evaluate | set | delete`);
+    } else if (cmd === 'triggers') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ triggers: listTriggers(db) }, null, 2));
+      else if (sub === 'save') console.log(JSON.stringify({ trigger: saveTrigger(db, { name: flag('name') || positionals[1], kind: flag('kind', 'interval'), action: flag('action'), intervalSec: Number(flag('interval', '900')) }) }, null, 2));
+      else if (sub === 'run') console.log(JSON.stringify(runTriggerNow(db, positionals[1] || flag('id')), null, 2));
+      else if (sub === 'delete') console.log(JSON.stringify(deleteTrigger(db, positionals[1] || flag('id')), null, 2));
+      else throw new Error(`Unknown triggers subcommand "${sub}". Use: list | save | run | delete`);
+    } else if (cmd === 'reconcile-stale') {
+      console.log(JSON.stringify(reconcileStaleTasks(db, {
+        taskIds: flag('ids') ? String(flag('ids')).split(',').map((s) => s.trim()).filter(Boolean) : null,
+        resolution: flag('resolution', 'cancelled'),
+        note: flag('note', ''),
+        confirmed: flags.confirm === true,
+      }), null, 2));
     } else if (cmd === 'merge-queue') {
       const sub = positionals[0] || 'list';
       if (sub === 'list') console.log(JSON.stringify({ queue: listMergeQueue(db) }, null, 2));
@@ -349,9 +441,15 @@ if (cmd === 'mcp') {
         'Commands:',
         '  tui [--demo --fps 8]                         Launch 24-bit TrueColor animated Terminal Cockpit (Codex/Claude/DSH)',
         '  hud [--format statusline|card|json --watch]  Sub-100ms live StatusLine & Cyber-HUD (Claude Code / tmux / WSL)',
-        '  room create <name> [--goal G --cli C --launch A --confirm]  Create shared Git collab room + register/launch agents',
+        '  room create|list|status|claim|renew|release|log|promote|reconcile-stale  Living shared room lifecycle',
+        '  handoff [--dir D --room R --save]            Generate sanitized Context Handoff Pack',
+        '  consensus list|create|vote|synthesize        Multi-agent arbitration & consensus verdict',
+        '  artifacts list|get|put|delete|prune          Shared redacted Artifact Vault',
+        '  budget list|evaluate|set|delete              Token & call budget guardrails',
+        '  triggers list|save|run|delete                Safe allowlisted periodic triggers',
+        '  reconcile-stale [--confirm --resolution R]   Batch-archive aged non-terminal tasks',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
-        '  mcp                                          Start the 45-tool SEP-1865 MCP Apps stdio server (AGY/Claude/Codex)',
+        '  mcp                                          Start the 51-tool SEP-1865 MCP Apps stdio server (AGY/Claude/Codex)',
         '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub & Meta-MCP tool discovery',
         '  skills-hub snapshot|sync-skill|sync-rule     Cross-Agent Skills & Rules sync hub',
         '  merge-queue list|enqueue|validate|process    Speculative Git Merge Queue',

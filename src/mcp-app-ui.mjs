@@ -359,6 +359,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     <button type="button" class="tab" data-tab="mcp"><span data-i18n="tMcp">MCP Hub</span> <span class="badge cyan" id="bMcp">0</span></button>
     <button type="button" class="tab" data-tab="skills"><span data-i18n="tSkills">Skills &amp; Rules</span> <span class="badge" id="bSkills">0</span></button>
     <button type="button" class="tab" data-tab="queue"><span data-i18n="tQueue">Merge Queue</span> <span class="badge" id="bQueue">0</span></button>
+    <button type="button" class="tab" data-tab="rooms"><span data-i18n="tRooms">Rooms &amp; Ops</span> <span class="badge cyan" id="bRooms">0</span></button>
   </nav>
 
   <!-- TAB 1: FLEET RADAR -->
@@ -413,6 +414,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
         </div>
         <div style="display:flex;gap:6px">
           <button type="button" class="btn cyan" id="btnTdPoll">Poll</button>
+          <button type="button" class="btn" id="btnTdLogs">Live Logs</button>
           <button type="button" class="btn warn" id="btnTdCancel">Cancel</button>
           <button type="button" class="btn" id="btnTdClose">×</button>
         </div>
@@ -429,7 +431,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
           <div class="card-title" data-i18n="mcpTitle">All-Agent MCP Hub &amp; Meta-MCP Lazy Router</div>
           <div class="card-sub" data-i18n="mcpSub">Zero-secret cross-client drift matrix &amp; on-demand tool discovery across AGY / Codex / Claude.</div>
         </div>
-        <button type="button" class="btn cyan" id="btnMcpScan">Scan Clients</button>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn ok" id="btnMcpImportAll">Import All Local MCPs</button>
+          <button type="button" class="btn cyan" id="btnMcpScan">Scan Clients</button>
+        </div>
       </div>
       <div class="search-bar">
         <input class="input" id="mcpSearchInput" placeholder="Meta-MCP find tools (e.g. git, search, worktree)…" />
@@ -465,9 +470,34 @@ button, input, select, textarea { font: inherit; color: inherit; }
         </div>
         <div style="display:flex;gap:6px">
           <button type="button" class="btn cyan" id="btnMqValidate">Speculative Check</button>
+          <button type="button" class="btn warn" id="btnMqProcess">Process Queue</button>
         </div>
       </div>
       <div class="list" id="mqList"></div>
+    </div>
+  </section>
+
+  <!-- TAB 6: ROOMS & OPS (v2.2.0 FULL LOOP) -->
+  <section class="pane" id="pane-rooms">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title" data-i18n="rmTitle">Living Shared Rooms &amp; Multi-Agent Ops</div>
+          <div class="card-sub" data-i18n="rmSub">SQLite + CLAIMS.md/ROOM-LOG.md dual-layer rooms, Artifact Vault, Handoff Pack, Budgets, Consensus &amp; Triggers.</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="btn cyan" id="btnGenHandoff">Handoff Pack</button>
+          <button type="button" class="btn warn" id="btnReconcileStale">Clean Stale</button>
+        </div>
+      </div>
+      <div class="search-bar">
+        <input class="input" id="rmNameInput" placeholder="New room name (e.g. sprint-v22)…" style="max-width:190px" />
+        <input class="input" id="rmGoalInput" placeholder="Room goal…" />
+        <button type="button" class="btn primary" id="btnRmCreate">Create Room</button>
+      </div>
+      <div class="list" id="roomsList" style="margin-bottom:8px"></div>
+      <div class="list" id="opsSummaryList"></div>
+      <pre class="pre" id="opsOut" hidden></pre>
     </div>
   </section>
 </div>
@@ -483,21 +513,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
   let lang = 'zh';
   const STR = {
     en: {
-      tRadar: 'Fleet Radar', tTasks: 'Kanban & Logs', tMcp: 'MCP Hub', tSkills: 'Skills & Rules', tQueue: 'Merge Queue',
+      tRadar: 'Fleet Radar', tTasks: 'Kanban & Logs', tMcp: 'MCP Hub', tSkills: 'Skills & Rules', tQueue: 'Merge Queue', tRooms: 'Rooms & Ops',
       fleetTitle: 'Live Agent Constellation', qdTitle: 'In-Host Quick Dispatch',
       qdSub: 'Dispatch directly to background agents without leaving your IDE.', qdSend: 'Dispatch',
       mcpTitle: 'All-Agent MCP Hub & Meta-MCP Router', mcpSub: 'Zero-secret drift matrix & lazy tool discovery across AGY / Codex / Claude.',
       skTitle: 'Cross-Agent Skills & Rules Sync', skSub: 'SKILL.md & AGENTS.md / CLAUDE.md alignment with Dry-Run + .bak backups.',
       mqTitle: 'Serialized Agent Merge Queue', mqSub: 'Side-effect-free speculative git merge-tree pre-flight validation.',
+      rmTitle: 'Living Shared Rooms & Multi-Agent Ops', rmSub: 'SQLite + CLAIMS.md/ROOM-LOG.md dual-layer rooms, Artifact Vault, Handoff Pack, Budgets & Triggers.',
       kAgents: 'Online Agents', kTasks: 'Active / Total', kMcp: 'MCP Servers', kQueue: 'Merge Queue',
     },
     zh: {
-      tRadar: '舰队雷达', tTasks: '看板与日志', tMcp: 'MCP 中心', tSkills: '技能与规范', tQueue: '合并队列',
+      tRadar: '舰队雷达', tTasks: '看板与日志', tMcp: 'MCP 中心', tSkills: '技能与规范', tQueue: '合并队列', tRooms: '协作房间',
       fleetTitle: '实时 Agent 神经拓扑', qdTitle: '宿主内一键派发',
       qdSub: '无需切去网页，在当前聊天窗口/侧栏直接派发后台任务。', qdSend: '立即派发',
       mcpTitle: '全 Agent MCP 中心与 Meta-MCP 路由', mcpSub: '跨 AGY / Codex / Claude 零密钥漂移矩阵与按需工具发现。',
       skTitle: '跨 Agent Skills / Rules 同步中心', skSub: '统一管理 SKILL.md 与 AGENTS.md / CLAUDE.md（预演 + .bak 备份）。',
       mqTitle: '串行 Agent 合并队列', mqSub: '零副作用 git merge-tree 累计冲突预演，防止并发分支互撞。',
+      rmTitle: '共享协作房间与闭环运维', rmSub: 'SQLite + CLAIMS.md 双层协作房、产物保险库、交接包、预算熔断与触发器。',
       kAgents: '在线 Agent', kTasks: '运行中 / 总任务', kMcp: 'MCP 服务', kQueue: '合并队列',
     },
   };
@@ -508,7 +540,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     hostCaps: {},
     selectedAgent: null,
     selectedTask: null,
-    data: { members: [], tasks: [], worktrees: [], merge_queue: [], mcp_hub: null, skills_hub: null, self_improve: { health_score: 100 }, workspaces: [] },
+    data: { members: [], tasks: [], worktrees: [], merge_queue: [], mcp_hub: null, skills_hub: null, self_improve: { health_score: 100 }, workspaces: [], rooms: [], artifacts: [], budget_summary: null, triggers: [], consensus: [] },
     projectDir: '',
     workspaces: [],
   };
@@ -616,15 +648,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
     }
     // Standalone HTTP fallback when previewed at /cockpit
     if (name === 'collab_cockpit_state' || name === 'collab_roster') {
-      const [ov, mcp, sk, ws] = await Promise.all([
+      const [ov, mcp, sk, ws, rm, art, bud, trg, con] = await Promise.all([
         fetch('/api/overview').then((r) => r.json()),
         fetch('/api/mcp-hub').then((r) => r.json()).catch(() => null),
         fetch('/api/skills-hub').then((r) => r.json()).catch(() => null),
         fetch('/api/workspaces').then((r) => r.json()).catch(() => null),
+        fetch('/api/rooms').then((r) => r.json()).catch(() => ({ rooms: [] })),
+        fetch('/api/artifacts?limit=20').then((r) => r.json()).catch(() => ({ artifacts: [] })),
+        fetch('/api/budget').then((r) => r.json()).catch(() => ({ evaluation: null })),
+        fetch('/api/triggers').then((r) => r.json()).catch(() => ({ triggers: [] })),
+        fetch('/api/consensus?limit=12').then((r) => r.json()).catch(() => ({ rounds: [] })),
       ]);
-      return { ...ov, mcp_hub: mcp, skills_hub: sk, workspaces: ws?.projects || [] };
+      return {
+        ...ov,
+        mcp_hub: mcp,
+        skills_hub: sk,
+        workspaces: ws?.projects || [],
+        rooms: rm?.rooms || [],
+        artifacts: art?.artifacts || [],
+        budget_summary: bud?.evaluation || null,
+        triggers: trg?.triggers || [],
+        consensus: con?.rounds || [],
+      };
     }
     if (name === 'collab_self_heal') {
+      if (args.action === 'reconcile_stale') {
+        return fetch('/api/tasks/reconcile-stale', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
+      }
       return fetch('/api/system/self-heal', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
     }
     if (name === 'collab_mcp_find_tools') {
@@ -633,8 +683,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
     if (name === 'collab_mcp_hub' && args.action === 'probe') {
       return fetch('/api/mcp-hub/probe', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ id: args.id }) }).then((r) => r.json());
     }
+    if (name === 'collab_mcp_hub' && args.action === 'import') {
+      return fetch('/api/mcp-hub/import', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ id: args.id }) }).then((r) => r.json());
+    }
     if (name === 'collab_merge_queue' && args.action === 'validate') {
       return fetch('/api/merge-queue/validate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: '{}' }).then((r) => r.json());
+    }
+    if (name === 'collab_merge_queue' && args.action === 'process') {
+      return fetch('/api/merge-queue/process', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
+    }
+    if (name === 'collab_room' && args.action === 'create') {
+      return fetch('/api/rooms/create', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
+    }
+    if (name === 'collab_handoff_pack') {
+      return fetch('/api/handoff-pack', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
+    }
+    if (name === 'collab_triggers' && args.action === 'run') {
+      return fetch('/api/triggers/run', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
     }
     if (name === 'collab_dispatch') {
       const r = await fetch('/api/tasks/dispatch', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ ...args, async: true }) });
@@ -818,7 +883,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   }
 
   function switchTab(id) {
-    const valid = ['radar', 'tasks', 'mcp', 'skills', 'queue'].includes(id) ? id : 'radar';
+    const valid = ['radar', 'tasks', 'mcp', 'skills', 'queue', 'rooms'].includes(id) ? id : 'radar';
     activeTab = valid;
     $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === valid));
     $$('.pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + valid));
@@ -853,6 +918,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     $('#bMcp').textContent = String(mcpCount);
     $('#bSkills').textContent = String(skillsCount);
     $('#bQueue').textContent = String(mq.length);
+    if ($('#bRooms')) $('#bRooms').textContent = String((d.rooms || []).length);
 
     $('#kpiRow').innerHTML = [
       { l: tr('kAgents'), v: online + ' / ' + members.length, c: 'var(--emerald)' },
@@ -884,10 +950,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
       const list = Array.isArray(appState.workspaces) ? appState.workspaces : [];
       const opts = list.map((w) => '<option value="' + esc(w.path) + '">' + esc(w.name || w.path) + '</option>');
       if (appState.projectDir && !list.some((w) => w.path === appState.projectDir)) {
-        opts.unshift('<option value="' + esc(appState.projectDir) + '">' + esc(appState.projectDir.split(/[\\/]/).filter(Boolean).pop() || appState.projectDir) + '</option>');
+        opts.unshift('<option value="' + esc(appState.projectDir) + '">' + esc(appState.projectDir.split(/[\\\\/]/).filter(Boolean).pop() || appState.projectDir) + '</option>');
       }
       qdProj.innerHTML = opts.length ? opts.join('') : '<option value="">No workspace project detected</option>';
-      if (curProj && qdProj.querySelector('option[value="' + curProj.replace(/"/g, '\\"') + '"]')) {
+      if (curProj && Array.from(qdProj.options).some((o) => o.value === curProj)) {
         qdProj.value = curProj;
       } else if (qdProj.options[0]?.value) {
         qdProj.value = qdProj.options[0].value;
@@ -943,6 +1009,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
       ).join('') || '<div class="card-sub">Merge Queue is empty.</div>';
     }
 
+    // Tab 6: Rooms & Ops
+    const rmBox = $('#roomsList');
+    if (rmBox) {
+      const rooms = d.rooms || [];
+      rmBox.innerHTML = rooms.map((rm) =>
+        '<div class="row-item"><div><strong class="mono">' + esc(rm.name) + '</strong> <span class="badge ok">' + esc(rm.active_claims || 0) + ' claims</span> <span class="badge">' + esc(rm.log_entries || 0) + ' logs</span><div class="card-sub">' + esc(rm.goal || rm.room_dir || '') + '</div></div></div>'
+      ).join('') || '<div class="card-sub">No Shared Rooms yet. Create one above.</div>';
+    }
+    const opsBox = $('#opsSummaryList');
+    if (opsBox) {
+      const arts = d.artifacts || [];
+      const bud = d.budget_summary;
+      const trgs = d.triggers || [];
+      const cons = d.consensus || [];
+      opsBox.innerHTML = [
+        '<div class="row-item"><div><strong>Budget 24h</strong> <span class="badge ' + (bud?.action === 'block' ? 'err' : (bud?.action === 'warn' ? 'warn' : 'ok')) + '">' + esc(bud?.action || 'allow') + '</span></div><span class="mono">calls=' + esc(bud?.usage?.global_calls_24h ?? 0) + ' · tokens=' + esc(bud?.usage?.global_tokens_24h ?? 0) + '</span></div>',
+        '<div class="row-item"><div><strong>Artifact Vault</strong> <span class="badge cyan">' + arts.length + '</span></div><span class="card-sub">' + esc(arts.slice(0, 3).map((a) => a.name).join(', ') || 'empty') + '</span></div>',
+        '<div class="row-item"><div><strong>Consensus Rounds</strong> <span class="badge">' + cons.length + '</span></div><span class="card-sub">' + esc(cons[0] ? (cons[0].topic + ' → ' + (cons[0].verdict?.decision || cons[0].status)) : 'none') + '</span></div>',
+        ...trgs.map((t) => '<div class="row-item"><div><strong>Trigger: ' + esc(t.name) + '</strong> <span class="badge">' + esc(t.action) + '</span><div class="card-sub">' + esc(t.last_summary || ('every ' + (t.interval_sec || '-') + 's')) + '</div></div><button type="button" class="btn cyan" data-run-trigger="' + esc(t.trigger_id) + '">Run Now</button></div>'),
+      ].join('');
+    }
+
     if (reducedMotion) drawFleetCanvas();
   }
 
@@ -981,10 +1069,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
       await refreshState();
     } catch (err) { showToast(err.message); }
   });
+  let healArmed = false;
+  let healArmedAt = 0;
+  let healArmTimer = null;
   $('#btnHeal').addEventListener('click', async () => {
     try {
-      const res = await callServer('collab_self_heal', { apply: false });
-      showToast('Self-Heal Preview: ' + (res.before_score ?? '?') + ' → ' + (res.after_score ?? '?') + ' (' + ((res.actions || []).length) + ' healable)');
+      if (!healArmed) {
+        const res = await callServer('collab_self_heal', { apply: false });
+        const count = (res.actions_taken || res.actions || []).length;
+        if (count === 0) {
+          showToast('Health ' + (res.before_score ?? '?') + '/100 · No healable issues');
+          return;
+        }
+        healArmed = true;
+        healArmedAt = Date.now();
+        $('#btnHeal').textContent = 'Confirm Heal?';
+        clearTimeout(healArmTimer);
+        healArmTimer = setTimeout(() => { healArmed = false; $('#btnHeal').textContent = '✚ Heal'; }, 5000);
+        showToast('Preview: ' + (res.before_score ?? '?') + ' → ' + (res.after_score ?? '?') + ' (' + count + ' healable) · Click again within 5s to apply');
+        return;
+      }
+      if (Date.now() - healArmedAt < 400) return;
+      healArmed = false;
+      clearTimeout(healArmTimer);
+      $('#btnHeal').textContent = '✚ Heal';
+      const applied = await callServer('collab_self_heal', { apply: true });
+      showToast('Healed: ' + (applied.before_score ?? '?') + ' → ' + (applied.after_score ?? '?'));
+      await refreshState();
     } catch (err) { showToast(err.message); }
   });
   $('#btnAskHost').addEventListener('click', async () => {
@@ -1032,6 +1143,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   });
 
   $('#btnMcpScan').addEventListener('click', refreshState);
+  $('#btnMcpImportAll')?.addEventListener('click', async () => {
+    showToast('Importing local MCP servers…');
+    try {
+      const res = await callServer('collab_mcp_hub', { action: 'import' });
+      showToast('Imported ' + (res.imported?.length ?? res.imported_count ?? 0) + ' MCP server(s)');
+      await refreshState();
+    } catch (err) { showToast(err.message); }
+  });
   $('#btnSkScan').addEventListener('click', refreshState);
   $('#btnMcpSearch').addEventListener('click', async () => {
     const q = ($('#mcpSearchInput')?.value || '').trim();
@@ -1051,8 +1170,112 @@ button, input, select, textarea { font: inherit; color: inherit; }
       showToast('Speculative merge-tree check complete');
     } catch (err) { showToast(err.message); }
   });
+  let mqArmed = false;
+  let mqArmedAt = 0;
+  let mqArmTimer = null;
+  $('#btnMqProcess')?.addEventListener('click', async () => {
+    if (!mqArmed) {
+      mqArmed = true;
+      mqArmedAt = Date.now();
+      $('#btnMqProcess').textContent = 'Confirm Merge?';
+      clearTimeout(mqArmTimer);
+      mqArmTimer = setTimeout(() => { mqArmed = false; $('#btnMqProcess').textContent = 'Process Queue'; }, 5000);
+      showToast('Click "Confirm Merge?" within 5s to serially merge ready queue items');
+      return;
+    }
+    if (Date.now() - mqArmedAt < 400) return;
+    mqArmed = false;
+    clearTimeout(mqArmTimer);
+    $('#btnMqProcess').textContent = 'Process Queue';
+    try {
+      const res = await callServer('collab_merge_queue', { action: 'process', confirmed: true });
+      showToast('Merge queue processed (' + ((res.merged || []).length) + ' merged)');
+      await refreshState();
+    } catch (err) { showToast(err.message); }
+  });
+  let roomArmedKey = null;
+  let roomArmedAt = 0;
+  let roomArmTimer = null;
+  $('#btnRmCreate')?.addEventListener('click', async () => {
+    const name = ($('#rmNameInput')?.value || '').trim();
+    const goal = ($('#rmGoalInput')?.value || '').trim();
+    if (!name) { showToast('Enter room name first'); return; }
+    const key = name + '::' + goal;
+    try {
+      if (roomArmedKey !== key) {
+        const dry = await callServer('collab_room', { action: 'create', name, goal, confirmed: false });
+        roomArmedKey = key;
+        roomArmedAt = Date.now();
+        $('#btnRmCreate').textContent = 'Confirm Room?';
+        clearTimeout(roomArmTimer);
+        roomArmTimer = setTimeout(() => { roomArmedKey = null; $('#btnRmCreate').textContent = 'Create Room'; }, 6000);
+        const out = $('#opsOut');
+        if (out) { out.hidden = false; out.textContent = JSON.stringify(dry, null, 2); }
+        showToast((dry.already_exists ? 'Existing dir detected! ' : 'Dry-run ready: ') + (dry.files_to_write?.length ?? 0) + ' file(s) · Click "Confirm Room?"');
+        return;
+      }
+      if (Date.now() - roomArmedAt < 400) return;
+      roomArmedKey = null;
+      clearTimeout(roomArmTimer);
+      $('#btnRmCreate').textContent = 'Create Room';
+      const res = await callServer('collab_room', { action: 'create', name, goal, confirmed: true });
+      $('#rmNameInput').value = '';
+      $('#rmGoalInput').value = '';
+      showToast('Room ready: ' + (res.room_name || name));
+      await refreshState();
+    } catch (err) { showToast(err.message); }
+  });
+  $('#btnGenHandoff')?.addEventListener('click', async () => {
+    try {
+      const res = await callServer('collab_handoff_pack', { project_dir: appState.projectDir, save_artifact: true });
+      const out = $('#opsOut');
+      if (out) { out.hidden = false; out.textContent = res.markdown || JSON.stringify(res, null, 2); }
+      showToast('Handoff Pack generated (' + (res.bytes || 0) + 'B)');
+      await refreshState();
+    } catch (err) { showToast(err.message); }
+  });
+  let staleCandidateIds = null;
+  let staleArmedAt = 0;
+  let staleTimer = null;
+  $('#btnReconcileStale')?.addEventListener('click', async () => {
+    if (!staleCandidateIds) {
+      const dry = await callServer('collab_self_heal', { action: 'reconcile_stale', confirmed: false });
+      const ids = Array.isArray(dry.candidates) ? dry.candidates.map((c) => c.task_id).filter(Boolean) : [];
+      if (ids.length === 0) {
+        showToast('Dry-run: 0 aged stale tasks found');
+        return;
+      }
+      staleCandidateIds = ids;
+      staleArmedAt = Date.now();
+      $('#btnReconcileStale').textContent = 'Confirm Clean?';
+      clearTimeout(staleTimer);
+      staleTimer = setTimeout(() => { staleCandidateIds = null; $('#btnReconcileStale').textContent = 'Clean Stale'; }, 5000);
+      showToast('Dry-run: ' + ids.length + ' aged stale task(s) · Click again within 5s');
+      return;
+    }
+    if (Date.now() - staleArmedAt < 400) return;
+    const idsToClean = staleCandidateIds;
+    staleCandidateIds = null;
+    clearTimeout(staleTimer);
+    $('#btnReconcileStale').textContent = 'Clean Stale';
+    try {
+      const res = await callServer('collab_self_heal', { action: 'reconcile_stale', task_ids: idsToClean, confirmed: true });
+      showToast('Reconciled ' + (res.reconciled_count ?? 0) + ' stale tasks');
+      await refreshState();
+    } catch (err) { showToast(err.message); }
+  });
 
   $('#btnTdClose').addEventListener('click', () => { $('#taskDetailCard').hidden = true; });
+  $('#btnTdLogs')?.addEventListener('click', async () => {
+    if (!appState.selectedTask) return;
+    try {
+      const res = appState.mode === 'standalone'
+        ? await fetch('/api/tasks/logs?task_id=' + encodeURIComponent(appState.selectedTask)).then((r) => r.json())
+        : await callServer('collab_poll', { task_id: appState.selectedTask, wait_sec: 0 });
+      const lines = Array.isArray(res.logs) ? res.logs.map((l) => '[' + (l.ts || '') + '] ' + (l.line || '')).join('\\n') : '';
+      $('#tdBody').textContent = lines || res.result_text || res.error_message || JSON.stringify(res, null, 2);
+    } catch (err) { showToast(err.message); }
+  });
   $('#btnTdPoll').addEventListener('click', async () => {
     if (!appState.selectedTask) return;
     try {
@@ -1062,17 +1285,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
     } catch (err) { showToast(err.message); }
   });
   let cancelArmedId = null;
+  let cancelArmedAt = 0;
   let cancelArmTimer = null;
   $('#btnTdCancel').addEventListener('click', async () => {
     if (!appState.selectedTask) return;
     if (cancelArmedId !== appState.selectedTask) {
       cancelArmedId = appState.selectedTask;
+      cancelArmedAt = Date.now();
       clearTimeout(cancelArmTimer);
       $('#btnTdCancel').textContent = 'Confirm Cancel?';
       cancelArmTimer = setTimeout(() => { cancelArmedId = null; $('#btnTdCancel').textContent = 'Cancel'; }, 4000);
       showToast('Click "Confirm Cancel?" within 4s to abort this task');
       return;
     }
+    if (Date.now() - cancelArmedAt < 400) return;
     cancelArmedId = null;
     clearTimeout(cancelArmTimer);
     $('#btnTdCancel').textContent = 'Cancel';
@@ -1110,6 +1336,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
       try {
         const res = await callServer('collab_mcp_hub', { action: 'probe', id });
         showToast(res.detail || ('Probed ' + id));
+        await refreshState();
+      } catch (err) { showToast(err.message); }
+      return;
+    }
+    const trEl = el.closest('[data-run-trigger]');
+    if (trEl) {
+      const trigger_id = trEl.getAttribute('data-run-trigger');
+      showToast('Running trigger ' + trigger_id + '…');
+      try {
+        const res = await callServer('collab_triggers', { action: 'run', trigger_id });
+        showToast(res.summary || 'Trigger finished');
         await refreshState();
       } catch (err) { showToast(err.message); }
       return;
