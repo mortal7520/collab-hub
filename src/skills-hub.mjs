@@ -93,6 +93,25 @@ export function parseFrontmatter(markdownText) {
   return { frontmatter: fm, body: m[2] };
 }
 
+function bufferHasInlineSecret(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length === 0) return false;
+  if (detectInlineSecret(buf.toString('utf8'))) return true;
+  if (buf.includes(0)) {
+    // Decode UTF-16LE and UTF-16BE (with or without BOM) so UTF-16 secrets cannot bypass NUL checks!
+    const leView = (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) ? buf.subarray(2) : buf;
+    if (detectInlineSecret(leView.toString('utf16le'))) return true;
+    const swapped = Buffer.from(buf);
+    for (let i = 0; i + 1 < swapped.length; i += 2) {
+      const tmp = swapped[i];
+      swapped[i] = swapped[i + 1];
+      swapped[i + 1] = tmp;
+    }
+    const beView = (swapped.length >= 2 && swapped[0] === 0xff && swapped[1] === 0xfe) ? swapped.subarray(2) : swapped;
+    if (detectInlineSecret(beView.toString('utf16le'))) return true;
+  }
+  return false;
+}
+
 function sha256Short(text) {
   return createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n'), 'utf8').digest('hex').slice(0, 16);
 }
@@ -142,8 +161,8 @@ function readSkillEntry(skillDir, skillName) {
         const buf = fs.readFileSync(abs);
         const fhash = createHash('sha256').update(buf).digest('hex').slice(0, 16);
         manifestLines.push(`${rel}:${fhash}`);
-        if (!secretInline && !buf.includes(0)) {
-          if (detectInlineSecret(buf.toString('utf8'))) secretInline = true;
+        if (!secretInline && bufferHasInlineSecret(buf)) {
+          secretInline = true;
         }
       } else {
         oversized = true;
@@ -388,7 +407,7 @@ export function syncSkillAcrossClients(db, {
       throw new Error(`Security rule: skill file "${rel}" changed or exceeded limits during verification.`);
     }
     const buf = fs.readFileSync(abs);
-    if (!buf.includes(0) && detectInlineSecret(buf.toString('utf8'))) {
+    if (bufferHasInlineSecret(buf)) {
       throw new Error(`Security rule: inline secret detected inside skill file "${rel}". Remove secrets before syncing.`);
     }
     verifiedManifest.push({ rel, buf });

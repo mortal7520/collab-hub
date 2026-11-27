@@ -273,7 +273,7 @@ export function gradientText(text, fromHex, toHex, colorLevel = 0, opts = {}) {
  * Strictly honours NO_COLOR, TERM=dumb, FORCE_COLOR, COLORTERM=truecolor and
  * `stream.isTTY`. Returns exactly `{ level: 0 | 1 | 2 | 3 }`.
  */
-export function detectColorSupport({ stream = process.stdout, env = process.env } = {}) {
+export function detectColorSupport({ stream = process.stdout, env = process.env, allowPipedAnsi = false } = {}) {
   const e = env || {};
   const has = (key) => Object.prototype.hasOwnProperty.call(e, key) && e[key] !== undefined;
 
@@ -289,12 +289,12 @@ export function detectColorSupport({ stream = process.stdout, env = process.env 
   }
 
   if (String(e.TERM || '').toLowerCase() === 'dumb') return { level: 0 };
-  if (!stream || !stream.isTTY) return { level: 0 };
+  if (!allowPipedAnsi && (!stream || !stream.isTTY)) return { level: 0 };
 
   const colorTerm = String(e.COLORTERM || '').toLowerCase();
   if (colorTerm === 'truecolor' || colorTerm === '24bit') return { level: 3 };
   if (String(e.TERM || '').toLowerCase().includes('256color')) return { level: 2 };
-  return { level: 1 };
+  return { level: allowPipedAnsi ? 3 : 1 };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -354,11 +354,24 @@ function glyphForAgent(id) {
  * @returns {object} snapshot
  */
 export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
-  if (!db || typeof db.prepare !== 'function') {
-    throw new TypeError('collectHudSnapshot(db) requires an open CollabHub SQLite database');
-  }
   const startedNs = process.hrtime.bigint();
   const nowMs = Number.isFinite(now) ? Number(now) : Date.now();
+  if (!db || typeof db.prepare !== 'function') {
+    const durationMs = Number(process.hrtime.bigint() - startedNs) / 1e6;
+    return {
+      generated_at: new Date(nowMs).toISOString(),
+      snapshot_ro: false,
+      empty_db: true,
+      agents: { total: 0, online: 0, busy: 0, cooldown: 0, offline: 0, items: [] },
+      tasks: { total: 0, active: 0, running: 0, queued: 0, stalled: 0, failed: 0, completed: 0, latest_age_ms: null, latest_age_human: '—', latest: null },
+      worktrees: { active: 0, total: 0 },
+      merge_queue: { queued: 0, ready: 0, validating: 0, conflict: 0, failed: 0, merged: 0 },
+      mcp: { registered: 0, healthy: 0, tools: 0 },
+      lessons: { active: 0, total: 0 },
+      health: { score: null, overall: 'no-db', findings: 0, healable: 0 },
+      duration_ms: Math.round(durationMs * 100) / 100,
+    };
+  }
 
   /* ------------------------------ agents ------------------------------- */
   let statuses = [];
@@ -564,8 +577,8 @@ function renderOneLine(snap, { width, level, frame }) {
   const pulse = PULSE_FRAMES[mod(frame, PULSE_FRAMES.length)];
   const sep = ` ${s('│', P.slate)} `;
 
-  const brand = `${s(pulse, P.emerald, { bold: true })} ${gradientText('COLLAB HUB', P.indigo, P.cyan, level, { bold: true })}`;
-  const shortBrand = `${s(pulse, P.emerald, { bold: true })} ${s('HUB', P.indigo, { bold: true })}`;
+  const brand = `${s(pulse, P.emerald, { bold: true })} ${gradientText('COLLAB HUB', P.indigo, P.cyan, level, { bold: true })}${snap.snapshot_ro ? ` ${s('SNAP', P.amber)}` : ''}`;
+  const shortBrand = `${s(pulse, P.emerald, { bold: true })} ${s('HUB', P.indigo, { bold: true })}${snap.snapshot_ro ? ` ${s('SNAP', P.amber)}` : ''}`;
   const healthSeg = `${s('♥', hcolor)}${s(healthGlyphValue(health), hcolor, { bold: true })}`;
 
   const agentSeg = (agents.items || []).slice(0, 5)
@@ -642,7 +655,7 @@ function healthBar(score, width, s) {
 
 function renderCard(snap, { width, level, frame }) {
   const s = makePainter(level);
-  const W = clampInt(width, 34, 78, 68);
+  const W = clampInt(width, 16, 78, 68);
   const inner = W - 2;
   const agents = snap.agents || {};
   const tasks = snap.tasks || {};
@@ -827,13 +840,14 @@ export async function runHudCli(db, {
   let snapshot = collectHudSnapshot(db, { worktreeDir });
   if (context && typeof context === 'object') snapshot.context = context;
 
-  const colorLevel = detectColorSupport({ stream, env }).level;
+  const colorLevel = detectColorSupport({ stream, env, allowPipedAnsi: Boolean(context) }).level;
   let frame = 0;
   let stopped = false;
   let timer = null;
   let cursorHidden = false;
+  let altScreen = false;
 
-  const columns = () => clampInt(width || stream?.columns || 100, 20, 400, 100);
+  const columns = () => clampInt(width || stream?.columns || 100, 10, 400, 100);
   const paint = () => renderStatusLine(snapshot, {
     width: columns(),
     colorLevel,
@@ -845,10 +859,17 @@ export async function runHudCli(db, {
     if (stopped) return;
     stopped = true;
     if (timer) clearInterval(timer);
-    if (cursorHidden) {
-      try { stream.write('\x1b[0m\x1b[?25h'); } catch {}
+    if (cursorHidden || altScreen) {
+      try {
+        stream.write(`\x1b[0m${cursorHidden ? '\x1b[?25h' : ''}${altScreen ? '\x1b[?1049l' : ''}`);
+      } catch {}
     }
-    try { process.off('SIGINT', onSignal); process.off('SIGTERM', onSignal); } catch {}
+    try {
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+      process.off('SIGHUP', onSignal);
+      process.off('exit', stop);
+    } catch {}
   };
 
   const onSignal = () => {
@@ -867,9 +888,15 @@ export async function runHudCli(db, {
 
   const tick = Math.max(100, Math.min(1000, Math.round(Number(intervalMs) || 250)));
   let tickCount = 0;
-  try { stream.write('\x1b[?25l'); cursorHidden = true; } catch {}
+  if (format === 'card') {
+    try { stream.write('\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H'); altScreen = true; cursorHidden = true; } catch {}
+  } else {
+    try { stream.write('\x1b[?25l'); cursorHidden = true; } catch {}
+  }
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal);
+  process.once('exit', stop);
 
   const draw = () => {
     if (stopped) return;

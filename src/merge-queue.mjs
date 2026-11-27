@@ -202,6 +202,11 @@ export function enqueueMergeQueue(db, { taskId, priority = 100, verifyPreset = '
   if (wt.state !== 'active') throw new Error(`Worktree ${safeTask} is state=${wt.state}, expected active`);
   if (!fs.existsSync(wt.worktree_path)) throw new Error(`Worktree directory missing: ${wt.worktree_path}`);
 
+  const existing = db.prepare('SELECT status FROM merge_queue WHERE task_id = ?').get(safeTask);
+  if (existing?.status === 'validating') {
+    throw new Error(`MERGE_IN_FLIGHT: cannot re-enqueue task "${safeTask}" while merge is actively validating.`);
+  }
+
   const dirty = runGit(wt.worktree_path, ['status', '--porcelain']);
   if (dirty) throw new Error(`Worktree ${safeTask} has uncommitted changes; commit them before enqueuing.`);
   const headSha = runGit(wt.worktree_path, ['rev-parse', 'HEAD']);
@@ -219,7 +224,13 @@ export function enqueueMergeQueue(db, { taskId, priority = 100, verifyPreset = '
       check_summary = NULL,
       conflict_files_json = '[]',
       updated_at = excluded.updated_at
+    WHERE merge_queue.status != 'validating'
   `).run(safeTask, wt.repo_dir, wt.branch_name, headSha, wt.base_ref, prio, String(verifyPreset || 'auto'), now, now);
+
+  const after = db.prepare('SELECT status FROM merge_queue WHERE task_id = ?').get(safeTask);
+  if (after?.status === 'validating') {
+    throw new Error(`MERGE_IN_FLIGHT: task "${safeTask}" entered validating state concurrently.`);
+  }
 
   const item = listMergeQueue(db).find((q) => q.task_id === safeTask);
   logEvent(db, {
@@ -233,8 +244,13 @@ export function enqueueMergeQueue(db, { taskId, priority = 100, verifyPreset = '
 
 export function removeMergeQueueItem(db, { taskId }) {
   const safeTask = assertValidTaskId(taskId, 'task_id');
-  const res = db.prepare('DELETE FROM merge_queue WHERE task_id = ?').run(safeTask);
-  if (!res.changes) throw new Error(`Task not in merge queue: ${safeTask}`);
+  const cur = db.prepare('SELECT status FROM merge_queue WHERE task_id = ?').get(safeTask);
+  if (!cur) throw new Error(`Task not in merge queue: ${safeTask}`);
+  if (cur.status === 'validating') {
+    throw new Error(`MERGE_IN_FLIGHT: cannot remove task "${safeTask}" while merge is actively validating.`);
+  }
+  const res = db.prepare("DELETE FROM merge_queue WHERE task_id = ? AND status != 'validating'").run(safeTask);
+  if (!res.changes) throw new Error(`MERGE_IN_FLIGHT: task "${safeTask}" could not be removed because merge is in flight.`);
   logEvent(db, { taskId: safeTask, eventType: 'merge_queue.removed', actor: 'collab-hub', payload: {} });
   return { removed: true, task_id: safeTask };
 }

@@ -19,25 +19,30 @@ export function openHubDb(dbPath = DB_PATH) {
   return db;
 }
 
+const READONLY_FALLBACK_CODES = new Set([5, 8, 10, 14]); // SQLITE_BUSY, SQLITE_READONLY, SQLITE_IOERR, SQLITE_CANTOPEN
+
 /**
  * Fast read-only handle for HUD / TUI renderers.
- * Avoids WAL write locks and falls back to SQLite `immutable=1` over cross-OS
- * network/9P mounts (e.g. WSL2 reading a Windows NTFS hub.db under /mnt/d/...).
+ * - Returns `null` when the DB does not exist yet (never silently creates or migrates a DB!).
+ * - Narrows fallback strictly to I/O/lock/readonly SQLite primary error codes, and tags
+ *   the immutable fallback handle with `__collabHubSnapshot = true` so UIs display a snapshot badge.
  */
 export function openHubDbReadOnly(dbPath = DB_PATH) {
-  if (!fs.existsSync(dbPath)) return openHubDb(dbPath);
+  if (!fs.existsSync(dbPath)) return null;
   try {
     const db = new DatabaseSync(dbPath, { readOnly: true });
     db.exec('PRAGMA busy_timeout = 2000;');
     db.prepare('SELECT 1').get();
+    db.__collabHubSnapshot = false;
     return db;
   } catch (err) {
-    const msg = String(err?.message || err?.errstr || '');
-    if (err?.code === 'ERR_SQLITE_ERROR' || /disk I\/O|readonly|locked|busy/i.test(msg)) {
+    const primaryCode = Number(err?.errcode || 0) & 0xff;
+    if (err?.code === 'ERR_SQLITE_ERROR' && READONLY_FALLBACK_CODES.has(primaryCode)) {
       const normalized = dbPath.replaceAll('\\', '/');
       const uri = `file:${encodeURI(normalized).replaceAll('#', '%23').replaceAll('?', '%3F')}?immutable=1`;
       const db = new DatabaseSync(uri, { readOnly: true });
       db.prepare('SELECT 1').get();
+      db.__collabHubSnapshot = true;
       return db;
     }
     throw err;

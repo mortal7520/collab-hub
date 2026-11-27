@@ -30,7 +30,7 @@ import { collectHudSnapshot, detectColorSupport, renderStatusLine } from '../src
 import { TUI_TABS, collectTuiData, renderTuiFrame } from '../src/tui.mjs';
 import {
   addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
-  listWorktreeComments, processMergeQueue, resolveWorktreeComment, validateMergeQueue,
+  listWorktreeComments, processMergeQueue, removeMergeQueueItem, resolveWorktreeComment, validateMergeQueue,
 } from '../src/merge-queue.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
 import { planDispatch, probeAllMembers } from '../src/prober.mjs';
@@ -2534,6 +2534,90 @@ test('v2.0.1: Codex P1 fixes (Meta-MCP app-only visibility guard, MQ CAS validat
     assert.ok(fs.existsSync(path.join(created.room_dir, 'AGENTS.md')));
     assert.ok(fs.existsSync(path.join(created.room_dir, 'CLAUDE.md')));
     assert.ok(fs.existsSync(path.join(created.room_dir, 'COLLAB-ROOM.md')));
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'CLAIMS.md')));
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'ROOM-LOG.md')));
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'inbox')));
+    assert.match(fs.readFileSync(path.join(created.room_dir, 'CLAUDE.md'), 'utf8'), /@AGENTS\.md/);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v2.1.0: 5-agent adversarial fixes (DNS loopback SSRF, Meta-MCP cache-miss visibility, MQ MERGE_IN_FLIGHT, UTF-16 secret scan, AbortSignal, RO null DB, piped ANSI HUD & Cockpit picker)', async () => {
+  const env = makeTempEnv();
+  const { openHubDbReadOnly } = await import('../src/db.mjs');
+  const { createCollabRoom } = await import('../src/workspace-room.mjs');
+  try {
+    // 1. Remote hostname cannot bypass via IPv4-mapped loopback or CGNAT; explicit loopback stays allowed
+    await assert.rejects(() => assertSafeRemoteUrl('https://[::ffff:127.0.0.1]/mcp'), /SSRF guard/i);
+    await assert.rejects(() => assertSafeRemoteUrl('https://100.64.0.1/mcp'), /SSRF guard/i);
+    const localOk = await assertSafeRemoteUrl('http://127.0.0.1:5291/mail');
+    assert.equal(localOk.host, '127.0.0.1');
+
+    // 2. Meta-MCP fails closed when tool cache is missing/empty (live probes and rejects missing/app-only tools)
+    const fakeMcpScript = path.join(env.dir, 'fake-app-mcp.mjs');
+    fs.writeFileSync(fakeMcpScript, `
+      import readline from 'node:readline';
+      const rl = readline.createInterface({ input: process.stdin });
+      rl.on('line', (line) => {
+        const m = JSON.parse(line);
+        if (m.method === 'initialize') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2024-11-05', serverInfo: { name: 'fake' } } }) + '\\n');
+        else if (m.method === 'tools/list') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'ui_secret', _meta: { ui: { visibility: ['app'] } } }] } }) + '\\n');
+      });
+    `);
+    registerMcpServer(env.db, { id: 'uncached-srv', name: 'Uncached Server', transport: 'stdio', command: process.execPath, args: [fakeMcpScript] });
+    await assert.rejects(() => callMcpServerTool(env.db, { serverId: 'uncached-srv', toolName: 'ui_secret' }), /APP_ONLY_TOOL_FORBIDDEN/);
+    await assert.rejects(() => callMcpServerTool(env.db, { serverId: 'uncached-srv', toolName: 'nonexistent' }), /TOOL_NOT_FOUND/);
+
+    // 3. Merge Queue blocks re-enqueue & removal while status === 'validating'
+    const now = new Date().toISOString();
+    env.db.prepare(`
+      INSERT INTO worktrees (task_id, member, repo_dir, worktree_path, wsl_path, branch_name, base_ref, state, created_at, updated_at)
+      VALUES ('t-lock', 'dsh', ?, ?, ?, 'collab/t-lock', 'main', 'active', ?, ?)
+    `).run(env.proj, env.proj, env.proj, now, now);
+    env.db.prepare(`
+      INSERT INTO merge_queue (task_id, repo_dir, branch_name, base_ref, head_sha, priority, status, updated_at, created_at)
+      VALUES ('t-lock', ?, 'collab/t-lock', 'main', 'deadbeef', 100, 'validating', ?, ?)
+    `).run(env.proj, now, now);
+    assert.throws(() => enqueueMergeQueue(env.db, { taskId: 't-lock' }), /MERGE_IN_FLIGHT/);
+    assert.throws(() => removeMergeQueueItem(env.db, { taskId: 't-lock' }), /MERGE_IN_FLIGHT/);
+
+    // 4. UTF-16LE secret in skill sub-file is caught despite NUL bytes
+    const sUtf16 = path.join(env.dir, 'sk-u16');
+    const sUtf16Dst = path.join(env.dir, 'sk-u16-dst');
+    fs.mkdirSync(path.join(sUtf16, 'u16-skill'), { recursive: true });
+    fs.writeFileSync(path.join(sUtf16, 'u16-skill', 'SKILL.md'), '---\nname: u16-skill\n---\nClean\n');
+    const u16Buf = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('token=sk-proj-1234567890abcdefghijklmnop', 'utf16le')]);
+    fs.writeFileSync(path.join(sUtf16, 'u16-skill', 'secret.txt'), u16Buf);
+    assert.throws(() => syncSkillAcrossClients(env.db, {
+      skillName: 'u16-skill', sourceClient: 'a', targetClients: ['b'], confirmed: false,
+      skillAdapters: [{ id: 'a', name: 'A', dirs: [sUtf16] }, { id: 'b', name: 'B', dirs: [sUtf16Dst] }],
+    }), /inline secret/i);
+
+    // 5. handleToolCall honors AbortSignal immediately
+    await assert.rejects(() => handleToolCall(env.db, 'collab_roster', {}, { signal: AbortSignal.abort(new Error('CANCELLED_TEST')) }), /CANCELLED_TEST/);
+
+    // 6. openHubDbReadOnly returns null on missing DB without creating files
+    const missingDbPath = path.join(env.dir, 'never-created', 'hub.db');
+    assert.equal(openHubDbReadOnly(missingDbPath), null);
+    assert.equal(fs.existsSync(path.dirname(missingDbPath)), false);
+
+    // 7. Piped Claude Code statusLine keeps ANSI colors unless NO_COLOR is set
+    assert.ok(detectColorSupport({ stream: { isTTY: false }, env: {}, allowPipedAnsi: true }).level >= 1);
+    assert.equal(detectColorSupport({ stream: { isTTY: false }, env: { NO_COLOR: '1' }, allowPipedAnsi: true }).level, 0);
+
+    // 8. Cockpit HTML includes project picker, double-click guard, standalone Poll/Cancel/Skill routes & valid JS
+    const cockpitHtml = buildCockpitAppHtml();
+    assert.ok(cockpitHtml.includes('id="qdProject"') && cockpitHtml.includes('dispatchInFlight') && cockpitHtml.includes('/api/tasks/poll'));
+    const { Script } = await import('node:vm');
+    for (const m of cockpitHtml.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)) new Script(m[1]);
+
+    // 9. Shared Room rejects symlink/directory outside jail & returns per-file dry-run plan
+    const dryPlan = await createCollabRoom(env.db, {
+      name: 'sprint-alpha', workspaceRoot: env.ws, confirmed: false,
+      discoverDeps: { probeLocalEndpoint: async (e) => ({ ...e, reachable: false, models: [] }), locateBinary: async () => null },
+    });
+    assert.ok(Array.isArray(dryPlan.files_plan) && dryPlan.files_plan.some((f) => f.file === 'CLAIMS.md' && f.action === 'write'));
   } finally {
     env.cleanup();
   }

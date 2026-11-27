@@ -9,7 +9,7 @@ import {
   cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, reconcileTask, recordNativeHandoff,
 } from './executors.mjs';
 import { discoverLocalAgents } from './discovery.mjs';
-import { createHotBackup, runSystemDoctor } from './doctor.mjs';
+import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
 import { COCKPIT_RESOURCE_URI, MCP_APP_MIME_TYPE, buildCockpitAppHtml, formatCyberHudCard } from './mcp-app-ui.mjs';
 import {
@@ -735,10 +735,12 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
   const mcp_hub = buildMcpHubSnapshot(db);
   const skills_hub = buildSkillsRulesSnapshot({ projectDir: projectDir || WORKSPACE_ROOT });
   const self_improve = getSelfImproveSummary(db);
+  const workspaces = listWorkspaceProjects(WORKSPACE_ROOT).slice(0, 30);
   return {
     version: APP_VERSION,
     initial_tab: tab || 'radar',
     project_dir: projectDir || WORKSPACE_ROOT,
+    workspaces,
     generated_at: new Date().toISOString(),
     members,
     tasks,
@@ -751,19 +753,24 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
   };
 }
 
-export async function handleToolCall(db, name, args = {}) {
+export async function handleToolCall(db, name, args = {}, opts = {}) {
+  const signal = opts?.signal || null;
+  signal?.throwIfAborted?.();
   switch (name) {
     case 'collab_cockpit':
     case 'collab_cockpit_state':
       return buildCockpitSnapshot(db, { tab: args.tab || 'radar', projectDir: args.project_dir || WORKSPACE_ROOT });
-    case 'collab_roster':
+    case 'collab_roster': {
+      const probed = await probeAllMembers(db, { desktopObservations: args.desktop_observations, signal });
+      signal?.throwIfAborted?.();
       return {
-        ...(await probeAllMembers(db, { desktopObservations: args.desktop_observations })),
+        ...probed,
         agents: listAgents(db, { includeDisabled: true }),
         toolkit: getToolkitStatus(),
         dashboard_url: `http://${DASHBOARD_HOST}:${DASHBOARD_PORT}`,
         mail_ui_url: `${MAIL_BASE_URL}/mail`,
       };
+    }
     case 'collab_plan':
       return planDispatch(db, {
         role: args.role,

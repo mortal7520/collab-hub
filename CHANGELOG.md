@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.1.0 (2026-11-27)
+
+**5-Agent Concurrent Adversarial Security Hardening, Shared Collaboration Room Protocol & Host-Native UX Fixes — audited jointly by `Claude Desktop` (`d4296042`), `Codex Desktop` (`01a21e03`), `WSL DSH` (`hrun-mwzct42f-e35eb5`), `Cloud Muse` (`5de9ea83dcf0196250f6`), and `AGY`.**
+
+### Security & Integrity Hardening
+- **Remote DNS & Loopback / CGNAT SSRF Guard** (`src/mcp-hub.mjs`): remote DNS resolutions to `127.0.0.0/8`, `::1`, or RFC 6598 `100.64.0.0/10` are now strictly rejected (while explicit local loopback URLs remain supported), with connection-time DNS pinning preserved.
+- **Meta-MCP App-Only Visibility Fail-Closed** (`src/mcp-hub.mjs`): on cached catalog miss in `callMcpServerTool`, performs live `tools/list` inspection and blocks `visibility: ["app"]` tools with `APP_ONLY_TOOL_FORBIDDEN`.
+- **Merge Queue Claim & Re-Enqueue Isolation** (`src/merge-queue.mjs`): blocks `enqueueMergeQueue` and `removeMergeQueueItem` with `MERGE_IN_FLIGHT` while `status = 'validating'`.
+- **UTF-16 Skill Secret Scan & Bounded Manifest** (`src/skills-hub.mjs`): scans UTF-8, UTF-16LE, and UTF-16BE supporting files so NUL bytes never bypass secret detection.
+- **Shared Room Symlink/Junction Jail & Protocol** (`src/workspace-room.mjs`, `src/discovery.mjs`): canonicalizes paths via `fs.realpathSync`, forbids symlinks/junctions, switches WSL CLI dispatch to `--exec` without shell interpolation, uses safe async desktop launcher (`open -a` on macOS), and initializes `COLLAB-ROOM.md` + `AGENTS.md` + `CLAUDE.md` (`@AGENTS.md`) + `CLAIMS.md` + `ROOM-LOG.md` + `inbox/`.
+- **MCP Cancellation Signal Propagation** (`src/mcp-server.mjs`, `src/prober.mjs`): passes `AbortSignal` into `handleToolCall` and `probeAllMembers` so `notifications/cancelled` aborts in-flight tool work cleanly.
+
+### Host-Native Runtime & UX Fixes
+- **WSL2 Read-Only DB & Cross-OS Paths** (`src/db.mjs`, `src/config.mjs`): `openHubDbReadOnly` returns `null` when DB is absent (zero side-effect DB creation), narrows immutable fallback to I/O/lock/readonly SQLite error codes, surfaces `SNAP` badge in HUD, and normalizes all 7 env-configured paths.
+- **Claude Code Colored StatusLine & TUI/HUD Ergonomics** (`src/hud.mjs`, `src/tui.mjs`): keeps ANSI colors when Claude Code pipes `statusLine` JSON on stdin (while honoring `NO_COLOR`/`TERM=dumb`), enters alternate screen on `hud --watch --format card`, clamps tiny terminals to actual rows/cols with `SIGHUP` restoration.
+- **SEP-1865 Cockpit Quick Dispatch & Standalone Parity** (`src/mcp-app-ui.mjs`): adds required Workspace Project picker (no `'.'` fallback), double-click `dispatchInFlight` + client `task_id` guard, standalone Poll / Cancel / Skill Dry-Run HTTP routes, and accurate `60fps · live` / `static · paused` status badge.
+
 ## v2.0.0 (2026-11-27)
 
 **Host-Native Animated Cockpits Everywhere: 60fps SEP-1865 MCP App Cockpit inside Antigravity / Claude Desktop / Codex Desktop, 24-bit TrueColor Animated Terminal TUI & Sub-10ms StatusLine HUD for Claude Code / Codex CLI / WSL DSH, plus 6 Team-Audited Security & Protocol Fixes — built & adversarially audited concurrently by `AGY` + `WSL DSH` + `Cloud Muse`.**

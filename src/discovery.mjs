@@ -106,29 +106,28 @@ function getDesktopAppCandidates(envObj = process.env) {
   }
   return [
     { id: 'antigravity', name: 'Antigravity CLI', paths: [path.join(home, '.local', 'bin', 'agy')], launch_args: (dir) => [dir] },
+    { id: 'codex-cli', name: 'Codex CLI', paths: [path.join(home, '.local', 'bin', 'codex')], launch_args: (dir) => [dir] },
+    { id: 'claude-cli', name: 'Claude Code CLI', paths: [path.join(home, '.local', 'bin', 'claude')], launch_args: (dir) => ['--add-dir', dir] },
     { id: 'vscode', name: 'VS Code', paths: ['/usr/bin/code', '/usr/local/bin/code'], launch_args: (dir) => [dir] },
   ];
 }
 
-async function discoverWslClis(registeredIds, envObj = process.env) {
+async function discoverWslClis(registeredIds, _envObj = process.env) {
   if (process.platform !== 'win32' || !INTEGRATIONS.wslDistro || !INTEGRATIONS.wslUser) return [];
   const distro = INTEGRATIONS.wslDistro;
   const user = INTEGRATIONS.wslUser;
   const wslCandidates = [
-    { id: 'wsl-claude-cli', bin: 'claude', name: 'WSL Claude Code CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer', 'synthesizer'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
-    { id: 'wsl-codex-cli', bin: 'codex', name: 'WSL Codex CLI', roles: ['planner', 'researcher', 'implementer', 'tester', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--', p, 'exec', '--skip-git-repo-check', '{{prompt}}'] },
-    { id: 'wsl-agy-cli', bin: 'agy', name: 'WSL Antigravity CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
-    { id: 'wsl-cursor-cli', bin: 'cursor-agent', name: 'WSL Cursor Agent CLI', roles: ['implementer', 'reviewer', 'researcher'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
+    { id: 'wsl-claude-cli', bin: 'claude', name: 'WSL Claude Code CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer', 'synthesizer'], args: (p) => ['-d', distro, '-u', user, '--exec', p, '-p', '{{prompt}}'] },
+    { id: 'wsl-codex-cli', bin: 'codex', name: 'WSL Codex CLI', roles: ['planner', 'researcher', 'implementer', 'tester', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--exec', p, 'exec', '--skip-git-repo-check', '{{prompt}}'] },
+    { id: 'wsl-agy-cli', bin: 'agy', name: 'WSL Antigravity CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--exec', p, '-p', '{{prompt}}'] },
+    { id: 'wsl-cursor-cli', bin: 'cursor-agent', name: 'WSL Cursor Agent CLI', roles: ['implementer', 'reviewer', 'researcher'], args: (p) => ['-d', distro, '-u', user, '--exec', p, '-p', '{{prompt}}'] },
   ];
-  const probeCmd = wslCandidates.map((c) => {
-    const p = `/home/${user}/.local/bin/${c.bin}`;
-    return `[ -x "${p}" ] && echo "${p}"`;
-  }).join('; ');
+  const probePaths = wslCandidates.map((c) => `/home/${user}/.local/bin/${c.bin}`);
   try {
     const { stdout } = await execFileAsync(
       'wsl.exe',
-      ['-d', distro, '-u', user, '--', 'sh', '-c', probeCmd],
-      { encoding: 'utf8', timeout: 3000, windowsHide: true },
+      ['-d', distro, '-u', user, '--exec', 'sh', '-c', 'for p in "$@"; do [ -x "$p" ] && echo "$p"; done', 'sh', ...probePaths],
+      { encoding: 'utf8', timeout: 5000, windowsHide: true },
     ).catch((err) => ({ stdout: String(err?.stdout || '') }));
     const foundSet = new Set(stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean));
     return wslCandidates
@@ -255,6 +254,7 @@ export async function discoverLocalAgents(db, deps = {}) {
       name: app.name,
       found: Boolean(foundPath),
       path: foundPath,
+      launch_args: app.launch_args,
     };
   });
 

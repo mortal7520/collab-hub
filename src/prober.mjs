@@ -147,13 +147,15 @@ export async function probeMailHub({ force = false } = {}) {
   return cachedMailHealth;
 }
 
-export async function probeAllMembers(db, { desktopObservations = null, runner = runQuiet } = {}) {
+export async function probeAllMembers(db, { desktopObservations = null, runner = runQuiet, signal = null } = {}) {
+  signal?.throwIfAborted?.();
   const [dshRes, museRes, claudeCli, mailHealth] = await Promise.all([
     probeDsh(runner),
     probeMuse(runner),
     probeClaudeCliProcess(runner),
     probeMailHub(),
   ]);
+  signal?.throwIfAborted?.();
 
   upsertMemberStatus(db, dshRes);
   upsertMemberStatus(db, museRes);

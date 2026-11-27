@@ -84,8 +84,9 @@ function isPrivateOrLinkLocalIp(ip) {
   const clean = String(ip).trim().replace(/^\[|\]$/g, '').toLowerCase();
   if (net.isIPv4(clean)) {
     const parts = clean.split('.').map(Number);
-    if (parts[0] === 127) return false; // loopback allowed for local MCP servers
+    if (parts[0] === 127) return true; // remote hostnames resolving to loopback are blocked (explicit loopback URLs bypass earlier)
     if (parts[0] === 10) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true; // RFC 6598 CGNAT / Tailscale
     if (parts[0] === 169 && parts[1] === 254) return true; // cloud metadata / link-local
     if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
     if (parts[0] === 192 && parts[1] === 168) return true;
@@ -93,7 +94,7 @@ function isPrivateOrLinkLocalIp(ip) {
     return false;
   }
   if (net.isIPv6(clean)) {
-    if (clean === '::1') return false;
+    if (clean === '::1') return true;
     // Unwrap IPv4-mapped IPv6 literals (both dotted ::ffff:169.254.169.254 and hex ::ffff:a9fe:a9fe)
     const v4Dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(clean);
     if (v4Dotted) return isPrivateOrLinkLocalIp(v4Dotted[1]);
@@ -1047,15 +1048,6 @@ export async function callMcpServerTool(db, {
   if (!server) throw new Error(`MCP server not found: ${safeId}`);
   if (!server.enabled) throw new Error(`MCP server "${safeId}" is disabled`);
 
-  // Enforce SEP-1865 app-only visibility against cached probe catalog
-  if (callerRole !== 'app') {
-    const cachedTool = (Array.isArray(server.last_probe_tools) ? server.last_probe_tools : [])
-      .find((t) => t.name === safeTool);
-    if (cachedTool && isAppOnlyTool(cachedTool)) {
-      throw new Error(`APP_ONLY_TOOL_FORBIDDEN: tool "${safeTool}" on server "${safeId}" is restricted to MCP App UI callers (visibility: ["app"]).`);
-    }
-  }
-
   const clean = validateMcpServerSpec({
     id: server.id,
     name: server.name,
@@ -1067,6 +1059,27 @@ export async function callMcpServerTool(db, {
     header_keys: server.header_keys,
     group_name: server.group_name,
   });
+
+  // Enforce SEP-1865 app-only visibility fail-closed: check cached catalog first, and on cache miss live-probe tools/list!
+  if (callerRole !== 'app') {
+    let toolMeta = (Array.isArray(server.last_probe_tools) ? server.last_probe_tools : [])
+      .find((t) => t.name === safeTool) || null;
+    if (!toolMeta) {
+      const listRes = await executeMcpJsonRpc(clean, {
+        method: 'tools/list',
+        params: {},
+        timeoutMs: Math.min(8000, Math.max(2000, Number(timeoutMs) || 8000)),
+      });
+      const liveTools = Array.isArray(listRes.result?.tools) ? listRes.result.tools : [];
+      toolMeta = liveTools.find((t) => t.name === safeTool) || null;
+      if (!toolMeta) {
+        throw new Error(`TOOL_NOT_FOUND: tool "${safeTool}" is not advertised by MCP server "${safeId}".`);
+      }
+    }
+    if (isAppOnlyTool(toolMeta)) {
+      throw new Error(`APP_ONLY_TOOL_FORBIDDEN: tool "${safeTool}" on server "${safeId}" is restricted to MCP App UI callers (visibility: ["app"]).`);
+    }
+  }
 
   const t0 = Date.now();
   const argsObj = toolArgs && typeof toolArgs === 'object' && !Array.isArray(toolArgs) ? toolArgs : {};

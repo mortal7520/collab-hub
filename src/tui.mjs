@@ -703,8 +703,9 @@ export function renderTuiFrame(data, uiState = {}) {
   const d = data || {};
   const level = clampInt(uiState.colorLevel ?? d.color_level ?? d.colorLevel ?? 0, 0, 3, 0);
   const s = makePainter(level);
-  const W = Math.max(24, Math.min(220, clampInt(uiState.width ?? d.width, 20, 221, 100) - 1));
-  const H = Math.max(20, Math.min(80, clampInt(uiState.height ?? d.height, 20, 80, 32)));
+  const W = Math.max(20, Math.min(220, clampInt(uiState.width ?? d.width, 20, 221, 100) - 1));
+  const targetH = clampInt(uiState.height ?? d.height, 4, 80, 32);
+  const H = Math.max(4, Math.min(80, targetH));
   const inner = W - 2;
   const frame = Math.max(0, Math.floor(Number(uiState.frame) || 0));
   const tab = clampInt(uiState.tab, 0, TUI_TABS.length - 1, 0);
@@ -715,7 +716,7 @@ export function renderTuiFrame(data, uiState = {}) {
   const score = Number.isFinite(health.score) ? health.score : null;
   const hcolor = healthColor(score);
   const pulse = PULSE_FRAMES[mod(frame, PULSE_FRAMES.length)];
-  const ctx = { d, s, inner, contentH: Math.max(6, H - 9), frame, tab, selected, level };
+  const ctx = { d, s, inner, contentH: Math.max(1, H - 9), frame, tab, selected, level };
 
   const lines = [];
   lines.push(`${s('╭', P.indigo)}${s('─'.repeat(W - 2), P.slate)}${s('╮', P.indigo)}`);
@@ -768,6 +769,11 @@ export function renderTuiFrame(data, uiState = {}) {
   lines.push(boxRow(inner, keyLeft, keyRight, s));
   lines.push(`${s('╰', P.indigo)}${s('─'.repeat(W - 2), P.slate)}${s('╯', P.indigo)}`);
 
+  if (lines.length > H) {
+    const bodySlots = Math.max(0, H - 2);
+    const trimmed = [lines[0], ...lines.slice(1, 1 + bodySlots), lines[lines.length - 1]];
+    return trimmed.slice(0, H).join('\n');
+  }
   return lines.join('\n');
 }
 
@@ -1177,8 +1183,8 @@ function buildDemoData({ colorLevel = 0, width = 100, height = 32 } = {}) {
  */
 export async function startInteractiveTui(db, { demo = false, fps = 8, width, height, projectDir = process.cwd() } = {}) {
   const colorLevel = detectColorSupport({ stream: process.stdout, env: process.env }).level;
-  let cols = Math.max(24, clampInt(width, 24, 400, process.stdout.columns || 100));
-  let rows = Math.max(20, clampInt(height, 20, 100, process.stdout.rows || 32));
+  let cols = Math.max(1, clampInt(width, 1, 400, process.stdout.columns || 100));
+  let rows = Math.max(1, clampInt(height, 1, 100, process.stdout.rows || 32));
   const rate = clampInt(fps, 1, 10, 8);
   const interval = Math.max(100, Math.round(1000 / rate));
   const state = { tab: 0, selected: 0, frame: 0 };
@@ -1229,6 +1235,9 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
       try { out.off('resize', onResize); } catch {}
       try { process.off('SIGINT', finish); } catch {}
       try { process.off('SIGTERM', finish); } catch {}
+      try { process.off('SIGHUP', finish); } catch {}
+      try { process.off('exit', finish); } catch {}
+      try { process.off('uncaughtException', onFatal); } catch {}
       try { input.setRawMode(false); } catch {}
       try { input.pause(); } catch {}
       try { out.write('\x1b[0m\x1b[?25h\x1b[?1049l'); } catch {}
@@ -1293,8 +1302,8 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
     };
 
     const onResize = () => {
-      cols = Math.max(24, clampInt(out.columns, 24, 400, cols));
-      rows = Math.max(20, clampInt(out.rows, 20, 100, rows));
+      cols = Math.max(1, clampInt(out.columns, 1, 400, cols));
+      rows = Math.max(1, clampInt(out.rows, 1, 100, rows));
       draw(true);
     };
 
@@ -1315,6 +1324,7 @@ export async function startInteractiveTui(db, { demo = false, fps = 8, width, he
     out.on('resize', onResize);
     process.on('SIGINT', finish);
     process.on('SIGTERM', finish);
+    process.on('SIGHUP', finish);
     process.once('exit', finish);
     process.once('uncaughtException', onFatal);
 

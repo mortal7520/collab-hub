@@ -40,12 +40,12 @@ export const APP_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_APP_ROOT || 
 export const WORKSPACE_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_WORKSPACE_ROOT || LOCAL_BOOT.workspaceRoot) || process.cwd();
 export const DATA_DIR = path.join(APP_ROOT, 'data');
 export const DB_PATH = normalizeCrossOsPath(process.env.COLLAB_HUB_DB_PATH) || path.join(DATA_DIR, 'hub.db');
-export const MEMORY_DIR = process.env.COLLAB_HUB_MEMORY_DIR || path.join(DATA_DIR, 'memory');
-export const WORKTREE_DIR = process.env.COLLAB_HUB_WORKTREE_DIR || path.join(APP_ROOT, 'worktrees');
+export const MEMORY_DIR = normalizeCrossOsPath(process.env.COLLAB_HUB_MEMORY_DIR) || path.join(DATA_DIR, 'memory');
+export const WORKTREE_DIR = normalizeCrossOsPath(process.env.COLLAB_HUB_WORKTREE_DIR) || path.join(APP_ROOT, 'worktrees');
 export const LOG_DIR = path.join(APP_ROOT, 'logs');
 export const PAYLOAD_DIR = path.join(DATA_DIR, 'muse-payloads');
-export const POLICY_PATH = process.env.COLLAB_HUB_POLICY_PATH || path.join(DATA_DIR, 'hub-policy.json');
-export const INTEGRATIONS_PATH = process.env.COLLAB_HUB_INTEGRATIONS_PATH || path.join(DATA_DIR, 'integrations.json');
+export const POLICY_PATH = normalizeCrossOsPath(process.env.COLLAB_HUB_POLICY_PATH) || path.join(DATA_DIR, 'hub-policy.json');
+export const INTEGRATIONS_PATH = normalizeCrossOsPath(process.env.COLLAB_HUB_INTEGRATIONS_PATH) || path.join(DATA_DIR, 'integrations.json');
 
 export const DASHBOARD_HOST = '127.0.0.1';
 export const DASHBOARD_PORT = Number(process.env.COLLAB_HUB_PORT || 5290);

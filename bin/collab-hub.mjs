@@ -349,6 +349,7 @@ if (cmd === 'mcp') {
         'Commands:',
         '  tui [--demo --fps 8]                         Launch 24-bit TrueColor animated Terminal Cockpit (Codex/Claude/DSH)',
         '  hud [--format statusline|card|json --watch]  Sub-100ms live StatusLine & Cyber-HUD (Claude Code / tmux / WSL)',
+        '  room create <name> [--goal G --cli C --launch A --confirm]  Create shared Git collab room + register/launch agents',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
         '  mcp                                          Start the 45-tool SEP-1865 MCP Apps stdio server (AGY/Claude/Codex)',
         '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub & Meta-MCP tool discovery',
@@ -381,6 +382,6 @@ if (cmd === 'mcp') {
     console.error(JSON.stringify({ ok: false, error: String(err.message || err) }, null, 2));
     process.exitCode = 1;
   } finally {
-    db.close();
+    db?.close();
   }
 }

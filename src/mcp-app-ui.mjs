@@ -388,13 +388,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
         </div>
       </div>
       <div class="search-bar">
-        <select class="input" id="qdMember" style="max-width:135px"><option value="auto">auto</option></select>
-        <select class="input" id="qdRole" style="max-width:125px">
+        <select class="input" id="qdMember" style="max-width:130px"><option value="auto">auto</option></select>
+        <select class="input" id="qdRole" style="max-width:120px">
           <option value="researcher">researcher</option>
           <option value="reviewer">reviewer</option>
           <option value="implementer">implementer</option>
           <option value="tester">tester</option>
         </select>
+        <select class="input" id="qdProject" style="max-width:165px"><option value="">Select project…</option></select>
         <input class="input" id="qdPrompt" placeholder="Enter bounded goal & deliverable…" />
         <button type="button" class="btn primary" id="btnQdSend" data-i18n="qdSend">Dispatch</button>
       </div>
@@ -507,8 +508,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     hostCaps: {},
     selectedAgent: null,
     selectedTask: null,
-    data: { members: [], tasks: [], worktrees: [], merge_queue: [], mcp_hub: null, skills_hub: null, self_improve: { health_score: 100 } },
+    data: { members: [], tasks: [], worktrees: [], merge_queue: [], mcp_hub: null, skills_hub: null, self_improve: { health_score: 100 }, workspaces: [] },
     projectDir: '',
+    workspaces: [],
   };
 
   let toastTimer = null;
@@ -570,7 +572,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
     if (sc.mcp_hub_summary && !appState.data.mcp_hub) appState.data.mcp_hub_summary = sc.mcp_hub_summary;
     if (sc.skills_hub) appState.data.skills_hub = sc.skills_hub;
     if (sc.self_improve) appState.data.self_improve = sc.self_improve;
+    if (Array.isArray(sc.workspaces)) appState.workspaces = sc.workspaces;
     if (sc.project_dir) appState.projectDir = sc.project_dir;
+    if (!appState.projectDir && appState.workspaces.length) appState.projectDir = appState.workspaces[0].path || '';
     if (sc.initial_tab) switchTab(sc.initial_tab);
     renderAll();
   }
@@ -612,12 +616,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
     }
     // Standalone HTTP fallback when previewed at /cockpit
     if (name === 'collab_cockpit_state' || name === 'collab_roster') {
-      const [ov, mcp, sk] = await Promise.all([
+      const [ov, mcp, sk, ws] = await Promise.all([
         fetch('/api/overview').then((r) => r.json()),
         fetch('/api/mcp-hub').then((r) => r.json()).catch(() => null),
         fetch('/api/skills-hub').then((r) => r.json()).catch(() => null),
+        fetch('/api/workspaces').then((r) => r.json()).catch(() => null),
       ]);
-      return { ...ov, mcp_hub: mcp, skills_hub: sk };
+      return { ...ov, mcp_hub: mcp, skills_hub: sk, workspaces: ws?.projects || [] };
     }
     if (name === 'collab_self_heal') {
       return fetch('/api/system/self-heal', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify(args) }).then((r) => r.json());
@@ -632,7 +637,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
       return fetch('/api/merge-queue/validate', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: '{}' }).then((r) => r.json());
     }
     if (name === 'collab_dispatch') {
-      return fetch('/api/tasks/dispatch', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ ...args, async: true }) }).then((r) => r.json());
+      const r = await fetch('/api/tasks/dispatch', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ ...args, async: true }) });
+      const data = await r.json();
+      if (!r.ok || data.error) throw new Error(data.error || ('HTTP ' + r.status));
+      return data;
+    }
+    if (name === 'collab_poll') {
+      return fetch('/api/tasks/poll', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ task_id: args.task_id, wait_sec: args.wait_sec ?? 0 }) }).then((r) => r.json());
+    }
+    if (name === 'collab_cancel') {
+      return fetch('/api/tasks/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ task_id: args.task_id, reason: args.reason }) }).then((r) => r.json());
+    }
+    if (name === 'collab_skills_hub' && args.action === 'sync_skill') {
+      return fetch('/api/skills-hub/sync-skill', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' }, body: JSON.stringify({ skill_name: args.skill_name, source_client: args.source_client, confirmed: false }) }).then((r) => r.json());
     }
     throw new Error('Action requires live MCP App host');
   }
@@ -659,7 +676,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
     });
   }
 
+  function syncCanvasBadge() {
+    const badge = $('#canvasFps');
+    if (badge) badge.textContent = shouldAnimate() ? '60fps · live' : (reducedMotion ? 'reduced-motion' : 'static · paused');
+  }
+
   document.addEventListener('visibilitychange', () => {
+    syncCanvasBadge();
     if (shouldAnimate()) scheduleCanvas();
   });
 
@@ -779,6 +802,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
       ctx.fillText(String(np.m.member || '').toUpperCase().slice(0, 5), np.x, np.y + 0.5);
     }
 
+    syncCanvasBadge();
     if (shouldAnimate()) {
       animPhase += 0.025;
       scheduleCanvas();
@@ -798,6 +822,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     activeTab = valid;
     $$('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === valid));
     $$('.pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + valid));
+    syncCanvasBadge();
     if (valid === 'radar') drawFleetCanvas();
   }
 
@@ -852,6 +877,25 @@ button, input, select, textarea { font: inherit; color: inherit; }
       qdSel.innerHTML = '<option value="auto">auto (smart)</option>' +
         members.filter((m) => m.driver !== 'desktop-native').map((m) => '<option value="' + esc(m.member) + '">' + esc(m.member) + ' (' + esc(m.state) + ')</option>').join('');
       qdSel.value = cur;
+    }
+    const qdProj = $('#qdProject');
+    if (qdProj) {
+      const curProj = qdProj.value || appState.projectDir || '';
+      const list = Array.isArray(appState.workspaces) ? appState.workspaces : [];
+      const opts = list.map((w) => '<option value="' + esc(w.path) + '">' + esc(w.name || w.path) + '</option>');
+      if (appState.projectDir && !list.some((w) => w.path === appState.projectDir)) {
+        opts.unshift('<option value="' + esc(appState.projectDir) + '">' + esc(appState.projectDir.split(/[\\/]/).filter(Boolean).pop() || appState.projectDir) + '</option>');
+      }
+      qdProj.innerHTML = opts.length ? opts.join('') : '<option value="">No workspace project detected</option>';
+      if (curProj && qdProj.querySelector('option[value="' + curProj.replace(/"/g, '\\"') + '"]')) {
+        qdProj.value = curProj;
+      } else if (qdProj.options[0]?.value) {
+        qdProj.value = qdProj.options[0].value;
+      }
+    }
+    const sendBtn = $('#btnQdSend');
+    if (sendBtn && !dispatchInFlight) {
+      sendBtn.disabled = !($('#qdProject')?.value || appState.projectDir);
     }
 
     // Mini Kanban
@@ -955,22 +999,36 @@ button, input, select, textarea { font: inherit; color: inherit; }
     } catch (err) { showToast(err.message); }
   });
 
+  let dispatchInFlight = false;
   $('#btnQdSend').addEventListener('click', async () => {
+    if (dispatchInFlight) return;
     const prompt = ($('#qdPrompt')?.value || '').trim();
+    const projectDir = ($('#qdProject')?.value || appState.projectDir || '').trim();
+    if (!projectDir) { showToast('Select a target project directory first'); return; }
     if (!prompt) { showToast('Enter a prompt first'); return; }
+    dispatchInFlight = true;
+    const btn = $('#btnQdSend');
+    if (btn) btn.disabled = true;
+    const clientTaskId = 'ck_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
     try {
       const res = await callServer('collab_dispatch', {
+        task_id: clientTaskId,
         member: $('#qdMember')?.value || 'auto',
         role: $('#qdRole')?.value || 'researcher',
-        project_dir: appState.projectDir || '.',
+        project_dir: projectDir,
         title: prompt.slice(0, 60),
         prompt,
         auto_fallback: true,
       });
       $('#qdPrompt').value = '';
-      showToast('Dispatched: ' + (res.task_id || res.task?.task_id || 'queued'));
+      showToast('Dispatched: ' + (res.task_id || res.task?.task_id || clientTaskId));
       await refreshState();
-    } catch (err) { showToast(err.message); }
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      dispatchInFlight = false;
+      if (btn) btn.disabled = !($('#qdProject')?.value || appState.projectDir);
+    }
   });
 
   $('#btnMcpScan').addEventListener('click', refreshState);
