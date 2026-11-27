@@ -2346,13 +2346,13 @@ test('v1.5: Worktree inline diff comments, rework dispatch, speculative Merge Qu
     assert.equal(preflight.results.find((r) => r.task_id === 'wt-q1').status, 'ready');
     assert.equal(preflight.results.find((r) => r.task_id === 'wt-q2').status, 'conflict');
     assert.ok(preflight.results.find((r) => r.task_id === 'wt-q2').conflict_files.includes('shared.txt'));
-    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8'), 'line1\nline2\n', 'speculative validation must NOT mutate main');
+    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8').replace(/\r\n/g, '\n'), 'line1\nline2\n', 'speculative validation must NOT mutate main');
 
     // 4. Serialized confirmed process merges ready wt-q1 cleanly into main
     const proc = processMergeQueue(env.db, { confirmed: true, cleanup: true });
     assert.equal(proc.merged.length, 1);
     assert.equal(proc.merged[0].task_id, 'wt-q1');
-    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8'), 'line1-from-wt1\nline2\n');
+    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8').replace(/\r\n/g, '\n'), 'line1-from-wt1\nline2\n');
     assert.equal(listMergeQueue(env.db).find((q) => q.task_id === 'wt-q1').status, 'merged');
 
     // 5. Dashboard serves new `/assets/studios.js` and enforces strict boolean on `/api/merge-queue/process`
