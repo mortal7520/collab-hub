@@ -12,7 +12,17 @@ import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './docto
 import { hubBus } from './event-bus.mjs';
 import { awaitActiveRuns, cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
+import {
+  buildMcpHubSnapshot, callMcpServerTool, findMcpTools, generateClientSnippet,
+  getMcpHubSummary, importDiscoveredMcpServers, probeMcpServer,
+  registerMcpServer, removeMcpServer, syncMcpToClient,
+} from './mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
+import {
+  addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
+  listWorktreeComments, processMergeQueue, removeMergeQueueItem,
+  resolveWorktreeComment, validateMergeQueue,
+} from './merge-queue.mjs';
 import { runPlaybook } from './playbooks.mjs';
 import { probeAllMembers, probeMailHub } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
@@ -20,6 +30,7 @@ import { getAgent, probeCustomAgent, registerAgent, removeAgent } from './regist
 import {
   applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson,
 } from './self-improve.mjs';
+import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from './skills-hub.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
@@ -38,11 +49,12 @@ const TERMINAL_STATES = new Set(['completed', 'failed', 'rerouted', 'cancelled']
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
-// Flat allowlist: the only three files the dashboard will ever serve from PUBLIC_DIR.
+// Flat allowlist: the only files the dashboard will ever serve from PUBLIC_DIR.
 const STATIC_ASSETS = new Map([
   ['index.html', 'text/html; charset=utf-8'],
   ['styles.css', 'text/css; charset=utf-8'],
   ['app.js', 'text/javascript; charset=utf-8'],
+  ['studios.js', 'text/javascript; charset=utf-8'],
 ]);
 
 const CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'";
@@ -539,6 +551,47 @@ function buildDemoOverview() {
       active_lessons: 2,
       last_heal_at: at(30),
     },
+    mcp_hub_summary: {
+      servers_count: 4,
+      registered_count: 3,
+      clients_detected: 3,
+      synced_pairs: 9,
+      drift_count: 1,
+      cached_tools_total: 14,
+    },
+    merge_queue: [
+      {
+        id: 1,
+        task_id: 'demo-wt-01',
+        repo_dir: DEMO_PROJECT,
+        branch_name: 'collab/demo/verify-gate',
+        head_sha: 'a1b2c3d4e5f6',
+        base_ref: 'main',
+        priority: 10,
+        status: 'ready',
+        member: 'cipher',
+        verify_status: 'passed',
+        check_summary: 'Clean speculative merge onto main (HEAD a1b2c3d4e5)',
+        conflict_files: [],
+        updated_at: at(2),
+      },
+      {
+        id: 2,
+        task_id: 'demo-wt-02',
+        repo_dir: DEMO_PROJECT,
+        branch_name: 'collab/demo/stream-router',
+        head_sha: 'f9e8d7c6b5a4',
+        base_ref: 'main',
+        priority: 20,
+        status: 'conflict',
+        member: 'beacon',
+        verify_status: 'passed',
+        check_summary: 'Collides with preceding queued branch on src/router.mjs',
+        conflict_files: ['src/router.mjs'],
+        updated_at: at(1),
+      },
+    ],
+    worktree_comments_open: 2,
   };
 }
 
@@ -942,7 +995,241 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const metrics = buildMetrics(members, tasks, worktrees, notesCount, cassStats);
         const telemetry = computeAgentTelemetry(db, { days: 30 });
         const selfImprove = getSelfImproveSummary(db, { worktreeDir: dispatchDeps.worktreeRoot });
-        sendJson(res, 200, { generated_at: new Date().toISOString(), mail_hub: mail, toolkit: getToolkitStatus(), metrics, telemetry, self_improve: selfImprove, members, batches, tasks, worktrees, notes });
+        const mcpHubSummary = getMcpHubSummary(db, { clientSpecs: dispatchDeps.mcpClientSpecs });
+        const mergeQueue = listMergeQueue(db);
+        const openComments = Number(db.prepare("SELECT COUNT(*) AS c FROM worktree_comments WHERE status = 'open'").get()?.c || 0);
+        sendJson(res, 200, {
+          generated_at: new Date().toISOString(),
+          mail_hub: mail,
+          toolkit: getToolkitStatus(),
+          metrics,
+          telemetry,
+          self_improve: selfImprove,
+          mcp_hub_summary: mcpHubSummary,
+          merge_queue: mergeQueue,
+          worktree_comments_open: openComments,
+          members,
+          batches,
+          tasks,
+          worktrees,
+          notes,
+        });
+        return;
+      }
+      // ---- Pillar 1: All-Agent MCP Hub & Meta-MCP Lazy Tool Proxy ----
+      if (req.method === 'GET' && url.pathname === '/api/mcp-hub') {
+        sendJson(res, 200, buildMcpHubSnapshot(db, { clientSpecs: dispatchDeps.mcpClientSpecs }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/register') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, { server: registerMcpServer(db, parsed, { source: 'registered' }) });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/remove') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, removeMcpServer(db, parsed.id || parsed.server_id)); }
+        catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/import') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, importDiscoveredMcpServers(db, {
+            clientId: parsed.client_id || null,
+            clientSpecs: dispatchDeps.mcpClientSpecs,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/probe') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, await probeMcpServer(db, parsed.id || parsed.server_id, {
+            clientSpecs: dispatchDeps.mcpClientSpecs,
+            timeoutMs: Math.max(2000, Math.min(20000, Number(parsed.timeout_ms) || 8000)),
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/mcp-hub/snippet') {
+        const clientId = url.searchParams.get('client_id') || 'antigravity';
+        const rawIds = url.searchParams.get('server_ids') || '';
+        const serverIds = rawIds ? rawIds.split(',').map((s) => s.trim()).filter(Boolean) : null;
+        sendJson(res, 200, generateClientSnippet(db, { clientId, serverIds, clientSpecs: dispatchDeps.mcpClientSpecs }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/sync') {
+        const parsed = await readBoundedJson(req);
+        try {
+          if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+            sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+            return;
+          }
+          sendJson(res, 200, syncMcpToClient(db, {
+            clientId: parsed.client_id,
+            serverIds: Array.isArray(parsed.server_ids) ? parsed.server_ids : null,
+            confirmed: parsed.confirmed === true,
+            clientSpecs: dispatchDeps.mcpClientSpecs,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/mcp-hub/tools') {
+        const query = url.searchParams.get('q') || '';
+        const serverId = url.searchParams.get('server_id') || null;
+        const searchIn = url.searchParams.get('search_in') || 'both';
+        const limit = Number(url.searchParams.get('limit')) || 40;
+        sendJson(res, 200, findMcpTools(db, { query, serverId, searchIn, limit }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mcp-hub/call') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, await callMcpServerTool(db, {
+            serverId: parsed.server_id,
+            toolName: parsed.tool_name,
+            toolArgs: parsed.arguments || parsed.tool_args || {},
+            clientSpecs: dispatchDeps.mcpClientSpecs,
+            timeoutMs: Number(parsed.timeout_ms) || 15000,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      // ---- Pillar 2: Cross-Agent Skills & Rules Sync Hub ----
+      if (req.method === 'GET' && url.pathname === '/api/skills-hub') {
+        const projectDir = url.searchParams.get('project_dir') || dispatchDeps.workspaceRoot;
+        sendJson(res, 200, buildSkillsRulesSnapshot({
+          projectDir,
+          skillAdapters: dispatchDeps.skillAdapters,
+          workspaceRoot: dispatchDeps.workspaceRoot,
+        }));
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/skills-hub/sync-skill') {
+        const parsed = await readBoundedJson(req);
+        try {
+          if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+            sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+            return;
+          }
+          sendJson(res, 200, syncSkillAcrossClients(db, {
+            skillName: parsed.skill_name,
+            sourceClient: parsed.source_client,
+            targetClients: Array.isArray(parsed.target_clients) ? parsed.target_clients : [],
+            confirmed: parsed.confirmed === true,
+            skillAdapters: dispatchDeps.skillAdapters,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/skills-hub/sync-rule') {
+        const parsed = await readBoundedJson(req);
+        try {
+          if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+            sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+            return;
+          }
+          sendJson(res, 200, syncRuleAcrossTargets(db, {
+            projectDir: parsed.project_dir || dispatchDeps.workspaceRoot,
+            sourceRuleId: parsed.source_rule_id || 'agents-md',
+            targetRuleIds: Array.isArray(parsed.target_rule_ids) ? parsed.target_rule_ids : [],
+            confirmed: parsed.confirmed === true,
+            workspaceRoot: dispatchDeps.workspaceRoot,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      // ---- Pillar 3: Worktree Inline Diff Comments + Serialized Merge Queue ----
+      if (req.method === 'GET' && url.pathname === '/api/worktrees/comments') {
+        const taskId = url.searchParams.get('task_id') || null;
+        try { sendJson(res, 200, { comments: listWorktreeComments(db, taskId) }); }
+        catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/worktrees/comments/add') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            comment: addWorktreeComment(db, {
+              taskId: parsed.task_id,
+              filePath: parsed.file_path,
+              lineNo: parsed.line_no ?? null,
+              side: parsed.side || 'new',
+              author: parsed.author || 'reviewer',
+              body: parsed.body,
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/worktrees/comments/resolve') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            comment: resolveWorktreeComment(db, { commentId: parsed.comment_id, status: parsed.status || 'resolved' }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/worktrees/rework') {
+        const parsed = await readBoundedJson(req);
+        try {
+          const result = await dispatchWorktreeRework(db, {
+            taskId: parsed.task_id,
+            member: parsed.member || null,
+            extraNote: parsed.extra_note || '',
+            asyncRun: parsed.async !== false,
+          }, dispatchDeps);
+          sendJson(res, 202, result);
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/merge-queue') {
+        sendJson(res, 200, { queue: listMergeQueue(db) });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/merge-queue/enqueue') {
+        const parsed = await readBoundedJson(req);
+        try {
+          sendJson(res, 200, {
+            item: enqueueMergeQueue(db, {
+              taskId: parsed.task_id,
+              priority: parsed.priority ?? 100,
+              verifyPreset: parsed.verify_preset || 'auto',
+            }),
+          });
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/merge-queue/remove') {
+        const parsed = await readBoundedJson(req);
+        try { sendJson(res, 200, removeMergeQueueItem(db, { taskId: parsed.task_id })); }
+        catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/merge-queue/validate') {
+        await readBoundedJson(req);
+        try { sendJson(res, 200, validateMergeQueue(db)); }
+        catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/merge-queue/process') {
+        const parsed = await readBoundedJson(req);
+        try {
+          if (parsed.confirmed !== undefined && typeof parsed.confirmed !== 'boolean') {
+            sendJson(res, 400, { error: 'confirmed must be a strict boolean' });
+            return;
+          }
+          sendJson(res, 200, processMergeQueue(db, {
+            confirmed: parsed.confirmed === true,
+            requireVerified: Boolean(parsed.require_verified),
+            cleanup: parsed.cleanup !== false,
+            stopOnFailure: parsed.stop_on_failure !== false,
+          }));
+        } catch (err) { sendJson(res, 400, { error: String(err.message || err) }); }
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/agents/discover') {

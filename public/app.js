@@ -1,13 +1,15 @@
-/* CollabHub v1.4 — app shell controller (zero dependencies, bilingual EN / ZH).
+/* CollabHub v1.5 — Precision Mission Control app shell controller (zero dependencies, bilingual EN / ZH).
  *
  * Scaffolding contract:
  *   - No inline <script>/<style> is ever generated; CSP stays `script-src 'self'`.
- *   - Every user-visible string comes from the I18N table below (the only place
- *     CJK literals live) so a language switch never leaves a half-translated view.
+ *   - Every user-visible string comes from the I18N table below (plus studios.js)
+ *     so a language switch never leaves a half-translated view.
  *   - Static hosting (GitHub Pages) is detected and enters a read-only demo mode
  *     that performs zero `/api/*` requests.
  */
 'use strict';
+import { createStudiosController, registerStudioI18n } from './studios.js';
+let studios = null;
 
 /* ------------------------------------------------------------------ */
 /* Utilities                                                           */
@@ -93,9 +95,9 @@ function initials(name) {
 /* I18N-TABLE-BEGIN — every CJK literal in this file lives inside this block. */
 const I18N = {
   en: {
-    'app.title': 'CollabHub v1.3 · Local-First Multi-Agent Workbench',
-    'app.titleDemo': 'CollabHub v1.3 · Demo Preview',
-    'app.titleStatic': 'CollabHub v1.3 · Static Demo · GitHub Pages',
+    'app.title': 'CollabHub v1.5 · Precision Multi-Agent Mission Control',
+    'app.titleDemo': 'CollabHub v1.5 · Interactive Demo Preview',
+    'app.titleStatic': 'CollabHub v1.5 · Interactive Demo · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': 'Switch language / 切换语言',
@@ -111,9 +113,9 @@ const I18N = {
     'common.copyFail': 'Copy failed: the browser denied clipboard access.',
     'common.dismiss': 'Dismiss',
 
-    'brand.foot': 'CollabHub v1.3',
+    'brand.foot': 'CollabHub v1.5',
     'brand.deps': '0 npm deps',
-    'brand.upgrade': 'Upgraded from CollabHub v1.1 · Static demo ready',
+    'brand.upgrade': 'Precision Mission Control · 43 MCP tools',
 
     'nav.workspace': 'Workspace',
     'nav.system': 'System',
@@ -891,9 +893,9 @@ const I18N = {
   },
 
   zh: {
-    'app.title': 'CollabHub v1.3 · 本地优先多 Agent 工作台',
-    'app.titleDemo': 'CollabHub v1.3 · 演示预览',
-    'app.titleStatic': 'CollabHub v1.3 · 静态演示 · GitHub Pages',
+    'app.title': 'CollabHub v1.5 · 精密多 Agent 指挥工作台',
+    'app.titleDemo': 'CollabHub v1.5 · 交互式演示预览',
+    'app.titleStatic': 'CollabHub v1.5 · 静态交互式演示 · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': '切换语言 / Switch language',
@@ -909,9 +911,9 @@ const I18N = {
     'common.copyFail': '复制失败：浏览器未授予剪贴板权限。',
     'common.dismiss': '关闭提示',
 
-    'brand.foot': 'CollabHub v1.3',
+    'brand.foot': 'CollabHub v1.5',
     'brand.deps': '0 个 npm 依赖',
-    'brand.upgrade': '自 CollabHub v1.1 升级 · 支持纯静态 Demo',
+    'brand.upgrade': 'Precision Mission Control · 43 个 MCP 工具',
 
     'nav.workspace': '工作区',
     'nav.system': '系统',
@@ -1796,6 +1798,8 @@ const VIEWS = {
   overview: { titleKey: 'nav.overview', subKey: 'view.overview.sub' },
   tasks: { titleKey: 'nav.tasks', subKey: 'view.tasks.sub' },
   dag: { titleKey: 'nav.dag', subKey: 'view.dag.sub' },
+  mcphub: { titleKey: 'nav.mcphub', subKey: 'view.mcphub.sub' },
+  skills: { titleKey: 'nav.skills', subKey: 'view.skills.sub' },
   worktrees: { titleKey: 'nav.worktrees', subKey: 'view.worktrees.sub' },
   toolkit: { titleKey: 'nav.toolkit', subKey: 'view.toolkit.sub' },
   system: { titleKey: 'nav.ops', subKey: 'view.ops.sub' },
@@ -1990,6 +1994,8 @@ function refreshDynamicI18n() {
   if (state.flags.selfLoaded && state.demo && state.selfDemo) applySelfCheck(state.selfDemo);
   else renderSelfPanel();
   if (state.sim.running || state.sim.batchId) renderDagBatchSelect();
+  studios?.onLanguageChanged();
+  studios?.renderOverviewBento(state.overviewRaw);
   refreshDrawer();
 }
 
@@ -2046,6 +2052,7 @@ function setView(id, { silent = false, focus = false } = {}) {
     renderNotes(state.notes);
     renderToolkitMeta();
   }
+  studios?.onViewEnter(key);
   closeMobileNav();
   if (!silent && typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
   if (focus) {
@@ -2658,6 +2665,7 @@ function renderAll() {
 }
 
 function applyOverviewData(data) {
+  state.overviewRaw = data;
   state.members = data.members || [];
   state.tasks = data.tasks || [];
   state.telemetry = data.telemetry?.agents || {};
@@ -2669,21 +2677,35 @@ function applyOverviewData(data) {
   state.selfImprove = data.self_improve || null;
   renderMail(data.mail_hub);
   setLastUpdated(data.generated_at);
+  studios?.renderOverviewBento(data);
+  studios?.renderMergeQueue();
 }
 
 function applyDemoFixture(fixture) {
-  state.members = fixture.members || [];
+  const enriched = {
+    ...fixture,
+    mcp_hub_summary: fixture.mcp_hub_summary || { servers_count: 4, registered_count: 3, clients_detected: 3, synced_pairs: 9, drift_count: 1, cached_tools_total: 8 },
+    merge_queue: fixture.merge_queue || [
+      { id: 1, task_id: 'demo-wt-01', branch_name: 'collab/demo/verify-gate', head_sha: 'a1b2c3d4e5f6', base_ref: 'main', priority: 10, status: 'ready', member: 'cipher', check_summary: 'Clean speculative merge onto main (HEAD a1b2c3d4e5)', conflict_files: [] },
+      { id: 2, task_id: 'demo-wt-02', branch_name: 'collab/demo/stream-router', head_sha: 'f9e8d7c6b5a4', base_ref: 'main', priority: 20, status: 'conflict', member: 'beacon', check_summary: 'Collides with preceding queued branch on src/router.mjs', conflict_files: ['src/router.mjs'] },
+    ],
+    worktree_comments_open: fixture.worktree_comments_open ?? 1,
+  };
+  state.overviewRaw = enriched;
+  state.members = enriched.members || [];
   const simTasks = state.sim.tasks || [];
-  state.tasks = [...simTasks, ...(fixture.tasks || [])];
-  state.telemetry = fixture.telemetry?.agents || {};
-  state.metrics = fixture.metrics || {};
+  state.tasks = [...simTasks, ...(enriched.tasks || [])];
+  state.telemetry = enriched.telemetry?.agents || {};
+  state.metrics = enriched.metrics || {};
   const simBatch = state.sim.batchId ? simBatchSummary() : null;
-  state.batches = simBatch ? [simBatch, ...(fixture.batches || [])] : (fixture.batches || []);
-  state.worktrees = fixture.worktrees || [];
-  state.notes = fixture.notes || [];
-  state.toolkit = fixture.toolkit || {};
-  state.selfImprove = fixture.self_improve || null;
-  renderMail(fixture.mail_hub);
+  state.batches = simBatch ? [simBatch, ...(enriched.batches || [])] : (enriched.batches || []);
+  state.worktrees = enriched.worktrees || [];
+  state.notes = enriched.notes || [];
+  state.toolkit = enriched.toolkit || {};
+  state.selfImprove = enriched.self_improve || null;
+  renderMail(enriched.mail_hub);
+  studios?.renderOverviewBento(enriched);
+  studios?.renderMergeQueue();
 }
 
 /* Content signature of every panel renderAll() paints. `generated_at` is
@@ -3948,6 +3970,7 @@ function renderWorktrees() {
       : `<span class="pill">${esc(t('wt.notVerified'))}</span>`;
     const actions = active ? `<div class="wt-actions">
       <button type="button" class="btn ghost sm" data-wt-review="${esc(w.task_id)}">${esc(t('wt.review'))}</button>
+      <button type="button" class="btn ghost sm" data-mq-enqueue="${esc(w.task_id)}">${esc(t('mq.enqueue'))}</button>
       ${state.demo ? '' : `<button type="button" class="btn danger sm" data-wt-cleanup="${esc(w.task_id)}">${esc(t('wt.cleanup'))}</button>`}
     </div>` : '';
     return `<article class="wt-card">
@@ -4049,6 +4072,7 @@ async function openWorktreeReview(taskId) {
       <div class="drawer-section"><h3>${esc(t('wt.commits', { n: (rev.commits || []).length }))}</h3><pre class="mono-pre">${esc((rev.commits || []).join('\n') || t('wt.noCommits'))}</pre></div>
       <div class="drawer-section"><h3>${esc(t('wt.diff'))}</h3><div class="diff-view" id="wtDiff" role="region" aria-label="${esc(t('wt.diff'))}"></div></div>`, { kind: 'worktree', key: taskId });
     mountDiff($('#wtDiff'), rev.diff_preview);
+    await studios?.enhanceWorktreeDiffDrawer(rev.task_id, rev.diff_preview);
   } catch (err) {
     toast(t('wt.reviewFail', { error: err.message }), 'error');
   }
@@ -6026,10 +6050,16 @@ function markDemoPill() {
 }
 
 async function boot() {
+  registerStudioI18n(I18N);
   LANG = initialLang();
   state.lang = LANG;
   initTheme();
   await detectMode();
+
+  studios = createStudiosController({
+    $, $$, esc, t, state, apiGet, apiPost, toast, setView, openModal, closeModal, loadOverview,
+  });
+  studios.bindEvents();
 
   applyStaticI18n();
   state.dagTemplates = state.demo ? [] : loadDagTemplates();

@@ -14,12 +14,12 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-37%20Tools-8b5cf6" alt="MCP 37 Tools" />
+  <img src="https://img.shields.io/badge/MCP-43%20Tools-8b5cf6" alt="MCP 43 Tools" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="Zero npm runtime deps" />
 </p>
 
 <p>
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://mortal7520.github.io/collab-hub/">Live Demo</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="CONTRIBUTING.md">Contributing</a>
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://mortal7520.github.io/collab-hub/">Live Demo</a> · <a href="docs/UPSTREAM-REUSE.md">Upstream Reuse</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 </div>
@@ -27,12 +27,14 @@
 ---
 
 > **Try it live — zero install:** [**Open the Interactive Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
-> Flip **EN / 中文**, switch **Obsidian Dark / Alabaster Light**, inspect the **4-column Kanban**, hit `Ctrl+K`, and click **Simulate Live DAG** to watch nodes light up and streaming logs roll in — 100% in your browser, zero install, zero signup.
+> Explore the **v1.5 Precision Mission Control** UI: collapsible icon rail (`[`), **All-Agent MCP Hub & Meta-MCP Lazy Tool Router**, **Cross-Agent Skills & Rules Sync Center**, **Worktree Inline Diff Comments & Speculative Merge Queue**, **4-column Kanban**, `Ctrl+K` Command Palette, **EN / 中文**, and **Obsidian Dark / Alabaster Light** — 100% in your browser.
 
-- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **37 unified MCP tools** and one local web workbench.
+- **All-Agent MCP Hub & Meta-MCP Lazy Tool Router (`v1.5`)** — Zero-secret cross-client MCP matrix across Antigravity, Codex, Claude Code, Cursor, Windsurf, and VS Code, live JSON-RPC probing, lazy `find_tools` + `call_tool` gateway (preventing context-window bloat), and **Dry-Run diff + automatic `.bak` backup** safe sync (adapted from `ravitemer/mcp-hub`, `warpdev/mcp-hub-mcp`, and `samanhappy/mcphub`).
+- **Cross-Agent Skills & Rules Sync Center (`v1.5`)** — Keep `SKILL.md` directories and project rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, `.windsurfrules`) aligned across agents with dialect adaptation, Dry-Run diffs, and `.bak` backups (adapted from `lbb00/ai-rules-sync`, `fALECX/shareskills`, and `viteinfinite/sync-skills`).
+- **Worktree Inline Diff Comments & Serialized Merge Queue (`v1.5`)** — Click any diff line to attach review comments and dispatch targeted rework directly into the owning worktree (inspired by `BloopAI/vibe-kanban`), then run side-effect-free speculative `git merge-tree` conflict detection before serially merging into `main`.
+- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **43 unified MCP tools** and one local web workbench.
 - **Self-diagnosing, self-healing & self-improving** — Runtime **0–100 Health Score**, dry-run/apply safe **Auto-Heal** (`collab_self_heal`), toggleable **Learned Guardrails** (`collab_lessons`) injected into future dispatches, per-channel Bayesian reliability + soft circuit breakers, and opt-in closed-loop **Auto-Repair DAG** steps.
-- **Watch it run, stop or resume cleanly** — Cross-process durable SQLite streaming logs with lossless SSE replay, confirmed process-group **Cancel/Abort** (`collab_cancel`), live SVG DAG overlays, **Checkpoint Resume** (`collab_workflow_resume`), and SHA-pinned Git worktree verification gates before merge.
-- **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux, with transactional schema migrations, credential-to-host binding, and dirty-gated 0-mutation idle UI.
+- **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux, with full upstream provenance in [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md).
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">
@@ -43,6 +45,13 @@
 ---
 
 ## What You'll See in the Demo
+
+### All-Agent MCP Hub, Meta-MCP Router & Safe Dry-Run `.bak` Sync (`v1.5`)
+Compare Antigravity (`JSON`), Codex (`TOML`), Claude Code (`JSON`), Cursor, Windsurf, and VS Code MCP configurations in one drift matrix, search and invoke probed tools lazily through the Meta-MCP gateway, and preview colorized Dry-Run diffs before applying `.bak`-backed syncs.
+
+<p align="center">
+  <img src="docs/assets/workbench-mcphub.png" alt="CollabHub v1.5 — All-Agent MCP Hub, Cross-Client Drift Matrix & Meta-MCP Lazy Tool Router" width="100%" />
+</p>
 
 ### Live SVG DAG Execution Overlay & Checkpoint Resume
 Watch multi-stage workflows light up on the interactive `Flow Canvas` (`Completed · 2.2s ✓`, pulsing `Running` ring, dashed dependency curves), save your own reusable DAG templates, or resume failed runs from their last checkpoint without re-running completed upstream stages.

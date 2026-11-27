@@ -31,7 +31,7 @@ jobs:
           import fs from 'node:fs';
           import path from 'node:path';
           fs.mkdirSync('_site', { recursive: true });
-          for (const f of ['styles.css', 'app.js']) {
+          for (const f of ['styles.css', 'app.js', 'studios.js']) {
             fs.copyFileSync(path.join('public', f), path.join('_site', f));
           }
           let html = fs.readFileSync(path.join('public', 'index.html'), 'utf8');

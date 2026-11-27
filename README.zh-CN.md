@@ -14,12 +14,12 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-37%20Tools-8b5cf6" alt="MCP 37 Tools" />
+  <img src="https://img.shields.io/badge/MCP-43%20Tools-8b5cf6" alt="MCP 43 Tools" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="零 npm 依赖" />
 </p>
 
 <p>
-  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="https://mortal7520.github.io/collab-hub/">在线演示</a> · <a href="CHANGELOG.md">更新日志</a> · <a href="CONTRIBUTING.md">参与贡献</a>
+  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="https://mortal7520.github.io/collab-hub/">在线演示</a> · <a href="docs/UPSTREAM-REUSE.md">开源复用溯源</a> · <a href="CHANGELOG.md">更新日志</a> · <a href="CONTRIBUTING.md">参与贡献</a>
 </p>
 
 </div>
@@ -27,12 +27,14 @@
 ---
 
 > **在线试用，无需安装：** [**打开交互式工作台演示 →**](https://mortal7520.github.io/collab-hub/)
-> 一键切换 **EN / 中文** 与 **Obsidian Dark / Alabaster Light** 主题，浏览 **4 列看板**，按 `Ctrl+K` 呼出命令面板，点击 **模拟 DAG 实时运行** 即可在浏览器中亲眼看到节点亮起与实时流式日志滚动 —— 零安装、零注册。
+> 全新 **v1.5 Precision Mission Control** 界面：可折叠图标导航轨（`[`）、**全 Agent MCP 中心与 Meta-MCP 懒加载路由**、**跨端 Skills / Rules 同步中心**、**Worktree 行级 Diff 批注返工与串行合并队列**、4 列看板、`Ctrl+K` 命令面板、**EN / 中文** 与 **Obsidian Dark / Alabaster Light** 双主题 —— 浏览器零安装即刻体验。
 
-- **零厂商锁定，复用你已有的 Agent** —— 通过 **37 个统一 MCP 工具** 和一个本地 Web 工作台，统一编排 Claude Code、Codex、Gemini CLI、Aider、OpenCode、Ollama、LM Studio、DeepSeek、OpenRouter 或自定义脚本。
-- **运行态自诊断、一键安全自愈与经验护栏自进化** —— 实时 **0–100 健康度评分**、预览/执行分离的安全自愈（`collab_self_heal`）、可启停的**经验护栏库**（`collab_lessons` 自动从重复故障中提炼并有界注入后续任务）、按通道隔离的贝叶斯可靠性路由与软熔断，以及可选的闭环 **Auto-Repair DAG** 自动返修。
-- **过程全可见，可确认中止、可断点续跑** —— 跨进程持久化 SQLite 流式日志与无损 SSE 断线补发、进程组级**可确认中止**（`collab_cancel`）、Live SVG DAG 状态联动、**失败断点续跑**（`collab_workflow_resume`），以及 SHA 锁定合并的 Git Worktree 测试闸门。
-- **零 npm 第三方依赖，10 秒启动** —— 纯 Node.js `>=22.13` 原生内置模块（`node:sqlite`、`node:http`、`node:child_process`），具备事务化数据库迁移、凭据与目标主机绑定，以及内容指纹脏检查的零空转前端渲染。
+- **全 Agent MCP 中心 + Meta-MCP 懒加载路由（`v1.5`）** —— 零明文密钥扫描对比 Antigravity、Codex、Claude Code、Cursor、Windsurf、VS Code 的 MCP 配置漂移，支持实时探活、`find_tools` + `call_tool` 按需懒加载防上下文爆炸，以及 **Dry-Run 差异预演 + 自动 `.bak` 备份** 安全写回（移植适配 `ravitemer/mcp-hub`、`warpdev/mcp-hub-mcp`、`samanhappy/mcphub`）。
+- **跨 Agent Skills / Rules 统一同步中心（`v1.5`）** —— 统一发现并同步各客户端 `SKILL.md` 与项目级 `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` / `.cursor/rules/*.mdc` / `.windsurfrules`，支持格式方言适配、Dry-Run 预演与 `.bak` 备份（移植适配 `lbb00/ai-rules-sync`、`fALECX/shareskills`、`viteinfinite/sync-skills`）。
+- **Worktree 行级 Diff 批注返工 + 串行合并队列（`v1.5`）** —— 点击 Diff 任意代码行挂载批注并一键打回原 Agent 返工（借鉴 `BloopAI/vibe-kanban`）；入队后通过零副作用 `git merge-tree` 累计预演多分支交叉冲突，确认后再串行安全合入 `main`。
+- **零厂商锁定，复用你已有的 Agent** —— 通过 **43 个统一 MCP 工具** 和一个本地 Web 工作台，统一编排 Claude Code、Codex、Gemini CLI、Aider、OpenCode、Ollama、LM Studio、DeepSeek、OpenRouter 或自定义脚本。
+- **运行态自诊断、一键安全自愈与经验护栏自进化** —— 实时 **0–100 健康度评分**、预览/执行分离的安全自愈（`collab_self_heal`）、可启停的**经验护栏库**（`collab_lessons`），以及按通道隔离的贝叶斯可靠性路由与软熔断。
+- **零 npm 第三方依赖，10 秒启动** —— 纯 Node.js `>=22.13` 原生内置模块，所有开源源码复用与 Commit 溯源完整记录于 [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md)。
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">
@@ -43,6 +45,13 @@
 ---
 
 ## 在线演示预览
+
+### 全 Agent MCP 中心、Meta-MCP 懒加载路由与 Dry-Run `.bak` 安全同步（`v1.5`）
+一屏对比 Antigravity（`JSON`）、Codex（`TOML`）、Claude Code（`JSON`）、Cursor、Windsurf 与 VS Code 的 MCP 漂移状态；通过 Meta-MCP 网关按需检索与调用工具；写回前强制 Dry-Run 差异预览并自动创建 `.bak` 备份。
+
+<p align="center">
+  <img src="docs/assets/workbench-mcphub.png" alt="CollabHub v1.5 — 全 Agent MCP 中心、跨端漂移矩阵与 Meta-MCP 懒加载路由" width="100%" />
+</p>
 
 ### 实时 SVG DAG 状态联动与断点续跑
 多阶段工作流运行时，右侧 `Flow Canvas` 实时点亮每个节点状态（`Completed · 2.2s ✓`、脉冲动画 `Running` 环、虚线依赖流）；支持保存自定义 DAG 模板，某一步失败时一键从断点续跑，直接复用已完成的上游产出。

@@ -19,12 +19,22 @@ import { hubBus } from '../src/event-bus.mjs';
 import { createSseParser, parseSseEvents } from '../src/mail-mcp-proxy.mjs';
 import { mailNameForMember } from '../src/mail-sync.mjs';
 import { searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
+import {
+  buildMcpHubSnapshot, callMcpServerTool, detectInlineSecret, findMcpTools,
+  generateClientSnippet, importDiscoveredMcpServers, probeMcpServer,
+  registerMcpServer, resolveSafePlaceholders, syncMcpToClient,
+} from '../src/mcp-hub.mjs';
 import { TOOLS, handleToolCall } from '../src/mcp-server.mjs';
+import {
+  addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
+  listWorktreeComments, processMergeQueue, resolveWorktreeComment, validateMergeQueue,
+} from '../src/merge-queue.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
 import { planDispatch, probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, probeCustomAgent, registerAgent, removeAgent } from '../src/registry.mjs';
 import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
+import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from '../src/skills-hub.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import { convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep } from '../src/toolkit.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
@@ -401,8 +411,8 @@ test('Muse outer identity verification, monotonic generation, ACK-only rejection
   }
 });
 
-test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 37 MCP tools', async () => {
-  assert.equal(TOOLS.length, 37);
+test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 43 MCP tools', async () => {
+  assert.equal(TOOLS.length, 43);
   const sse = parseSseEvents('event: message\ndata: {"jsonrpc":"2.0",\ndata: "id":1}\n\ndata: {"id":2}\n\n');
   assert.equal(sse.length, 2);
   assert.deepEqual(JSON.parse(sse[0]), { jsonrpc: '2.0', id: 1 });
@@ -1204,7 +1214,7 @@ test('v1.0: Real token usage telemetry aggregation + Kanban board HTML & /api/wo
     const html = (await rawHttpRequest({ port, pathName: '/', headers: { Host: `127.0.0.1:${port}` } })).body;
     assert.match(html, /tasksKanbanWrap/);
     assert.match(html, /btnViewKanban/);
-    assert.match(html, /CollabHub v1\.1/);
+    assert.match(html, /CollabHub v1\.5/);
   } finally {
     server.close();
     env.cleanup();
@@ -1799,8 +1809,8 @@ test('v1.3: Codex P1 fixes — dispatch-token race guard, DSH ok:false cancel re
   const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
 
   try {
-    // 1. PRAGMA user_version migrated atomically to 140
-    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 140);
+    // 1. PRAGMA user_version migrated atomically to 150
+    assert.equal(Number(env.db.prepare('PRAGMA user_version').get().user_version), 150);
 
     // 2. Dispatch-token race: if task is failed/cancelled while awaiting reserveMailPaths, external bridge MUST NOT be called!
     let dshCalled = false;
@@ -2121,10 +2131,240 @@ test('v1.4: opt-in closed-loop auto_repair DAG (redacts secrets, stops on duplic
 
     const mcpSelf = await handleToolCall(env.db, 'collab_self_check', {});
     assert.equal(typeof mcpSelf.health_score, 'number');
-    assert.equal(TOOLS.length, 37);
+    assert.equal(TOOLS.length, 43);
   } finally {
     try { await server.shutdown({ drainMs: 500 }); } catch {}
     if (fs.existsSync(flagFile)) fs.unlinkSync(flagFile);
+    env.cleanup();
+  }
+});
+
+test('v1.5: All-Agent MCP Hub zero-secret scan, live stdio probe, Meta-MCP lazy tool proxy & Dry-Run .bak client sync', async () => {
+  const env = makeTempEnv();
+  const cfgDir = path.join(env.dir, 'clients');
+  fs.mkdirSync(cfgDir, { recursive: true });
+  const agyJson = path.join(cfgDir, 'mcp_config.json');
+  const codexToml = path.join(cfgDir, 'config.toml');
+
+  // Minimal real stdio MCP server script for live probe + Meta-MCP tools/call test
+  const mockMcpPath = path.join(env.dir, 'mock-mcp.mjs');
+  fs.writeFileSync(mockMcpPath, `
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const m = JSON.parse(line);
+  if (m.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { serverInfo: { name: 'mock-echo', version: '1.0.0' } } }) + '\\n');
+  } else if (m.method === 'tools/list') {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'echo_upper', description: 'Uppercase any input text', inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } } }] } }) + '\\n');
+  } else if (m.method === 'tools/call') {
+    const out = String(m.params?.arguments?.text || '').toUpperCase();
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: out }] } }) + '\\n');
+  }
+});
+`, 'utf8');
+
+  fs.writeFileSync(agyJson, JSON.stringify({
+    mcpServers: {
+      'mock-echo': { command: process.execPath, args: [mockMcpPath], env: { MY_KEY: '${MY_KEY}' } },
+      'leaked-srv': { command: 'node', args: ['s.js'], env: { OPENAI_API_KEY: 'sk-proj-1234567890abcdefghijklmnop' } },
+    },
+  }, null, 2), 'utf8');
+  fs.writeFileSync(codexToml, 'model = "gpt-5"\n\n[mcp_servers.old_srv]\ncommand = "node"\nargs = ["old.js"]\n', 'utf8');
+
+  const clientSpecs = [
+    { id: 'antigravity', name: 'Antigravity', format: 'json', rootKey: 'mcpServers', paths: [agyJson] },
+    { id: 'codex', name: 'Codex', format: 'toml', rootKey: 'mcp_servers', paths: [codexToml] },
+  ];
+
+  try {
+    // 1. Security rules: reject plaintext env, inline secrets, and ${cmd:...}
+    assert.throws(() => registerMcpServer(env.db, {
+      id: 'bad-env', transport: 'stdio', command: 'node', env: { SECRET: 'raw' },
+    }), /never store plaintext env/i);
+    assert.equal(detectInlineSecret('sk-proj-1234567890abcdefghijklmnop'), true);
+    assert.equal(detectInlineSecret('${OPENAI_API_KEY}'), false);
+    assert.throws(() => resolveSafePlaceholders('${cmd:whoami}'), /disallowed/i);
+
+    // 2. Scan detects drift & inline secrets without echoing secret values
+    const snap = buildMcpHubSnapshot(env.db, { clientSpecs });
+    assert.equal(snap.summary.clients_detected, 2);
+    const leaked = snap.servers.find((s) => s.id === 'leaked-srv');
+    assert.equal(leaked.secret_inline, true);
+
+    // 3. Register canonical server + live stdio JSON-RPC probe + Meta-MCP lazy tool discovery & proxy call
+    registerMcpServer(env.db, {
+      id: 'mock-echo', name: 'Mock Echo', transport: 'stdio', command: process.execPath, args: [mockMcpPath], env_keys: ['MY_KEY'], group_name: 'test',
+    });
+    const probe = await probeMcpServer(env.db, 'mock-echo', { clientSpecs, timeoutMs: 8000 });
+    assert.equal(probe.ok, true);
+    assert.equal(probe.tools_count, 1);
+    assert.equal(probe.tools[0].name, 'echo_upper');
+
+    const found = findMcpTools(env.db, { query: 'uppercase' });
+    assert.equal(found.matched_count, 1);
+    assert.equal(found.matches[0].server_id, 'mock-echo');
+
+    const proxied = await callMcpServerTool(env.db, {
+      serverId: 'mock-echo', toolName: 'echo_upper', toolArgs: { text: 'collabhub' }, clientSpecs,
+    });
+    assert.equal(proxied.is_error, false);
+    assert.equal(proxied.result.content[0].text, 'COLLABHUB');
+
+    // 4. Dry-Run + .bak Confirmed sync to Codex TOML preserves unrelated `model = "gpt-5"` and blocks secret_inline
+    const dry = syncMcpToClient(env.db, { clientId: 'codex', serverIds: ['mock-echo', 'leaked-srv'], confirmed: false, clientSpecs });
+    assert.equal(dry.applied, false);
+    assert.deepEqual(dry.added, ['mock-echo']);
+    assert.equal(dry.blocked_secrets.length, 1);
+
+    const applied = syncMcpToClient(env.db, { clientId: 'codex', serverIds: ['mock-echo'], confirmed: true, clientSpecs });
+    assert.equal(applied.applied, true);
+    assert.equal(applied.backup_created, true);
+    const updatedToml = fs.readFileSync(codexToml, 'utf8');
+    assert.ok(updatedToml.includes('model = "gpt-5"'));
+    assert.ok(updatedToml.includes('[mcp_servers.mock-echo]'));
+    assert.ok(fs.readdirSync(cfgDir).some((f) => f.startsWith('config.toml.bak.')));
+
+    const snip = generateClientSnippet(env.db, { clientId: 'codex', serverIds: ['mock-echo'], clientSpecs });
+    assert.equal(snip.format, 'toml');
+    assert.ok(snip.snippet.includes('[mcp_servers.mock-echo]'));
+
+    const imp = importDiscoveredMcpServers(env.db, { clientId: 'antigravity', clientSpecs });
+    assert.ok(imp.imported_count >= 1);
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v1.5: Cross-Agent Skills & Rules Sync Hub with dialect adaptation, Dry-Run diff & .bak backup', () => {
+  const env = makeTempEnv();
+  const agySkills = path.join(env.dir, 'agy-skills');
+  const claudeSkills = path.join(env.dir, 'claude-skills');
+  const codexSkills = path.join(env.dir, 'codex-skills');
+  fs.mkdirSync(path.join(agySkills, 'review-gate'), { recursive: true });
+  fs.mkdirSync(path.join(claudeSkills, 'review-gate'), { recursive: true });
+  fs.mkdirSync(codexSkills, { recursive: true });
+
+  fs.writeFileSync(path.join(agySkills, 'review-gate', 'SKILL.md'), '---\nname: review-gate\ndescription: Canonical review skill\n---\n\nAlways run tests.\n', 'utf8');
+  fs.writeFileSync(path.join(claudeSkills, 'review-gate', 'SKILL.md'), '---\nname: review-gate\ndescription: Old version\n---\n\nOutdated.\n', 'utf8');
+  fs.writeFileSync(path.join(env.proj, 'AGENTS.md'), '# Project Rules\n\nUse zero dependencies.\n', 'utf8');
+  fs.writeFileSync(path.join(env.proj, 'CLAUDE.md'), '# Old Claude Rules\n', 'utf8');
+
+  const skillAdapters = [
+    { id: 'antigravity', name: 'Antigravity', dirs: [agySkills] },
+    { id: 'claude', name: 'Claude Code', dirs: [claudeSkills] },
+    { id: 'codex', name: 'Codex', dirs: [codexSkills] },
+  ];
+
+  try {
+    const snap = buildSkillsRulesSnapshot({ projectDir: env.proj, skillAdapters, workspaceRoot: env.ws });
+    assert.equal(snap.summary.skills_total, 1);
+    assert.equal(snap.summary.skill_drift_count, 1);
+    assert.equal(snap.skills[0].client_presence.claude, 'drifted');
+    assert.equal(snap.skills[0].client_presence.codex, 'missing');
+    assert.equal(snap.summary.rules_detected, 2);
+    assert.equal(snap.summary.rules_drifted, 1);
+
+    // Dry-run skill sync does not mutate files
+    const skDry = syncSkillAcrossClients(env.db, {
+      skillName: 'review-gate', sourceClient: 'antigravity', targetClients: ['claude', 'codex'], confirmed: false, skillAdapters,
+    });
+    assert.equal(skDry.applied, false);
+    assert.equal(fs.existsSync(path.join(codexSkills, 'review-gate', 'SKILL.md')), false);
+
+    // Confirmed skill sync copies & creates .bak for existing claude skill
+    const skApp = syncSkillAcrossClients(env.db, {
+      skillName: 'review-gate', sourceClient: 'antigravity', targetClients: ['claude', 'codex'], confirmed: true, skillAdapters,
+    });
+    assert.equal(skApp.applied, true);
+    assert.ok(fs.readFileSync(path.join(codexSkills, 'review-gate', 'SKILL.md'), 'utf8').includes('Always run tests.'));
+    assert.ok(fs.readdirSync(claudeSkills).some((f) => f.startsWith('review-gate.bak.')));
+
+    // Rule sync adapts `.mdc` frontmatter for Cursor & creates `.bak` for CLAUDE.md
+    const rApp = syncRuleAcrossTargets(env.db, {
+      projectDir: env.proj, sourceRuleId: 'agents-md', targetRuleIds: ['claude-md', 'cursor-rules'], confirmed: true, workspaceRoot: env.ws,
+    });
+    assert.equal(rApp.applied, true);
+    assert.ok(fs.readFileSync(path.join(env.proj, 'CLAUDE.md'), 'utf8').includes('Use zero dependencies.'));
+    assert.ok(fs.readFileSync(path.join(env.proj, '.cursor', 'rules', 'project.mdc'), 'utf8').includes('alwaysApply: true'));
+    assert.ok(fs.readdirSync(env.proj).some((f) => f.startsWith('CLAUDE.md.bak.')));
+  } finally {
+    env.cleanup();
+  }
+});
+
+test('v1.5: Worktree inline diff comments, rework dispatch, speculative Merge Queue conflict detection & HTTP APIs', async () => {
+  const env = makeTempEnv();
+  execFileSync('git', ['init', '-b', 'main'], { cwd: env.proj });
+  execFileSync('git', ['config', 'user.email', 'test@local'], { cwd: env.proj });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: env.proj });
+  fs.writeFileSync(path.join(env.proj, 'shared.txt'), 'line1\nline2\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: env.proj });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: env.proj });
+
+  registerAgent(env.db, {
+    agentId: 'mq-cli', name: 'MQ CLI', driver: 'generic-cli', roles: ['implementer'],
+    config: { command: process.execPath, args: ['-e', 'console.log("REWORK_DONE:" + process.argv[1].slice(0, 60))', '{{prompt}}'], timeout_s: 20 },
+  });
+
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const hdrs = { Host: `127.0.0.1:${port}`, 'Content-Type': 'application/json', 'X-CollabHub-CSRF': '1' };
+
+  try {
+    // 1. Two concurrent worktrees editing the SAME line of shared.txt -> semantic/textual collision!
+    const wt1 = createWorktree(env.db, { repoDir: env.proj, taskId: 'wt-q1', member: 'mq-cli', worktreeRoot: env.wts, workspaceRoot: env.ws });
+    const wt2 = createWorktree(env.db, { repoDir: env.proj, taskId: 'wt-q2', member: 'mq-cli', worktreeRoot: env.wts, workspaceRoot: env.ws });
+
+    fs.writeFileSync(path.join(wt1.worktree_path, 'shared.txt'), 'line1-from-wt1\nline2\n', 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: wt1.worktree_path });
+    execFileSync('git', ['commit', '-m', 'wt1 change'], { cwd: wt1.worktree_path });
+
+    fs.writeFileSync(path.join(wt2.worktree_path, 'shared.txt'), 'line1-from-wt2\nline2\n', 'utf8');
+    execFileSync('git', ['add', '.'], { cwd: wt2.worktree_path });
+    execFileSync('git', ['commit', '-m', 'wt2 conflicting change'], { cwd: wt2.worktree_path });
+
+    // 2. Inline diff comments + targeted rework dispatch
+    const c1 = addWorktreeComment(env.db, { taskId: 'wt-q1', filePath: 'shared.txt', lineNo: 1, side: 'new', body: 'Rename line1 token' });
+    const c2 = addWorktreeComment(env.db, { taskId: 'wt-q1', filePath: 'shared.txt', lineNo: 2, side: 'new', body: 'Keep trailing newline' });
+    assert.equal(listWorktreeComments(env.db, 'wt-q1').length, 2);
+    resolveWorktreeComment(env.db, { commentId: c2.id, status: 'resolved' });
+
+    const rework = await dispatchWorktreeRework(env.db, { taskId: 'wt-q1', member: 'mq-cli', asyncRun: false }, { workspaceRoot: env.ws, extraRoots: [env.wts] });
+    assert.equal(rework.comments_sent, 1);
+    assert.equal(rework.rework_task.state, 'completed');
+    assert.equal(listWorktreeComments(env.db, 'wt-q1').find((c) => c.id === c1.id).status, 'sent');
+
+    // 3. Enqueue both -> speculative git merge-tree marks wt-q1 READY and wt-q2 CONFLICT before touching main!
+    enqueueMergeQueue(env.db, { taskId: 'wt-q1', priority: 10 });
+    enqueueMergeQueue(env.db, { taskId: 'wt-q2', priority: 20 });
+    const preflight = validateMergeQueue(env.db);
+    assert.equal(preflight.results.find((r) => r.task_id === 'wt-q1').status, 'ready');
+    assert.equal(preflight.results.find((r) => r.task_id === 'wt-q2').status, 'conflict');
+    assert.ok(preflight.results.find((r) => r.task_id === 'wt-q2').conflict_files.includes('shared.txt'));
+    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8'), 'line1\nline2\n', 'speculative validation must NOT mutate main');
+
+    // 4. Serialized confirmed process merges ready wt-q1 cleanly into main
+    const proc = processMergeQueue(env.db, { confirmed: true, cleanup: true });
+    assert.equal(proc.merged.length, 1);
+    assert.equal(proc.merged[0].task_id, 'wt-q1');
+    assert.equal(fs.readFileSync(path.join(env.proj, 'shared.txt'), 'utf8'), 'line1-from-wt1\nline2\n');
+    assert.equal(listMergeQueue(env.db).find((q) => q.task_id === 'wt-q1').status, 'merged');
+
+    // 5. Dashboard serves new `/assets/studios.js` and enforces strict boolean on `/api/merge-queue/process`
+    const studiosAsset = await rawHttpRequest({ port, pathName: '/assets/studios.js', headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(studiosAsset.status, 200);
+    const badConfirm = await rawHttpRequest({
+      port, method: 'POST', pathName: '/api/merge-queue/process', headers: hdrs,
+      body: JSON.stringify({ confirmed: 'true' }),
+    });
+    assert.equal(badConfirm.status, 400);
+  } finally {
+    try { await server.shutdown({ drainMs: 500 }); } catch {}
     env.cleanup();
   }
 });

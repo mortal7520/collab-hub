@@ -11,12 +11,21 @@ import {
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, runSystemDoctor } from './doctor.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
+import {
+  buildMcpHubSnapshot, callMcpServerTool, findMcpTools, generateClientSnippet,
+  importDiscoveredMcpServers, probeMcpServer, registerMcpServer, removeMcpServer, syncMcpToClient,
+} from './mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
+import {
+  addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
+  listWorktreeComments, processMergeQueue, removeMergeQueueItem, resolveWorktreeComment, validateMergeQueue,
+} from './merge-queue.mjs';
 import { runPlaybook } from './playbooks.mjs';
 import { planDispatch, probeAllMembers } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from './registry.mjs';
 import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from './self-improve.mjs';
+import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from './skills-hub.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep, searchSessionsCass,
@@ -555,6 +564,114 @@ export const TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'collab_mcp_hub',
+    description: 'All-Agent MCP Hub: scan/compare Antigravity, Codex, Claude Code, Cursor, Windsurf, VS Code MCP configs (zero-secret), register/import/probe servers, generate copyable JSON/TOML snippets, or run Dry-Run / confirmed `.bak`-backed safe client config sync.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['snapshot', 'register', 'remove', 'import', 'probe', 'snippet', 'sync'] },
+        id: { type: 'string' },
+        name: { type: 'string' },
+        transport: { type: 'string', enum: ['stdio', 'http', 'sse'] },
+        command: { type: 'string' },
+        args: { type: 'array', items: { type: 'string' } },
+        url: { type: 'string' },
+        env_keys: { type: 'array', items: { type: 'string' } },
+        header_keys: { type: 'array', items: { type: 'string' } },
+        tags: { type: 'array', items: { type: 'string' } },
+        group_name: { type: 'string' },
+        client_id: { type: 'string' },
+        server_ids: { type: 'array', items: { type: 'string' } },
+        confirmed: { type: 'boolean', description: 'Must be true to write synced client config (default false = read-only dry-run diff preview).' },
+      },
+    },
+  },
+  {
+    name: 'collab_mcp_find_tools',
+    description: 'Meta-MCP lazy tool discovery (adapted from warpdev/mcp-hub-mcp): search cached tool catalogs across all probed MCP servers by keyword without polluting agent context windows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keyword or substring to match against tool names, descriptions, or server IDs.' },
+        server_id: { type: 'string' },
+        search_in: { type: 'string', enum: ['both', 'name', 'description'] },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+    },
+  },
+  {
+    name: 'collab_mcp_call_tool',
+    description: 'Meta-MCP on-demand tool proxy (adapted from warpdev/mcp-hub-mcp): invoke a specific tool on any registered/probed MCP server lazily with scrubbed env and SSRF protection.',
+    inputSchema: {
+      type: 'object',
+      required: ['server_id', 'tool_name'],
+      properties: {
+        server_id: { type: 'string' },
+        tool_name: { type: 'string' },
+        arguments: { type: 'object' },
+        timeout_ms: { type: 'integer', minimum: 2000, maximum: 30000 },
+      },
+    },
+  },
+  {
+    name: 'collab_skills_hub',
+    description: 'Cross-Agent Skills & Rules Sync Hub (adapted from lbb00/ai-rules-sync & fALECX/shareskills): inspect SKILL.md and AGENTS.md/CLAUDE.md/GEMINI.md/.cursor/rules drift across clients, preview Dry-Run diffs, and apply `.bak`-backed sync when confirmed=true.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['snapshot', 'sync_skill', 'sync_rule'] },
+        project_dir: { type: 'string' },
+        skill_name: { type: 'string' },
+        source_client: { type: 'string' },
+        target_clients: { type: 'array', items: { type: 'string' } },
+        source_rule_id: { type: 'string' },
+        target_rule_ids: { type: 'array', items: { type: 'string' } },
+        confirmed: { type: 'boolean', description: 'Must be true to write synced files (default false = dry-run preview).' },
+      },
+    },
+  },
+  {
+    name: 'collab_worktree_comments',
+    description: 'Worktree inline diff review comments & targeted rework dispatch (inspired by BloopAI/vibe-kanban): list, add, resolve line comments, or dispatch open comments directly back to the owning agent for rework.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'add', 'resolve', 'dispatch_rework'] },
+        task_id: { type: 'string' },
+        file_path: { type: 'string' },
+        line_no: { type: 'integer' },
+        side: { type: 'string', enum: ['new', 'old', 'file'] },
+        author: { type: 'string' },
+        body: { type: 'string' },
+        comment_id: { type: 'integer' },
+        status: { type: 'string', enum: ['open', 'sent', 'resolved'] },
+        member: { type: 'string' },
+        extra_note: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'collab_merge_queue',
+    description: 'Serialized Agent Merge Queue: enqueue isolated worktrees, run side-effect-free speculative `git merge-tree` conflict detection across queued branches, and serially merge ready worktrees into base_ref when confirmed=true.',
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'enqueue', 'remove', 'validate', 'process'] },
+        task_id: { type: 'string' },
+        priority: { type: 'integer', minimum: 1, maximum: 999 },
+        verify_preset: { type: 'string' },
+        confirmed: { type: 'boolean' },
+        require_verified: { type: 'boolean' },
+        cleanup: { type: 'boolean' },
+        stop_on_failure: { type: 'boolean' },
+      },
+    },
+  },
 ]);
 
 export async function handleToolCall(db, name, args = {}) {
@@ -799,6 +916,55 @@ export async function handleToolCall(db, name, args = {}) {
         return { lesson: toggleIncidentLesson(db, args.id, Boolean(args.active)) };
       }
       throw new Error(`Unsupported collab_lessons action: ${args.action}`);
+    }
+    case 'collab_mcp_hub': {
+      if (args.action === 'snapshot') return buildMcpHubSnapshot(db);
+      if (args.action === 'register') return { server: registerMcpServer(db, args) };
+      if (args.action === 'remove') return removeMcpServer(db, args.id);
+      if (args.action === 'import') return importDiscoveredMcpServers(db, { clientId: args.client_id || null });
+      if (args.action === 'probe') return probeMcpServer(db, args.id);
+      if (args.action === 'snippet') return generateClientSnippet(db, { clientId: args.client_id || 'antigravity', serverIds: args.server_ids || null });
+      if (args.action === 'sync') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') {
+          throw new Error('confirmed must be a strict boolean');
+        }
+        return syncMcpToClient(db, { clientId: args.client_id, serverIds: args.server_ids || null, confirmed: args.confirmed === true });
+      }
+      throw new Error(`Unsupported collab_mcp_hub action: ${args.action}`);
+    }
+    case 'collab_mcp_find_tools':
+      return findMcpTools(db, { query: args.query || '', serverId: args.server_id || null, searchIn: args.search_in || 'both', limit: args.limit || 30 });
+    case 'collab_mcp_call_tool':
+      return callMcpServerTool(db, { serverId: args.server_id, toolName: args.tool_name, toolArgs: args.arguments || {}, timeoutMs: args.timeout_ms || 15000 });
+    case 'collab_skills_hub': {
+      if (args.action === 'snapshot') return buildSkillsRulesSnapshot({ projectDir: args.project_dir || WORKSPACE_ROOT });
+      if (args.action === 'sync_skill') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') throw new Error('confirmed must be a strict boolean');
+        return syncSkillAcrossClients(db, { skillName: args.skill_name, sourceClient: args.source_client, targetClients: args.target_clients || [], confirmed: args.confirmed === true });
+      }
+      if (args.action === 'sync_rule') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') throw new Error('confirmed must be a strict boolean');
+        return syncRuleAcrossTargets(db, { projectDir: args.project_dir || WORKSPACE_ROOT, sourceRuleId: args.source_rule_id || 'agents-md', targetRuleIds: args.target_rule_ids || [], confirmed: args.confirmed === true });
+      }
+      throw new Error(`Unsupported collab_skills_hub action: ${args.action}`);
+    }
+    case 'collab_worktree_comments': {
+      if (args.action === 'list') return { comments: listWorktreeComments(db, args.task_id || null) };
+      if (args.action === 'add') return { comment: addWorktreeComment(db, { taskId: args.task_id, filePath: args.file_path, lineNo: args.line_no ?? null, side: args.side || 'new', author: args.author || 'reviewer', body: args.body }) };
+      if (args.action === 'resolve') return { comment: resolveWorktreeComment(db, { commentId: args.comment_id, status: args.status || 'resolved' }) };
+      if (args.action === 'dispatch_rework') return dispatchWorktreeRework(db, { taskId: args.task_id, member: args.member || null, extraNote: args.extra_note || '' });
+      throw new Error(`Unsupported collab_worktree_comments action: ${args.action}`);
+    }
+    case 'collab_merge_queue': {
+      if (args.action === 'list') return { queue: listMergeQueue(db) };
+      if (args.action === 'enqueue') return { item: enqueueMergeQueue(db, { taskId: args.task_id, priority: args.priority ?? 100, verifyPreset: args.verify_preset || 'auto' }) };
+      if (args.action === 'remove') return removeMergeQueueItem(db, { taskId: args.task_id });
+      if (args.action === 'validate') return validateMergeQueue(db);
+      if (args.action === 'process') {
+        if (args.confirmed !== undefined && typeof args.confirmed !== 'boolean') throw new Error('confirmed must be a strict boolean');
+        return processMergeQueue(db, { confirmed: args.confirmed === true, requireVerified: Boolean(args.require_verified), cleanup: args.cleanup !== false, stopOnFailure: args.stop_on_failure !== false });
+      }
+      throw new Error(`Unsupported collab_merge_queue action: ${args.action}`);
     }
     default:
       throw new Error(`Unknown collab-hub tool: ${name}`);

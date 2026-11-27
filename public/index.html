@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CollabHub v1.4 · Local-First Multi-Agent Workbench</title>
-<meta name="description" content="CollabHub v1.4 — zero-dependency, local-first multi-agent orchestration workbench with self-improvement &amp; auto-heal." />
+<title>CollabHub v1.5 · Precision Multi-Agent Mission Control</title>
+<meta name="description" content="CollabHub v1.5 — zero-dependency, local-first multi-agent orchestration workbench with All-Agent MCP Hub & Meta-MCP router, cross-agent Skills/Rules sync, Worktree inline diff comments & serialized Merge Queue." />
 <meta name="color-scheme" content="dark light" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235e6ad2'/%3E%3Cpath d='M12 12 6.5 7M12 12l5.5-5M12 12v6' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='12' r='2.2' fill='%23fff'/%3E%3Ccircle cx='6' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='18' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='12' cy='19' r='1.5' fill='%23fff'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/assets/styles.css" />
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell" id="appShell">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="2.4"></circle>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="2.5"></circle>
           <circle cx="5" cy="6" r="1.7"></circle>
           <circle cx="19" cy="6" r="1.7"></circle>
           <circle cx="12" cy="20" r="1.7"></circle>
@@ -24,53 +24,69 @@
       </span>
       <span class="brand-text">
         <span class="brand-name">CollabHub</span>
-        <span class="brand-version" id="brandVersion">v1.4</span>
+        <span class="brand-version" id="brandVersion">v1.5</span>
       </span>
+      <button type="button" class="rail-toggle" id="btnCollapseRail" title="Toggle compact rail ([)" aria-label="Toggle compact navigation rail">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+      </button>
     </div>
 
     <nav class="nav" aria-label="Primary navigation">
-      <div class="nav-label" data-i18n="nav.workspace">Workspace</div>
-      <button type="button" class="nav-item active" data-view="overview">
+      <div class="nav-label" data-i18n="nav.workspace">Command</div>
+      <button type="button" class="nav-item active" data-view="overview" title="Overview">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.6"></rect><rect x="14" y="3" width="7" height="7" rx="1.6"></rect><rect x="3" y="14" width="7" height="7" rx="1.6"></rect><rect x="14" y="14" width="7" height="7" rx="1.6"></rect></svg>
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.overview">Overview</span><span class="nav-en" data-i18n="nav.overviewAlt"></span></span>
       </button>
-      <button type="button" class="nav-item" data-view="tasks">
+      <button type="button" class="nav-item" data-view="tasks" title="Tasks & Kanban">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5.5" height="16" rx="1.4"></rect><rect x="9.25" y="4" width="5.5" height="11" rx="1.4"></rect><rect x="15.5" y="4" width="5.5" height="14" rx="1.4"></rect></svg>
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.tasks">Tasks &amp; Kanban</span><span class="nav-en" data-i18n="nav.tasksAlt"></span></span>
         <span class="nav-count" id="navTaskCount">0</span>
       </button>
-      <button type="button" class="nav-item" data-view="dag">
+      <button type="button" class="nav-item" data-view="dag" title="DAG & Playbooks">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="6" r="2.2"></circle><circle cx="18.5" cy="12" r="2.2"></circle><circle cx="5.5" cy="18" r="2.2"></circle><path d="M7.7 6.8l8.6 4.4M16.3 13.2 7.7 17.2"></path></svg>
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.dag">DAG &amp; Playbooks</span><span class="nav-en" data-i18n="nav.dagAlt"></span></span>
       </button>
-      <button type="button" class="nav-item" data-view="worktrees">
+
+      <div class="nav-label" data-i18n="nav.studios">Multi-Agent Studios</div>
+      <button type="button" class="nav-item" data-view="mcphub" title="MCP Hub">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="6" rx="1.5"></rect><rect x="2.5" y="14.5" width="19" height="6" rx="1.5"></rect><path d="M6.5 6.5h.01M6.5 17.5h.01M12 9.5v5"></path></svg>
+        <span class="nav-copy"><span class="nav-title" data-i18n="nav.mcphub">MCP Hub</span><span class="nav-en" data-i18n="nav.mcphubAlt"></span></span>
+        <span class="nav-count accent" id="navMcpCount">0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="skills" title="Skills & Rules">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path><path d="M9 7h6M9 11h4"></path></svg>
+        <span class="nav-copy"><span class="nav-title" data-i18n="nav.skills">Skills &amp; Rules</span><span class="nav-en" data-i18n="nav.skillsAlt"></span></span>
+        <span class="nav-count" id="navSkillsCount">0</span>
+      </button>
+      <button type="button" class="nav-item" data-view="worktrees" title="Worktrees & Queue">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2.2"></circle><circle cx="6" cy="19" r="2.2"></circle><circle cx="18" cy="7" r="2.2"></circle><path d="M6 7.2v9.6M18 9.2c0 4.8-5.2 3.6-9.2 6.4"></path></svg>
-        <span class="nav-copy"><span class="nav-title" data-i18n="nav.worktrees">Worktrees</span><span class="nav-en" data-i18n="nav.worktreesAlt"></span></span>
+        <span class="nav-copy"><span class="nav-title" data-i18n="nav.worktrees">Worktrees &amp; Queue</span><span class="nav-en" data-i18n="nav.worktreesAlt"></span></span>
         <span class="nav-count" id="navWtCount">0</span>
       </button>
-      <div class="nav-label" data-i18n="nav.system">System</div>
-      <button type="button" class="nav-item" data-view="toolkit">
+
+      <div class="nav-label" data-i18n="nav.system">Platform</div>
+      <button type="button" class="nav-item" data-view="toolkit" title="Toolkit & Memory">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 6.5a3.5 3.5 0 0 0 4.4 4.4l-9.1 9.1a2.1 2.1 0 0 1-3-3l9.1-9.1a3.5 3.5 0 0 0-1.4-1.4Z"></path><path d="M3 6h6M3 12h4"></path></svg>
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.toolkit">Toolkit &amp; Memory</span><span class="nav-en" data-i18n="nav.toolkitAlt"></span></span>
       </button>
-      <button type="button" class="nav-item" data-view="system">
+      <button type="button" class="nav-item" data-view="system" title="Ops & Doctor">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"></path></svg>
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.ops">Ops &amp; Doctor</span><span class="nav-en" data-i18n="nav.opsAlt"></span></span>
       </button>
     </nav>
 
     <div class="sidebar-foot">
-      <button type="button" class="side-action" data-action="probe" id="sideProbe">
+      <button type="button" class="side-action" data-action="probe" id="sideProbe" title="Probe all agents (R)">
         <span class="side-action-dot" id="sideProbeDot"></span>
-        <span data-i18n="side.probe">Probe all agents</span>
+        <span class="side-action-label" data-i18n="side.probe">Probe all agents</span>
         <kbd>R</kbd>
       </button>
       <div class="side-meta">
-        <span data-i18n="brand.foot">CollabHub v1.4</span>
+        <span data-i18n="brand.foot">CollabHub v1.5</span>
         <span class="dot-sep">·</span>
         <span data-i18n="brand.deps">0 npm deps</span>
       </div>
-      <div class="side-meta side-compat" data-i18n="brand.upgrade">Upgraded from CollabHub v1.1 · Static demo ready</div>
+      <div class="side-meta side-compat" data-i18n="brand.upgrade">Precision Mission Control · 43 MCP tools</div>
     </div>
   </aside>
 
@@ -79,7 +95,10 @@
       <div class="topbar-left">
         <button type="button" class="icon-btn only-mobile" id="btnMobileNav" data-i18n-aria="topbar.nav" aria-label="Toggle navigation">☰</button>
         <div class="crumb">
-          <span class="crumb-title" id="viewTitle" data-i18n="view.overview.title">Overview</span>
+          <div class="crumb-line">
+            <span class="crumb-title" id="viewTitle" data-i18n="view.overview.title">Overview</span>
+            <span class="crumb-badge">v1.5 Studio</span>
+          </div>
           <span class="crumb-sub" id="viewSubtitle" data-i18n="view.overview.sub">Agents, throughput, and live workbench health</span>
         </div>
       </div>
@@ -102,19 +121,23 @@
     </header>
 
     <main class="views">
+      <!-- ==================== VIEW: OVERVIEW ==================== -->
       <section class="view active" id="view-overview" data-view-panel="overview" aria-labelledby="viewTitle">
         <div class="alert-banner" id="alertBanner" hidden></div>
 
         <div class="quick-row">
           <button type="button" class="quick-btn" id="btnProbe" data-action="probe"><span class="quick-ico">◎</span><span data-i18n="quick.probe">Probe agents</span></button>
           <button type="button" class="quick-btn" id="btnOpenAgent" data-action="agent"><span class="quick-ico">＋</span><span data-i18n="quick.agent">Add agent</span></button>
-          <button type="button" class="quick-btn" data-action="memory"><span class="quick-ico">✎</span><span data-i18n="quick.memory">Write memory</span></button>
+          <button type="button" class="quick-btn" data-goto-view="mcphub"><span class="quick-ico">⌘</span><span data-i18n="quick.mcphub">MCP Hub</span></button>
+          <button type="button" class="quick-btn" data-goto-view="skills"><span class="quick-ico">❖</span><span data-i18n="quick.skills">Skills &amp; Rules</span></button>
+          <button type="button" class="quick-btn" data-goto-view="worktrees"><span class="quick-ico">⑂</span><span data-i18n="quick.queue">Merge Queue</span></button>
           <button type="button" class="quick-btn" data-goto-view="dag"><span class="quick-ico">⇄</span><span data-i18n="quick.dag">Run DAG</span></button>
-          <button type="button" class="quick-btn" data-goto-view="system"><span class="quick-ico">✚</span><span data-i18n="quick.ops">Run doctor</span></button>
+          <button type="button" class="quick-btn" data-action="memory"><span class="quick-ico">✎</span><span data-i18n="quick.memory">Write memory</span></button>
           <button type="button" class="quick-btn" data-action="events"><span class="quick-ico">◉</span><span data-i18n="quick.events">Event stream</span></button>
         </div>
 
         <section class="kpi-grid" id="kpiBar"></section>
+        <section class="bento-studio-grid" id="studioBento"></section>
         <section class="self-strip" id="selfStrip" hidden></section>
         <section class="toolkit-strip" id="toolkitStrip"></section>
 
@@ -149,6 +172,7 @@
         </div>
       </section>
 
+      <!-- ==================== VIEW: TASKS & KANBAN ==================== -->
       <section class="view" id="view-tasks" data-view-panel="tasks" aria-labelledby="viewTitle">
         <section class="panel">
           <div class="panel-head">
@@ -190,6 +214,7 @@
         </section>
       </section>
 
+      <!-- ==================== VIEW: DAG & PLAYBOOKS ==================== -->
       <section class="view" id="view-dag" data-view-panel="dag" aria-labelledby="viewTitle">
         <div class="dag-layout">
           <section class="panel">
@@ -318,24 +343,196 @@
         </section>
       </section>
 
+      <!-- ==================== VIEW: ALL-AGENT MCP HUB STUDIO (NEW v1.5) ==================== -->
+      <section class="view" id="view-mcphub" data-view-panel="mcphub" aria-labelledby="viewTitle">
+        <section class="panel studio-hero-panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="mcp.title">All-Agent MCP Hub &amp; Meta-MCP Gateway</h2>
+              <p data-i18n="mcp.sub">Unified zero-secret registry, drift matrix across Antigravity / Codex / Claude / Cursor / VS Code, lazy tool router, and Dry-Run `.bak` safe sync.</p>
+            </div>
+            <div class="panel-tools">
+              <button type="button" class="btn ghost sm" id="btnMcpRefresh" data-i18n="mcp.refresh">Scan clients</button>
+              <button type="button" class="btn ghost sm" id="btnMcpImport" data-i18n="mcp.import">Import discovered</button>
+              <button type="button" class="btn primary sm" id="btnOpenMcpModal" data-i18n="mcp.register">+ Register MCP</button>
+            </div>
+          </div>
+          <div class="studio-kpi-row" id="mcpKpiRow"></div>
+          <div class="client-chip-bar" id="mcpClientChips"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="mcp.matrixTitle">Cross-Client MCP Drift Matrix</h2>
+              <p data-i18n="mcp.matrixSub">Compare canonical server definitions against local client configs. Raw env/header values are never stored or echoed.</p>
+            </div>
+            <span class="pill" id="mcpMatrixCount">0</span>
+          </div>
+          <div class="table-wrap" id="mcpMatrixWrap"></div>
+        </section>
+
+        <section class="panel">
+          <div class="tabs" role="tablist" id="mcpStudioTabs">
+            <button type="button" class="tab-btn active" data-mcp-tab="router" data-i18n="mcp.tabRouter">Meta-MCP Lazy Tool Router</button>
+            <button type="button" class="tab-btn" data-mcp-tab="sync" data-i18n="mcp.tabSync">Safe Client Sync (Dry-Run + .bak)</button>
+            <button type="button" class="tab-btn" data-mcp-tab="snippet" data-i18n="mcp.tabSnippet">Zero-Secret Snippets</button>
+          </div>
+
+          <div class="tab-pane active" id="mcp-pane-router">
+            <div class="search-row">
+              <input type="search" id="mcpToolQuery" data-i18n-ph="mcp.toolSearchPh" placeholder="Search tools across all probed MCP servers (e.g. search, worktree, git)…" autocomplete="off" />
+              <button type="button" class="btn primary sm" id="btnMcpFindTools" data-i18n="mcp.findTools">Discover tools</button>
+            </div>
+            <div class="meta studio-hint" id="mcpToolsMeta"></div>
+            <div class="tool-catalog-grid" id="mcpToolCatalog"></div>
+            <div class="proxy-call-box" id="mcpProxyBox" hidden>
+              <div class="panel-head">
+                <div>
+                  <h3 id="mcpProxyTitle">Meta-MCP Proxy Call</h3>
+                  <p class="meta" id="mcpProxyTarget"></p>
+                </div>
+                <button type="button" class="btn ghost sm" id="btnCloseMcpProxy">×</button>
+              </div>
+              <label class="field"><span data-i18n="mcp.proxyArgs">JSON Arguments</span><textarea id="mcpProxyArgs" rows="3">{}</textarea></label>
+              <div class="form-actions">
+                <button type="button" class="btn primary sm" id="btnRunMcpProxy" data-i18n="mcp.proxyRun">Invoke via Meta-MCP Gateway</button>
+              </div>
+              <pre class="mono-pre" id="mcpProxyOut" hidden></pre>
+            </div>
+          </div>
+
+          <div class="tab-pane" id="mcp-pane-sync">
+            <div class="field-row">
+              <label class="field grow">
+                <span data-i18n="mcp.syncClient">Target local AI client</span>
+                <select id="mcpSyncClient">
+                  <option value="antigravity">Antigravity (JSON)</option>
+                  <option value="codex">Codex (TOML)</option>
+                  <option value="claude-code">Claude Code (JSON)</option>
+                  <option value="claude-desktop">Claude Desktop (JSON)</option>
+                  <option value="cursor">Cursor (JSON)</option>
+                  <option value="windsurf">Windsurf (JSON)</option>
+                  <option value="vscode">VS Code (JSON)</option>
+                  <option value="gemini-cli">Gemini CLI (JSON)</option>
+                </select>
+              </label>
+              <div class="field align-end">
+                <button type="button" class="btn ghost" id="btnMcpSyncDry" data-i18n="mcp.syncDry">1. Preview Dry-Run Diff</button>
+              </div>
+              <div class="field align-end">
+                <button type="button" class="btn primary" id="btnMcpSyncApply" disabled data-i18n="mcp.syncApply">2. Confirm &amp; Write (.bak)</button>
+              </div>
+            </div>
+            <div class="sync-summary-bar" id="mcpSyncSummary" hidden></div>
+            <div class="diff-view" id="mcpSyncDiff" hidden></div>
+          </div>
+
+          <div class="tab-pane" id="mcp-pane-snippet">
+            <div class="field-row">
+              <label class="field grow">
+                <span data-i18n="mcp.snippetClient">Client format</span>
+                <select id="mcpSnippetClient">
+                  <option value="antigravity">Antigravity (mcp_config.json)</option>
+                  <option value="codex">Codex (config.toml)</option>
+                  <option value="claude-code">Claude Code (.claude.json)</option>
+                  <option value="cursor">Cursor (.cursor/mcp.json)</option>
+                  <option value="vscode">VS Code (mcp.json)</option>
+                </select>
+              </label>
+              <div class="field align-end">
+                <button type="button" class="btn ghost" id="btnMcpGenSnippet" data-i18n="mcp.genSnippet">Generate</button>
+              </div>
+              <div class="field align-end">
+                <button type="button" class="btn primary" id="btnMcpCopySnippet" data-i18n="common.copy">Copy</button>
+              </div>
+            </div>
+            <pre class="mono-pre" id="mcpSnippetOut"></pre>
+          </div>
+        </section>
+      </section>
+
+      <!-- ==================== VIEW: SKILLS & RULES STUDIO (NEW v1.5) ==================== -->
+      <section class="view" id="view-skills" data-view-panel="skills" aria-labelledby="viewTitle">
+        <section class="panel studio-hero-panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="skills.title">Cross-Agent Skills &amp; Rules Sync Center</h2>
+              <p data-i18n="skills.sub">Keep SKILL.md capabilities and AGENTS.md / CLAUDE.md / GEMINI.md / .cursor/rules aligned across every coding agent with Dry-Run diffs and `.bak` backups.</p>
+            </div>
+            <div class="panel-tools">
+              <input type="text" id="skProjectDir" class="compact-input" list="wsProjects" data-i18n-ph="dag.dirPh" placeholder="Workspace / project dir…" />
+              <button type="button" class="btn primary sm" id="btnSkillsRefresh" data-i18n="skills.refresh">Rescan assets</button>
+            </div>
+          </div>
+          <div class="studio-kpi-row" id="skillsKpiRow"></div>
+        </section>
+
+        <section class="panel">
+          <div class="tabs" role="tablist" id="skillsStudioTabs">
+            <button type="button" class="tab-btn active" data-sk-tab="skills" data-i18n="skills.tabSkills">Skills (SKILL.md Matrix)</button>
+            <button type="button" class="tab-btn" data-sk-tab="rules" data-i18n="skills.tabRules">Project Rules &amp; Instructions</button>
+          </div>
+
+          <div class="tab-pane active" id="sk-pane-skills">
+            <div class="table-wrap" id="skillsMatrixWrap"></div>
+          </div>
+
+          <div class="tab-pane" id="sk-pane-rules">
+            <div class="rules-grid" id="rulesGrid"></div>
+          </div>
+        </section>
+
+        <section class="panel" id="skillsSyncPanel" hidden>
+          <div class="panel-head">
+            <div>
+              <h2 id="skillsSyncTitle">Sync Preview (Dry-Run)</h2>
+              <p class="meta" id="skillsSyncSub"></p>
+            </div>
+            <div class="panel-tools">
+              <button type="button" class="btn ghost sm" id="btnCloseSkillsSync" data-i18n="common.close">Close</button>
+              <button type="button" class="btn primary sm" id="btnConfirmSkillsSync" data-i18n="skills.confirmSync">Confirm &amp; Apply (.bak)</button>
+            </div>
+          </div>
+          <div class="sync-summary-bar" id="skillsSyncMeta"></div>
+          <div class="diff-view" id="skillsSyncDiff"></div>
+        </section>
+      </section>
+
+      <!-- ==================== VIEW: WORKTREES & MERGE QUEUE ==================== -->
       <section class="view" id="view-worktrees" data-view-panel="worktrees" aria-labelledby="viewTitle">
+        <section class="panel merge-queue-panel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="mq.title">Serialized Agent Merge Queue</h2>
+              <p data-i18n="mq.sub">Side-effect-free speculative `git merge-tree` pre-flight check catches cross-worktree collisions before touching `main`.</p>
+            </div>
+            <div class="panel-tools">
+              <button type="button" class="btn ghost sm" id="btnMqValidate" data-i18n="mq.validate">Speculative Check</button>
+              <button type="button" class="btn primary sm" id="btnMqProcess" data-i18n="mq.process">Confirm &amp; Merge Ready</button>
+            </div>
+          </div>
+          <div class="mq-list" id="mqList"></div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <div>
               <h2 data-i18n="wt.title">Concurrent Git worktree isolation</h2>
-              <p data-i18n="wt.sub">Each implementation task owns a branch; merge or cleanup only after the test gate passes.</p>
+              <p data-i18n="wt.sub">Click Review Diff to attach line-level review comments and dispatch targeted rework back to the owning agent, or enqueue into Merge Queue.</p>
             </div>
             <span class="pill" id="wtCount">0</span>
           </div>
           <div class="wt-grid" id="wtList"></div>
         </section>
         <div class="grid-3">
-          <section class="panel step-card"><span class="step-no">01</span><h3 data-i18n="wt.step1.title">Review Diff</h3><p data-i18n="wt.step1.desc">Inspect commits, dirty state and the colorized diff preview to confirm scope.</p></section>
-          <section class="panel step-card"><span class="step-no">02</span><h3 data-i18n="wt.step2.title">Verify Gate</h3><p data-i18n="wt.step2.desc">Run the allowlisted test suite inside the isolated directory; failure blocks the merge.</p></section>
-          <section class="panel step-card"><span class="step-no">03</span><h3 data-i18n="wt.step3.title">Merge / Cleanup</h3><p data-i18n="wt.step3.desc">Merge into the base branch once verified; abandon by cleaning the lease and branch.</p></section>
+          <section class="panel step-card"><span class="step-no">01</span><h3 data-i18n="wt.step1.title">Inline Diff Comments</h3><p data-i18n="wt.step1.desc">Click any diff line to attach feedback and dispatch targeted rework directly to the agent worktree.</p></section>
+          <section class="panel step-card"><span class="step-no">02</span><h3 data-i18n="wt.step2.title">Verify Gate &amp; Speculative Queue</h3><p data-i18n="wt.step2.desc">Run isolated tests and speculative `git merge-tree` across queued branches to prevent semantic collisions.</p></section>
+          <section class="panel step-card"><span class="step-no">03</span><h3 data-i18n="wt.step3.title">Serialized Merge / Cleanup</h3><p data-i18n="wt.step3.desc">Merge SHA-pinned verified branches in order into `main`, then release Mail leases cleanly.</p></section>
         </div>
       </section>
 
+      <!-- ==================== VIEW: TOOLKIT & MEMORY ==================== -->
       <section class="view" id="view-toolkit" data-view-panel="toolkit" aria-labelledby="viewTitle">
         <section class="panel">
           <div class="panel-head">
@@ -424,6 +621,7 @@
         </div>
       </section>
 
+      <!-- ==================== VIEW: OPS & DOCTOR ==================== -->
       <section class="view" id="view-system" data-view-panel="system" aria-labelledby="viewTitle">
         <section class="panel self-panel" id="selfPanel" aria-labelledby="selfTitle">
           <div class="panel-head self-head">
@@ -568,6 +766,46 @@
 </div>
 
 <div class="toast-host" id="toastHost" aria-live="polite" aria-atomic="false"></div>
+
+<!-- Register MCP Server Modal (NEW v1.5) -->
+<div class="modal-backdrop" id="modalMcpBg" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Register MCP server">
+    <div class="modal-head">
+      <div><h2 data-i18n="mcp.modalTitle">Register canonical MCP server</h2><p data-i18n="mcp.modalSub">Zero-secret registry: pass env var names only, never literal API keys.</p></div>
+      <button type="button" class="icon-btn" data-close-modal="modalMcpBg" aria-label="Close">×</button>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span data-i18n="mcp.fId">Server ID</span><input type="text" id="mcpId" placeholder="github-mcp" /></label>
+      <label class="field grow"><span data-i18n="mcp.fName">Display Name</span><input type="text" id="mcpName" placeholder="GitHub MCP" /></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span data-i18n="mcp.fTransport">Transport</span>
+        <select id="mcpTransport">
+          <option value="stdio">stdio (local process)</option>
+          <option value="http">http (Streamable HTTP)</option>
+          <option value="sse">sse (Server-Sent Events)</option>
+        </select>
+      </label>
+      <label class="field grow"><span data-i18n="mcp.fGroup">Logical Group</span><input type="text" id="mcpGroup" value="core" /></label>
+    </div>
+    <div id="mcpStdioFields">
+      <label class="field"><span data-i18n="mcp.fCommand">Command</span><input type="text" id="mcpCommand" placeholder="npx" /></label>
+      <label class="field"><span data-i18n="mcp.fArgs">Args (JSON array or space-separated)</span><input type="text" id="mcpArgs" placeholder='["-y", "@modelcontextprotocol/server-filesystem", "."]' /></label>
+    </div>
+    <div id="mcpHttpFields" hidden>
+      <label class="field"><span data-i18n="mcp.fUrl">Endpoint URL (https:// or loopback http://)</span><input type="text" id="mcpUrl" placeholder="http://127.0.0.1:5291/mcp" /></label>
+    </div>
+    <div class="field-row">
+      <label class="field grow"><span data-i18n="mcp.fEnvKeys">Env var names (comma-separated, NO values)</span><input type="text" id="mcpEnvKeys" placeholder="GITHUB_TOKEN, API_KEY" /></label>
+      <label class="field grow"><span data-i18n="mcp.fTags">Tags</span><input type="text" id="mcpTags" placeholder="git, search" /></label>
+    </div>
+    <div class="form-error" id="mcpErr"></div>
+    <div class="form-actions">
+      <button type="button" class="btn" data-close-modal="modalMcpBg" data-i18n="common.cancel">Cancel</button>
+      <button type="button" class="btn primary" id="btnSaveMcp" data-i18n="mcp.save">Save MCP Server</button>
+    </div>
+  </div>
+</div>
 
 <!-- Agent registration modal -->
 <div class="modal-backdrop" id="modalAgentBg" aria-hidden="true">

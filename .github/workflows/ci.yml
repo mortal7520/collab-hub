@@ -21,7 +21,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
       - name: Run zero-dependency test suite
         run: node --test test/collab-hub.test.mjs
-      - name: Verify MCP stdio handshake (37 tools)
+      - name: Verify MCP stdio handshake (43 tools)
         run: |
           node --input-type=module -e "
           import { spawn } from 'node:child_process';
@@ -32,7 +32,7 @@ jobs:
           rl.on('line', (l) => {
             out.push(JSON.parse(l));
             if (out.length === 2) {
-              if (out[1].result.tools.length !== 37) process.exit(1);
+              if (out[1].result.tools.length !== 43) process.exit(1);
               console.log('MCP verified:', out[0].result.serverInfo, out[1].result.tools.length, 'tools');
               c.kill();
               process.exit(0);

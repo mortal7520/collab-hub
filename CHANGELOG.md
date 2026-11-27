@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.5.0 (2026-11-27)
+
+**All-Agent Multi-Tool Collaboration Suite & Precision Mission Control Redesign: All-Agent MCP Hub + Meta-MCP Lazy Tool Router, Cross-Agent Skills & Rules Sync Center, Worktree Inline Diff Comments + Serialized Speculative Merge Queue, 43 unified MCP tools, and zero npm dependencies.**
+
+### Highlights
+- **All-Agent MCP Hub & Meta-MCP Lazy Tool Router (`src/mcp-hub.mjs`, `collab_mcp_hub`, `collab_mcp_find_tools`, `collab_mcp_call_tool`, `/api/mcp-hub*`)**:
+  - Zero-dependency adaptation of `ravitemer/mcp-hub` (`v4.2.1`, MIT), `warpdev/mcp-hub-mcp` (MIT), and `samanhappy/mcphub` (Apache-2.0) — full commit provenance recorded in [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md).
+  - Scans and compares Antigravity (`mcp_config.json`), Codex (`config.toml`), Claude Code (`.claude.json`), Claude Desktop, Gemini CLI, Cursor, Windsurf, and VS Code with zero-secret canonical hashing, inline-secret detection (`secret_inline` blocks syncing literal tokens), DNS-resolved SSRF protection, live JSON-RPC 2.0 `initialize` + `tools/list` probing, Meta-MCP lazy `find_tools` + `call_tool` gateway, copyable JSON/TOML snippets, and **Dry-Run diff preview + automatic `.bak` backup + `confirmed: true`** safe client config sync.
+- **Cross-Agent Skills & Rules Sync Center (`src/skills-hub.mjs`, `collab_skills_hub`, `/api/skills-hub*`)**:
+  - Zero-dependency adaptation of `lbb00/ai-rules-sync` (Unlicense), `fALECX/shareskills` (ISC), and `viteinfinite/sync-skills` (MIT).
+  - Inventories `SKILL.md` directories across Antigravity, Claude Code, Codex, and Cursor plus workspace rule files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/project.mdc`, `.windsurfrules`) with frontmatter parsing, SHA-256 drift detection, `.mdc` dialect wrapping, Dry-Run diff preview, and `.bak`-backed confirmed sync.
+- **Worktree Inline Diff Comments, Targeted Rework & Serialized Merge Queue (`src/merge-queue.mjs`, `collab_worktree_comments`, `collab_merge_queue`, `/api/worktrees/comments*`, `/api/merge-queue*`)**:
+  - Inspired by `BloopAI/vibe-kanban` (Apache-2.0): pin line-level review comments (`file:line`) directly on worktree diffs and dispatch all open comments back to the owning agent inside that isolated worktree for targeted rework.
+  - Side-effect-free speculative `git merge-tree --write-tree` cumulative queue validation catches both base-branch conflicts and cross-worktree collisions in queue order BEFORE mutating `main`, followed by confirmed serialized SHA-pinned merges.
+- **Precision Mission Control UI Redesign (`public/index.html`, `public/styles.css`, `public/app.js`, `public/studios.js`)**:
+  - Collapsible icon+label navigation rail (`[`), frosted-glass telemetry topbar, Overview Bento Studio telemetry cards, dedicated **MCP Hub**, **Skills & Rules**, and **Worktrees & Queue** studios, interactive clickable diff gutters, full EN/中文 parity, Obsidian Dark / Alabaster Light themes, and 100% static GitHub Pages interactive demo compatibility.
+- **43 Unified MCP Tools & 38 Automated End-to-End Tests (`SCHEMA_VERSION = 150`)**.
+
 ## v1.4.0 (2026-11-25)
 
 **Self-Improving & Self-Healing Multi-Agent Engine: runtime self-diagnosis, safe dry-run/apply auto-heal, learned incident guardrails, per-channel Bayesian telemetry, opt-in closed-loop auto-repair DAG, and 37 unified MCP tools** — built & adversarially audited concurrently by `Codex Desktop` + `WSL DSH` + `Cloud Muse` + `AGY`.

@@ -9,12 +9,15 @@ import { discoverLocalAgents } from '../src/discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
 import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, sweepOrphanTasks } from '../src/executors.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
+import { buildMcpHubSnapshot, findMcpTools, importDiscoveredMcpServers, probeMcpServer, syncMcpToClient } from '../src/mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
+import { enqueueMergeQueue, listMergeQueue, processMergeQueue, validateMergeQueue } from '../src/merge-queue.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
 import { probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
 import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
+import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from '../src/skills-hub.mjs';
 import { computeAgentTelemetry } from '../src/telemetry.mjs';
 import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
@@ -284,12 +287,36 @@ if (cmd === 'mcp') {
       else console.log(rep.markdown);
     } else if (cmd === 'toolkit') {
       console.log(JSON.stringify({ ...getToolkitStatus(), cass_archive: await getCassStats() }, null, 2));
+    } else if (cmd === 'mcp-hub') {
+      const sub = positionals[0] || 'snapshot';
+      if (sub === 'snapshot') console.log(JSON.stringify(buildMcpHubSnapshot(db), null, 2));
+      else if (sub === 'import') console.log(JSON.stringify(importDiscoveredMcpServers(db, { clientId: flag('client') }), null, 2));
+      else if (sub === 'probe') console.log(JSON.stringify(await probeMcpServer(db, positionals[1] || flag('id')), null, 2));
+      else if (sub === 'find-tools') console.log(JSON.stringify(findMcpTools(db, { query: positionals.slice(1).join(' ') || flag('q', '') }), null, 2));
+      else if (sub === 'sync') console.log(JSON.stringify(syncMcpToClient(db, { clientId: flag('client') || positionals[1], confirmed: flags.confirm === true }), null, 2));
+      else throw new Error(`Unknown mcp-hub subcommand "${sub}". Use: snapshot | import | probe | find-tools | sync`);
+    } else if (cmd === 'skills-hub') {
+      const sub = positionals[0] || 'snapshot';
+      if (sub === 'snapshot') console.log(JSON.stringify(buildSkillsRulesSnapshot({ projectDir: flag('dir') || WORKSPACE_ROOT }), null, 2));
+      else if (sub === 'sync-skill') console.log(JSON.stringify(syncSkillAcrossClients(db, { skillName: flag('skill') || positionals[1], sourceClient: flag('from'), targetClients: flag('to') ? String(flag('to')).split(',') : [], confirmed: flags.confirm === true }), null, 2));
+      else if (sub === 'sync-rule') console.log(JSON.stringify(syncRuleAcrossTargets(db, { projectDir: flag('dir') || WORKSPACE_ROOT, sourceRuleId: flag('from', 'agents-md'), targetRuleIds: flag('to') ? String(flag('to')).split(',') : [], confirmed: flags.confirm === true }), null, 2));
+      else throw new Error(`Unknown skills-hub subcommand "${sub}". Use: snapshot | sync-skill | sync-rule`);
+    } else if (cmd === 'merge-queue') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ queue: listMergeQueue(db) }, null, 2));
+      else if (sub === 'enqueue') console.log(JSON.stringify(enqueueMergeQueue(db, { taskId: positionals[1] || flag('task'), priority: Number(flag('priority', '100')) }), null, 2));
+      else if (sub === 'validate') console.log(JSON.stringify(validateMergeQueue(db), null, 2));
+      else if (sub === 'process') console.log(JSON.stringify(processMergeQueue(db, { confirmed: flags.confirm === true }), null, 2));
+      else throw new Error(`Unknown merge-queue subcommand "${sub}". Use: list | enqueue | validate | process`);
     } else {
       console.log([
         `CollabHub v${APP_VERSION} — Zero-Dependency Local-First Multi-Agent Workbench`,
         'Commands:',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
-        '  mcp                                          Start the 34-tool MCP stdio server',
+        '  mcp                                          Start the 43-tool MCP stdio server',
+        '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub & Meta-MCP tool discovery',
+        '  skills-hub snapshot|sync-skill|sync-rule     Cross-Agent Skills & Rules sync hub',
+        '  merge-queue list|enqueue|validate|process    Speculative Git Merge Queue',
         '  init                                         Initialize runtime directories & SQLite ledger',
         '  probe | roster                               Live-probe all agents + Mail Hub + toolkit',
         '  doctor [--backup]                            8-point system health check (+ optional VACUUM INTO backup)',

@@ -40,7 +40,7 @@ function ensureColumn(db, table, column, definition) {
   }
 }
 
-const SCHEMA_VERSION = 140;
+const SCHEMA_VERSION = 150;
 
 function initSchema(db) {
   db.exec('BEGIN IMMEDIATE;');
@@ -182,6 +182,60 @@ function initSchema(db) {
       actions_json TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS mcp_servers (
+      server_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      transport TEXT NOT NULL,
+      command TEXT,
+      args_json TEXT NOT NULL DEFAULT '[]',
+      url TEXT,
+      env_keys_json TEXT NOT NULL DEFAULT '[]',
+      header_keys_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      group_name TEXT NOT NULL DEFAULT 'default',
+      source TEXT NOT NULL DEFAULT 'registered',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_probe_ok INTEGER,
+      last_probe_tools_count INTEGER,
+      last_probe_tools_json TEXT,
+      last_probe_detail TEXT,
+      last_probed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS worktree_comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      line_no INTEGER,
+      side TEXT NOT NULL DEFAULT 'new',
+      author TEXT NOT NULL DEFAULT 'reviewer',
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      rework_task_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_wt_comments_task ON worktree_comments(task_id, status, id ASC);
+
+    CREATE TABLE IF NOT EXISTS merge_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT NOT NULL UNIQUE,
+      repo_dir TEXT NOT NULL,
+      branch_name TEXT NOT NULL,
+      head_sha TEXT NOT NULL,
+      base_ref TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 100,
+      status TEXT NOT NULL DEFAULT 'queued',
+      verify_preset TEXT NOT NULL DEFAULT 'auto',
+      check_summary TEXT,
+      conflict_files_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_merge_queue_order ON merge_queue(status, priority ASC, id ASC);
   `);
 
   // Safe forward-compatible migrations for existing hub.db
@@ -190,6 +244,7 @@ function initSchema(db) {
   ensureColumn(db, 'tasks', 'attempted_at', 'TEXT');
   ensureColumn(db, 'tasks', 'depends_on_json', 'TEXT');
   ensureColumn(db, 'tasks', 'owner_pid', 'INTEGER');
+  ensureColumn(db, 'mcp_servers', 'group_name', "TEXT NOT NULL DEFAULT 'default'");
   ensureColumn(db, 'tasks', 'owner_token', 'TEXT');
   ensureColumn(db, 'tasks', 'cancel_requested_at', 'TEXT');
   ensureColumn(db, 'tasks', 'cancel_reason', 'TEXT');
