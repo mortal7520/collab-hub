@@ -1,6 +1,10 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import { INTEGRATIONS } from './config.mjs';
 import { listAgents } from './registry.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -12,6 +16,34 @@ const KNOWN_LOCAL_ENDPOINTS = [
 ];
 
 const KNOWN_CLI_CANDIDATES = [
+  {
+    id: 'claude-cli',
+    name: 'Claude Code CLI',
+    binaries: ['claude.exe', 'claude'],
+    roles: ['planner', 'researcher', 'implementer', 'reviewer', 'synthesizer'],
+    config_template: (cmd) => ({ command: cmd, args: ['-p', '{{prompt}}'], prompt_mode: 'arg', timeout_s: 240 }),
+  },
+  {
+    id: 'codex-cli',
+    name: 'Codex CLI',
+    binaries: ['codex.exe', 'codex'],
+    roles: ['planner', 'researcher', 'implementer', 'tester', 'reviewer'],
+    config_template: (cmd) => ({ command: cmd, args: ['exec', '--skip-git-repo-check', '{{prompt}}'], prompt_mode: 'arg', timeout_s: 240 }),
+  },
+  {
+    id: 'agy-cli',
+    name: 'Antigravity CLI',
+    binaries: ['agy.exe', 'agy'],
+    roles: ['planner', 'researcher', 'implementer', 'reviewer'],
+    config_template: (cmd) => ({ command: cmd, args: ['-p', '{{prompt}}'], prompt_mode: 'arg', timeout_s: 180 }),
+  },
+  {
+    id: 'cursor-agent-cli',
+    name: 'Cursor Agent CLI',
+    binaries: ['cursor-agent.exe', 'cursor-agent'],
+    roles: ['implementer', 'reviewer', 'researcher'],
+    config_template: (cmd) => ({ command: cmd, args: ['-p', '{{prompt}}'], prompt_mode: 'arg', timeout_s: 180 }),
+  },
   {
     id: 'gemini-cli',
     name: 'Gemini CLI',
@@ -49,6 +81,86 @@ const KNOWN_CLOUD_ENV_PROVIDERS = [
   { id: 'openai-api', name: 'OpenAI API', env_var: 'OPENAI_API_KEY', base_url: 'https://api.openai.com/v1', model: 'gpt-4.1', roles: ['planner', 'reviewer', 'synthesizer'] },
   { id: 'siliconflow-api', name: 'SiliconFlow', env_var: 'SILICONFLOW_API_KEY', base_url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-Coder-32B-Instruct', roles: ['researcher', 'reviewer'] },
 ];
+
+function getDesktopAppCandidates(envObj = process.env) {
+  const localApp = envObj.LOCALAPPDATA || '';
+  const progFiles = envObj.ProgramFiles || '';
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return [
+      { id: 'antigravity', name: 'Antigravity Desktop', paths: [path.join(localApp, 'Programs', 'Antigravity', 'Antigravity.exe')], launch_args: (dir) => [dir] },
+      { id: 'claude-desktop', name: 'Claude Desktop', paths: [path.join(localApp, 'AnthropicClaude', 'claude.exe'), path.join(localApp, 'Programs', 'Claude', 'Claude.exe')], launch_args: () => [] },
+      { id: 'codex-desktop', name: 'Codex Desktop', paths: [path.join(localApp, 'Programs', 'Codex', 'Codex.exe'), path.join(localApp, 'Codex', 'Codex.exe')], launch_args: (dir) => [dir] },
+      { id: 'cursor', name: 'Cursor IDE', paths: [path.join(localApp, 'Programs', 'cursor', 'Cursor.exe')], launch_args: (dir) => [dir] },
+      { id: 'vscode', name: 'VS Code', paths: [path.join(localApp, 'Programs', 'Microsoft VS Code', 'Code.exe'), path.join(progFiles, 'Microsoft VS Code', 'Code.exe')], launch_args: (dir) => [dir] },
+      { id: 'windows-terminal', name: 'Windows Terminal', paths: [path.join(localApp, 'Microsoft', 'WindowsApps', 'wt.exe')], launch_args: (dir) => ['-d', dir] },
+    ];
+  }
+  if (process.platform === 'darwin') {
+    return [
+      { id: 'antigravity', name: 'Antigravity Desktop', paths: ['/Applications/Antigravity.app'], launch_args: (dir) => [dir] },
+      { id: 'claude-desktop', name: 'Claude Desktop', paths: ['/Applications/Claude.app'], launch_args: () => [] },
+      { id: 'cursor', name: 'Cursor IDE', paths: ['/Applications/Cursor.app'], launch_args: (dir) => [dir] },
+      { id: 'vscode', name: 'VS Code', paths: ['/Applications/Visual Studio Code.app'], launch_args: (dir) => [dir] },
+    ];
+  }
+  return [
+    { id: 'antigravity', name: 'Antigravity CLI', paths: [path.join(home, '.local', 'bin', 'agy')], launch_args: (dir) => [dir] },
+    { id: 'vscode', name: 'VS Code', paths: ['/usr/bin/code', '/usr/local/bin/code'], launch_args: (dir) => [dir] },
+  ];
+}
+
+async function discoverWslClis(registeredIds, envObj = process.env) {
+  if (process.platform !== 'win32' || !INTEGRATIONS.wslDistro || !INTEGRATIONS.wslUser) return [];
+  const distro = INTEGRATIONS.wslDistro;
+  const user = INTEGRATIONS.wslUser;
+  const wslCandidates = [
+    { id: 'wsl-claude-cli', bin: 'claude', name: 'WSL Claude Code CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer', 'synthesizer'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
+    { id: 'wsl-codex-cli', bin: 'codex', name: 'WSL Codex CLI', roles: ['planner', 'researcher', 'implementer', 'tester', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--', p, 'exec', '--skip-git-repo-check', '{{prompt}}'] },
+    { id: 'wsl-agy-cli', bin: 'agy', name: 'WSL Antigravity CLI', roles: ['planner', 'researcher', 'implementer', 'reviewer'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
+    { id: 'wsl-cursor-cli', bin: 'cursor-agent', name: 'WSL Cursor Agent CLI', roles: ['implementer', 'reviewer', 'researcher'], args: (p) => ['-d', distro, '-u', user, '--', p, '-p', '{{prompt}}'] },
+  ];
+  const probeCmd = wslCandidates.map((c) => {
+    const p = `/home/${user}/.local/bin/${c.bin}`;
+    return `[ -x "${p}" ] && echo "${p}"`;
+  }).join('; ');
+  try {
+    const { stdout } = await execFileAsync(
+      'wsl.exe',
+      ['-d', distro, '-u', user, '--', 'sh', '-c', probeCmd],
+      { encoding: 'utf8', timeout: 3000, windowsHide: true },
+    ).catch((err) => ({ stdout: String(err?.stdout || '') }));
+    const foundSet = new Set(stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean));
+    return wslCandidates
+      .map((c) => {
+        const remotePath = `/home/${user}/.local/bin/${c.bin}`;
+        if (!foundSet.has(remotePath)) return null;
+        return {
+          id: c.id,
+          name: c.name,
+          found: true,
+          path: `wsl:${distro}:${remotePath}`,
+          is_wsl: true,
+          already_registered: registeredIds.has(c.id),
+          suggested_registration: {
+            agent_id: c.id,
+            name: c.name,
+            driver: 'generic-cli',
+            roles: c.roles,
+            config: {
+              command: 'wsl.exe',
+              args: c.args(remotePath),
+              prompt_mode: 'arg',
+              timeout_s: 240,
+            },
+          },
+        };
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 async function probeLocalEndpoint(ep) {
   try {
@@ -96,22 +208,25 @@ function slugId(prefix, modelName) {
 
 /**
  * Safely discover locally available OpenAI-compatible model servers (Ollama/LM Studio/vLLM),
- * installed external Agent CLIs on PATH, and boolean API-key env readiness (NEVER exposes secrets).
+ * installed external Agent CLIs (native + WSL), installed Desktop Apps, and boolean API-key
+ * env readiness (NEVER exposes secrets).
  */
 export async function discoverLocalAgents(db, deps = {}) {
   const registeredIds = new Set(listAgents(db, { includeDisabled: true }).map((a) => a.id));
   const endpointProbe = deps.probeLocalEndpoint || probeLocalEndpoint;
   const binLocator = deps.locateBinary || locateBinary;
   const envObj = deps.env || process.env;
+  const skipWsl = deps.skipWsl === true || Boolean(deps.locateBinary);
 
-  const [endpoints, cliMatches] = await Promise.all([
+  const [endpoints, cliMatches, wslCliMatches] = await Promise.all([
     Promise.all(KNOWN_LOCAL_ENDPOINTS.map((ep) => endpointProbe(ep))),
     Promise.all(KNOWN_CLI_CANDIDATES.map(async (c) => {
       for (const b of c.binaries) {
         const found = await binLocator(b);
         if (found) {
           return {
-            ...c,
+            id: c.id,
+            name: c.name,
             found: true,
             path: found.path,
             is_shim: found.is_shim,
@@ -128,7 +243,20 @@ export async function discoverLocalAgents(db, deps = {}) {
       }
       return { id: c.id, name: c.name, found: false, path: null, already_registered: registeredIds.has(c.id) };
     })),
+    skipWsl ? Promise.resolve([]) : discoverWslClis(registeredIds, envObj),
   ]);
+
+  const desktop_apps = getDesktopAppCandidates(envObj).map((app) => {
+    const foundPath = app.paths.find((p) => {
+      try { return Boolean(p) && fs.existsSync(p); } catch { return false; }
+    }) || null;
+    return {
+      id: app.id,
+      name: app.name,
+      found: Boolean(foundPath),
+      path: foundPath,
+    };
+  });
 
   const local_models = [];
   for (const ep of endpoints) {
@@ -170,7 +298,8 @@ export async function discoverLocalAgents(db, deps = {}) {
     scanned_at: new Date().toISOString(),
     local_endpoints: endpoints.map(({ id_prefix, label, base_url, reachable, models }) => ({ id_prefix, label, base_url, reachable, model_count: models.length })),
     local_models,
-    cli_agents: cliMatches,
+    cli_agents: [...cliMatches, ...wslCliMatches],
+    desktop_apps,
     cloud_env_ready,
   };
 }

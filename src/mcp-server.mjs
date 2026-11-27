@@ -11,9 +11,10 @@ import {
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, runSystemDoctor } from './doctor.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
+import { COCKPIT_RESOURCE_URI, MCP_APP_MIME_TYPE, buildCockpitAppHtml, formatCyberHudCard } from './mcp-app-ui.mjs';
 import {
   buildMcpHubSnapshot, callMcpServerTool, findMcpTools, generateClientSnippet,
-  importDiscoveredMcpServers, probeMcpServer, registerMcpServer, removeMcpServer, syncMcpToClient,
+  getMcpHubSummary, importDiscoveredMcpServers, probeMcpServer, registerMcpServer, removeMcpServer, syncMcpToClient,
 } from './mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from './memory.mjs';
 import {
@@ -24,7 +25,7 @@ import { runPlaybook } from './playbooks.mjs';
 import { planDispatch, probeAllMembers } from './prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from './recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from './registry.mjs';
-import { applySelfHeal, diagnoseSystem, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from './self-improve.mjs';
+import { applySelfHeal, diagnoseSystem, getSelfImproveSummary, listIncidentLessons, saveIncidentLesson, toggleIncidentLesson } from './self-improve.mjs';
 import { buildSkillsRulesSnapshot, syncRuleAcrossTargets, syncSkillAcrossClients } from './skills-hub.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 import {
@@ -33,9 +34,61 @@ import {
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from './workflows.mjs';
 import { cleanupWorktree, createWorktree, listWorktrees, mergeWorktree, reviewWorktree, verifyWorktree } from './worktree.mjs';
 
+const COCKPIT_TOOL_META = Object.freeze({
+  ui: { resourceUri: COCKPIT_RESOURCE_URI },
+  'ui/resourceUri': COCKPIT_RESOURCE_URI,
+  'com.google.antigravity/ui': {
+    entrypoints: [
+      { type: 'aux_pane', title: 'CollabHub Cockpit' },
+      { type: 'global', title: 'CollabHub' },
+    ],
+  },
+});
+
+const INLINE_COCKPIT_META = Object.freeze({
+  ui: { resourceUri: COCKPIT_RESOURCE_URI },
+  'ui/resourceUri': COCKPIT_RESOURCE_URI,
+});
+
+export const MCP_APP_RESOURCES = Object.freeze([
+  {
+    uri: COCKPIT_RESOURCE_URI,
+    name: 'CollabHub Neural Mission Cockpit',
+    description: 'Interactive 60fps animated multi-agent Mission Control UI (Fleet Radar, Kanban & Logs, MCP Hub, Skills & Rules, Merge Queue) for Antigravity, Claude Desktop, and Codex Desktop.',
+    mimeType: MCP_APP_MIME_TYPE,
+    _meta: { ui: { prefersBorder: false } },
+  },
+]);
+
 export const TOOLS = Object.freeze([
   {
+    name: 'collab_cockpit',
+    title: 'CollabHub Cockpit',
+    description: 'Open the interactive animated CollabHub Neural Mission Control Cockpit natively inside Antigravity (inline / side pane / global sidebar), Claude Desktop, or Codex Desktop — with graceful Cyber-HUD text card fallback for terminal hosts.',
+    _meta: COCKPIT_TOOL_META,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tab: { type: 'string', enum: ['radar', 'tasks', 'mcp', 'skills', 'queue'], description: 'Optional initial cockpit tab (default radar).' },
+        project_dir: { type: 'string', description: 'Optional workspace/project directory for Skills & Rules scan.' },
+      },
+    },
+  },
+  {
+    name: 'collab_cockpit_state',
+    title: 'CollabHub Cockpit Live State',
+    description: 'App-only fast state refresh for the embedded CollabHub MCP App Cockpit (hidden from LLM tool list).',
+    _meta: { ui: { visibility: ['app'] } },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_dir: { type: 'string' },
+      },
+    },
+  },
+  {
     name: 'collab_roster',
+    _meta: INLINE_COCKPIT_META,
     description: 'Live-probe ALL registered agents (built-in Codex/AGY/Claude/DSH/Muse + any custom generic-cli/openai-http/desktop-native agents), verified Mail Hub, and installed GitHub toolkit status.',
     inputSchema: {
       type: 'object',
@@ -674,8 +727,35 @@ export const TOOLS = Object.freeze([
   },
 ]);
 
+function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT } = {}) {
+  const members = getMemberStatuses(db);
+  const tasks = db.prepare('SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 60').all().map(parseTaskRow);
+  const worktrees = listWorktrees(db);
+  const merge_queue = listMergeQueue(db);
+  const mcp_hub = buildMcpHubSnapshot(db);
+  const skills_hub = buildSkillsRulesSnapshot({ projectDir: projectDir || WORKSPACE_ROOT });
+  const self_improve = getSelfImproveSummary(db);
+  return {
+    version: APP_VERSION,
+    initial_tab: tab || 'radar',
+    project_dir: projectDir || WORKSPACE_ROOT,
+    generated_at: new Date().toISOString(),
+    members,
+    tasks,
+    worktrees,
+    merge_queue,
+    mcp_hub,
+    mcp_hub_summary: getMcpHubSummary(db),
+    skills_hub,
+    self_improve,
+  };
+}
+
 export async function handleToolCall(db, name, args = {}) {
   switch (name) {
+    case 'collab_cockpit':
+    case 'collab_cockpit_state':
+      return buildCockpitSnapshot(db, { tab: args.tab || 'radar', projectDir: args.project_dir || WORKSPACE_ROOT });
     case 'collab_roster':
       return {
         ...(await probeAllMembers(db, { desktopObservations: args.desktop_observations })),
@@ -971,13 +1051,23 @@ export async function handleToolCall(db, name, args = {}) {
   }
 }
 
+const SUPPORTED_MCP_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+
 export function startMcpStdioServer() {
   ensureRuntimeDirs();
   const db = openHubDb();
   const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  const cancelledIds = new Set();
+  const activeControllers = new Map();
 
-  const shutdown = () => { try { db.close(); } catch {} };
+  const shutdown = () => {
+    for (const ac of activeControllers.values()) {
+      try { ac.abort('server_shutdown'); } catch {}
+    }
+    activeControllers.clear();
+    try { db.close(); } catch {}
+  };
   rl.on('close', shutdown);
   process.on('SIGINT', () => { shutdown(); process.exit(0); });
   process.on('SIGTERM', () => { shutdown(); process.exit(0); });
@@ -996,16 +1086,35 @@ export function startMcpStdioServer() {
     }
     const hasId = Object.prototype.hasOwnProperty.call(msg, 'id') && msg.id !== undefined;
     const { id, method, params } = msg;
-    if (!hasId) return;
+    if (!hasId) {
+      if (method === 'notifications/cancelled' && params?.requestId !== undefined) {
+        const key = String(params.requestId);
+        cancelledIds.add(key);
+        const ctrl = activeControllers.get(key);
+        if (ctrl) {
+          try { ctrl.abort(params.reason || 'client_cancelled'); } catch {}
+        }
+        if (cancelledIds.size > 200) {
+          const oldest = cancelledIds.values().next().value;
+          if (oldest !== undefined) cancelledIds.delete(oldest);
+        }
+      }
+      return;
+    }
 
     try {
       if (method === 'initialize') {
+        const reqVer = params?.protocolVersion;
+        const negotiated = SUPPORTED_MCP_VERSIONS.includes(reqVer) ? reqVer : '2025-06-18';
         send({
           jsonrpc: '2.0',
           id,
           result: {
-            protocolVersion: params?.protocolVersion || '2024-11-05',
-            capabilities: { tools: {} },
+            protocolVersion: negotiated,
+            capabilities: {
+              tools: {},
+              resources: { subscribe: false, listChanged: false },
+            },
             serverInfo: { name: 'collab-hub', version: APP_VERSION },
           },
         });
@@ -1013,18 +1122,47 @@ export function startMcpStdioServer() {
         send({ jsonrpc: '2.0', id, result: {} });
       } else if (method === 'tools/list') {
         send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
-      } else if (method === 'tools/call') {
-        try {
-          const result = await handleToolCall(db, params?.name, params?.arguments || {});
+      } else if (method === 'resources/list') {
+        send({ jsonrpc: '2.0', id, result: { resources: MCP_APP_RESOURCES } });
+      } else if (method === 'resources/read') {
+        const uri = params?.uri;
+        if (uri !== COCKPIT_RESOURCE_URI) {
+          send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown resource URI: ${uri}` } });
+        } else {
           send({
             jsonrpc: '2.0',
             id,
             result: {
-              content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+              contents: [{
+                uri: COCKPIT_RESOURCE_URI,
+                mimeType: MCP_APP_MIME_TYPE,
+                text: buildCockpitAppHtml(),
+                _meta: { ui: { prefersBorder: false } },
+              }],
+            },
+          });
+        }
+      } else if (method === 'tools/call') {
+        const reqKey = String(id);
+        const ac = new AbortController();
+        activeControllers.set(reqKey, ac);
+        try {
+          if (cancelledIds.delete(reqKey)) return;
+          const result = await handleToolCall(db, params?.name, params?.arguments || {}, { signal: ac.signal });
+          if (ac.signal.aborted || cancelledIds.delete(reqKey)) return;
+          const textContent = params?.name === 'collab_cockpit'
+            ? `${formatCyberHudCard(result)}\n\nTip: Interactive 60fps MCP App Cockpit attached (${COCKPIT_RESOURCE_URI}).`
+            : JSON.stringify(result, null, 2);
+          send({
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: textContent }],
               structuredContent: result,
             },
           });
         } catch (toolErr) {
+          if (ac.signal.aborted || cancelledIds.delete(reqKey)) return;
           send({
             jsonrpc: '2.0',
             id,
@@ -1033,6 +1171,8 @@ export function startMcpStdioServer() {
               content: [{ type: 'text', text: String(toolErr.message || toolErr) }],
             },
           });
+        } finally {
+          activeControllers.delete(reqKey);
         }
       } else {
         send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });

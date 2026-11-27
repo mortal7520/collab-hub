@@ -19,12 +19,15 @@ import { hubBus } from '../src/event-bus.mjs';
 import { createSseParser, parseSseEvents } from '../src/mail-mcp-proxy.mjs';
 import { mailNameForMember } from '../src/mail-sync.mjs';
 import { searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
+import { COCKPIT_RESOURCE_URI, MCP_APP_MIME_TYPE, buildCockpitAppHtml, formatCyberHudCard } from '../src/mcp-app-ui.mjs';
 import {
-  buildMcpHubSnapshot, callMcpServerTool, detectInlineSecret, findMcpTools,
+  assertSafeRemoteUrl, buildMcpHubSnapshot, callMcpServerTool, detectInlineSecret, findMcpTools,
   generateClientSnippet, importDiscoveredMcpServers, probeMcpServer,
   registerMcpServer, resolveSafePlaceholders, syncMcpToClient,
 } from '../src/mcp-hub.mjs';
-import { TOOLS, handleToolCall } from '../src/mcp-server.mjs';
+import { MCP_APP_RESOURCES, TOOLS, handleToolCall } from '../src/mcp-server.mjs';
+import { collectHudSnapshot, detectColorSupport, renderStatusLine } from '../src/hud.mjs';
+import { TUI_TABS, collectTuiData, renderTuiFrame } from '../src/tui.mjs';
 import {
   addWorktreeComment, dispatchWorktreeRework, enqueueMergeQueue, listMergeQueue,
   listWorktreeComments, processMergeQueue, resolveWorktreeComment, validateMergeQueue,
@@ -411,8 +414,8 @@ test('Muse outer identity verification, monotonic generation, ACK-only rejection
   }
 });
 
-test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 43 MCP tools', async () => {
-  assert.equal(TOOLS.length, 43);
+test('M6 + M8 + Batch poll: atomic Chinese memory, multi-line SSE framing, and 45 MCP tools', async () => {
+  assert.equal(TOOLS.length, 45);
   const sse = parseSseEvents('event: message\ndata: {"jsonrpc":"2.0",\ndata: "id":1}\n\ndata: {"id":2}\n\n');
   assert.equal(sse.length, 2);
   assert.deepEqual(JSON.parse(sse[0]), { jsonrpc: '2.0', id: 1 });
@@ -1214,7 +1217,7 @@ test('v1.0: Real token usage telemetry aggregation + Kanban board HTML & /api/wo
     const html = (await rawHttpRequest({ port, pathName: '/', headers: { Host: `127.0.0.1:${port}` } })).body;
     assert.match(html, /tasksKanbanWrap/);
     assert.match(html, /btnViewKanban/);
-    assert.match(html, /CollabHub v1\.5/);
+    assert.match(html, /CollabHub v2\.0/);
   } finally {
     server.close();
     env.cleanup();
@@ -2131,7 +2134,7 @@ test('v1.4: opt-in closed-loop auto_repair DAG (redacts secrets, stops on duplic
 
     const mcpSelf = await handleToolCall(env.db, 'collab_self_check', {});
     assert.equal(typeof mcpSelf.health_score, 'number');
-    assert.equal(TOOLS.length, 43);
+    assert.equal(TOOLS.length, 45);
   } finally {
     try { await server.shutdown({ drainMs: 500 }); } catch {}
     if (fs.existsSync(flagFile)) fs.unlinkSync(flagFile);
@@ -2365,6 +2368,173 @@ test('v1.5: Worktree inline diff comments, rework dispatch, speculative Merge Qu
     assert.equal(badConfirm.status, 400);
   } finally {
     try { await server.shutdown({ drainMs: 500 }); } catch {}
+    env.cleanup();
+  }
+});
+
+
+test('v2.0: SEP-1865 MCP App Cockpit, DSH audit security fixes (IPv6 SSRF, sub-file skill drift, MQ TOCTOU), /api/statusline, /cockpit, HUD & 24-bit TUI', async () => {
+  const env = makeTempEnv();
+  const server = createDashboardServer(env.db, {
+    host: '127.0.0.1', port: 0,
+    dispatchDeps: { workspaceRoot: env.ws, extraRoots: [env.wts], memoryDir: env.mem },
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+
+  try {
+    // 1. SEP-1865 MCP Apps metadata, resources, and self-contained HTML cockpit
+    assert.equal(TOOLS.length, 45);
+    const cockpitTool = TOOLS.find((t) => t.name === 'collab_cockpit');
+    assert.equal(cockpitTool._meta.ui.resourceUri, COCKPIT_RESOURCE_URI);
+    assert.ok(cockpitTool._meta['com.google.antigravity/ui'].entrypoints.some((e) => e.type === 'aux_pane'));
+    assert.ok(cockpitTool._meta['com.google.antigravity/ui'].entrypoints.some((e) => e.type === 'global'));
+    const appOnly = TOOLS.find((t) => t.name === 'collab_cockpit_state');
+    assert.deepEqual(appOnly._meta.ui.visibility, ['app']);
+    assert.equal(MCP_APP_RESOURCES[0].mimeType, MCP_APP_MIME_TYPE);
+    const appHtml = buildCockpitAppHtml();
+    assert.ok(appHtml.includes('ui/initialize') && appHtml.includes('2026-01-26') && appHtml.includes('fleetCanvas'));
+    const { Script } = await import('node:vm');
+    const inlineScripts = [...appHtml.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map((m) => m[1]);
+    assert.ok(inlineScripts.length >= 1, 'Cockpit HTML must include inline script');
+    for (const sc of inlineScripts) new Script(sc, { filename: 'cockpit-inline.js' });
+    const cockpitSnap = await handleToolCall(env.db, 'collab_cockpit', { tab: 'mcp' });
+    assert.equal(cockpitSnap.initial_tab, 'mcp');
+    const card = formatCyberHudCard(cockpitSnap);
+    assert.ok(card.includes('CollabHub') && card.includes('Fleet'));
+
+    // 2. DSH Audit #3: IPv6 bracket & IPv4-mapped IPv6 SSRF bypasses are blocked fail-closed
+    await assert.rejects(() => assertSafeRemoteUrl('https://[::ffff:169.254.169.254]/mcp'), /SSRF guard/i);
+    await assert.rejects(() => assertSafeRemoteUrl('https://[fd00::1]/mcp'), /SSRF guard/i);
+    await assert.rejects(() => assertSafeRemoteUrl('https://[fe80::1]/mcp'), /SSRF guard/i);
+
+    // 3. DSH Audit #5: Skills sub-file drift & sub-file secret detection
+    const sA = path.join(env.dir, 'sk-a');
+    const sB = path.join(env.dir, 'sk-b');
+    fs.mkdirSync(path.join(sA, 'my-skill', 'scripts'), { recursive: true });
+    fs.mkdirSync(path.join(sB, 'my-skill', 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(sA, 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nSame\n');
+    fs.writeFileSync(path.join(sB, 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nSame\n');
+    fs.writeFileSync(path.join(sA, 'my-skill', 'scripts', 'run.js'), 'console.log(1);\n');
+    fs.writeFileSync(path.join(sB, 'my-skill', 'scripts', 'run.js'), 'console.log(2);\n');
+    const skSnap = buildSkillsRulesSnapshot({
+      projectDir: env.proj, workspaceRoot: env.ws,
+      skillAdapters: [{ id: 'a', name: 'A', dirs: [sA] }, { id: 'b', name: 'B', dirs: [sB] }],
+    });
+    assert.equal(skSnap.skills[0].client_presence.b, 'drifted', 'Sub-file divergence must mark skill drifted');
+    fs.writeFileSync(path.join(sA, 'my-skill', 'scripts', 'leak.txt'), 'token=sk-proj-1234567890abcdefghijklmnop\n');
+    assert.throws(() => syncSkillAcrossClients(env.db, {
+      skillName: 'my-skill', sourceClient: 'a', targetClients: ['b'], confirmed: false,
+      skillAdapters: [{ id: 'a', name: 'A', dirs: [sA] }, { id: 'b', name: 'B', dirs: [sB] }],
+    }), /inline secret/i);
+
+    // 4. Dashboard compact /api/statusline & standalone /cockpit preview
+    const sl = await rawHttpRequest({ port, pathName: '/api/statusline', headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(sl.status, 200);
+    assert.equal(sl.body.includes('\n'), false, '/api/statusline must return compact single-line JSON');
+    const slJson = JSON.parse(sl.body);
+    assert.equal(typeof slJson.health, 'number');
+    const ck = await rawHttpRequest({ port, pathName: '/cockpit', headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(ck.status, 200);
+    assert.match(ck.body, /CollabHub/);
+
+    // 5. Sub-100ms HUD (src/hud.mjs) & 24-bit Animated TUI (src/tui.mjs)
+    assert.equal(detectColorSupport({ stream: { isTTY: true }, env: { NO_COLOR: '1', COLORTERM: 'truecolor' } }).level, 0);
+    assert.equal(detectColorSupport({ stream: { isTTY: true }, env: { TERM: 'dumb' } }).level, 0);
+    assert.equal(detectColorSupport({ stream: { isTTY: true }, env: { COLORTERM: 'truecolor' } }).level, 3);
+    const t0 = performance.now();
+    const hudSnap = collectHudSnapshot(env.db, { worktreeDir: env.wts });
+    assert.ok(performance.now() - t0 < 200);
+    const lineWide = renderStatusLine(hudSnap, { width: 120, colorLevel: 0, frame: 0, format: 'statusline' });
+    const lineNarrow = renderStatusLine(hudSnap, { width: 60, colorLevel: 0, frame: 1, format: 'statusline' });
+    assert.equal(lineWide.includes('\x1b['), false, 'colorLevel=0 must emit zero ANSI escapes');
+    assert.ok(lineNarrow.length <= 65);
+    const hudCard = renderStatusLine(hudSnap, { width: 72, colorLevel: 0, frame: 0, format: 'card' });
+    assert.ok(hudCard.includes('COLLAB HUB') || hudCard.includes('CollabHub'));
+
+    const tuiData = collectTuiData(env.db, { demo: true, projectDir: env.proj });
+    assert.equal(TUI_TABS.length, 5);
+    for (let tab = 0; tab < 5; tab += 1) {
+      const frame = renderTuiFrame(tuiData, { tab, width: 100, height: 26, colorLevel: 0, frame: tab, selectedIndex: 0 });
+      assert.equal(frame.split('\n').length, 26);
+      assert.equal(frame.includes('\x1b['), false);
+    }
+  } finally {
+    try { await server.shutdown({ drainMs: 500 }); } catch {}
+    env.cleanup();
+  }
+});
+
+test('v2.0.1: Codex P1 fixes (Meta-MCP app-only visibility guard, MQ CAS validator ownership, Skills bounded manifest, WSL RO DB & Shared Collab Room)', async () => {
+  const env = makeTempEnv();
+  const { openHubDbReadOnly } = await import('../src/db.mjs');
+  const { createCollabRoom } = await import('../src/workspace-room.mjs');
+  try {
+    // 1. Meta-MCP hides visibility:["app"] from findMcpTools and blocks model callers via callMcpServerTool
+    registerMcpServer(env.db, { id: 'vis-srv', name: 'Vis Server', transport: 'stdio', command: 'node', args: ['-v'] });
+    const now = new Date().toISOString();
+    env.db.prepare('UPDATE mcp_servers SET last_probe_ok = 1, last_probe_tools_count = 2, last_probe_tools_json = ?, updated_at = ? WHERE server_id = ?').run(
+      JSON.stringify([
+        { name: 'public_tool', description: 'Model callable', _meta: { ui: { resourceUri: 'ui://x/a.html', visibility: ['model', 'app'] } } },
+        { name: 'secret_app_tool', description: 'App UI only', _meta: { ui: { visibility: ['app'] } } },
+      ]),
+      now,
+      'vis-srv',
+    );
+    const modelHits = findMcpTools(env.db, { query: 'tool', serverId: 'vis-srv' });
+    assert.deepEqual(modelHits.matches.map((m) => m.tool_name), ['public_tool']);
+    const allHits = findMcpTools(env.db, { query: 'tool', serverId: 'vis-srv', includeAppOnly: true });
+    assert.equal(allHits.matches.length, 2);
+    await assert.rejects(() => callMcpServerTool(env.db, { serverId: 'vis-srv', toolName: 'secret_app_tool' }), /APP_ONLY_TOOL_FORBIDDEN/);
+
+    // 2. Merge Queue CAS: stale validator cannot overwrite an in-flight 'validating' row
+    env.db.prepare(`
+      INSERT INTO worktrees (task_id, member, repo_dir, worktree_path, wsl_path, branch_name, base_ref, state, created_at, updated_at)
+      VALUES ('t-cas', 'dsh', ?, ?, ?, 'collab/t-cas', 'main', 'active', ?, ?)
+    `).run(env.proj, env.proj, env.proj, now, now);
+    env.db.prepare(`
+      INSERT INTO merge_queue (task_id, repo_dir, branch_name, base_ref, head_sha, priority, status, updated_at, created_at)
+      VALUES ('t-cas', ?, 'collab/t-cas', 'main', 'deadbeef', 100, 'validating', ?, ?)
+    `).run(env.proj, now, now);
+    const mqVal = validateMergeQueue(env.db);
+    assert.equal(mqVal.queue.find((q) => q.task_id === 't-cas')?.status, 'validating', 'Validator must never touch in-flight validating claim');
+
+    // 3. Skills sync refuses directories exceeding MAX_SKILL_FILES (60) fail-closed
+    const sOver = path.join(env.dir, 'sk-over');
+    const sDst = path.join(env.dir, 'sk-dst');
+    fs.mkdirSync(path.join(sOver, 'huge-skill'), { recursive: true });
+    fs.writeFileSync(path.join(sOver, 'huge-skill', 'SKILL.md'), '---\nname: huge-skill\n---\nHi\n');
+    for (let i = 0; i < 65; i += 1) {
+      fs.writeFileSync(path.join(sOver, 'huge-skill', `f${i}.txt`), `ok ${i}\n`);
+    }
+    assert.throws(() => syncSkillAcrossClients(env.db, {
+      skillName: 'huge-skill', sourceClient: 'a', targetClients: ['b'], confirmed: false,
+      skillAdapters: [{ id: 'a', name: 'A', dirs: [sOver] }, { id: 'b', name: 'B', dirs: [sDst] }],
+    }), /MAX_SKILL_FILES/);
+
+    // 4. openHubDbReadOnly opens existing SQLite DB cleanly without write pragmas
+    const roDb = openHubDbReadOnly(path.join(env.dir, 'hub.db'));
+    assert.ok(roDb.prepare('SELECT COUNT(*) AS c FROM mcp_servers').get().c >= 1);
+    roDb.close();
+
+    // 5. Shared Collab Room: dry-run preview, path-jail validation, and confirmed creation
+    await assert.rejects(() => createCollabRoom(env.db, { name: '../escape', workspaceRoot: env.ws }), /Invalid room name/);
+    const dry = await createCollabRoom(env.db, {
+      name: 'sprint-alpha', goal: 'Joint audit', workspaceRoot: env.ws, confirmed: false,
+      discoverDeps: { probeLocalEndpoint: async (e) => ({ ...e, reachable: false, models: [] }), locateBinary: async () => null },
+    });
+    assert.equal(dry.dry_run, true);
+    assert.equal(fs.existsSync(dry.room_dir), false);
+    const created = await createCollabRoom(env.db, {
+      name: 'sprint-alpha', goal: 'Joint audit', workspaceRoot: env.ws, confirmed: true,
+      discoverDeps: { probeLocalEndpoint: async (e) => ({ ...e, reachable: false, models: [] }), locateBinary: async () => null },
+    });
+    assert.equal(created.dry_run, false);
+    assert.equal(created.git_initialized, true);
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'AGENTS.md')));
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'CLAUDE.md')));
+    assert.ok(fs.existsSync(path.join(created.room_dir, 'COLLAB-ROOM.md')));
+  } finally {
     env.cleanup();
   }
 });

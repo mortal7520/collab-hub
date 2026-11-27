@@ -14,7 +14,7 @@
   <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-43%20Tools-8b5cf6" alt="MCP 43 Tools" />
+  <img src="https://img.shields.io/badge/MCP-45%20Tools%20%2B%20Apps-8b5cf6" alt="MCP 45 Tools + SEP-1865 Apps" />
   <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="Zero npm runtime deps" />
 </p>
 
@@ -26,15 +26,17 @@
 
 ---
 
-> **Try it live — zero install:** [**Open the Interactive Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
-> Explore the **v1.5 Precision Mission Control** UI: collapsible icon rail (`[`), **All-Agent MCP Hub & Meta-MCP Lazy Tool Router**, **Cross-Agent Skills & Rules Sync Center**, **Worktree Inline Diff Comments & Speculative Merge Queue**, **4-column Kanban**, `Ctrl+K` Command Palette, **EN / 中文**, and **Obsidian Dark / Alabaster Light** — 100% in your browser.
+> **No browser required — Host-Native Cockpits Everywhere (`v2.0`):**
+> - **Antigravity (AGY) · Claude Desktop · Codex Desktop**: Call `collab_cockpit` (or open **CollabHub** from Antigravity's left sidebar / `+` side pane) to launch our **60fps SEP-1865 MCP App Neural Cockpit** (`ui://collab-hub/cockpit.html`) right inside your IDE/chat!
+> - **Claude Code CLI · Codex CLI · WSL DSH Terminal**: Run `node bin/collab-hub.mjs tui` for a **24-bit TrueColor animated terminal cockpit**, or wire `node bin/collab-hub.mjs hud --format statusline` into Claude Code's bottom `statusLine` (<10ms SQLite read)!
+> - **Browser Interactive Demo (zero install)**: [**Open Live Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
 
-- **All-Agent MCP Hub & Meta-MCP Lazy Tool Router (`v1.5`)** — Zero-secret cross-client MCP matrix across Antigravity, Codex, Claude Code, Cursor, Windsurf, and VS Code, live JSON-RPC probing, lazy `find_tools` + `call_tool` gateway (preventing context-window bloat), and **Dry-Run diff + automatic `.bak` backup** safe sync (adapted from `ravitemer/mcp-hub`, `warpdev/mcp-hub-mcp`, and `samanhappy/mcphub`).
-- **Cross-Agent Skills & Rules Sync Center (`v1.5`)** — Keep `SKILL.md` directories and project rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, `.windsurfrules`) aligned across agents with dialect adaptation, Dry-Run diffs, and `.bak` backups (adapted from `lbb00/ai-rules-sync`, `fALECX/shareskills`, and `viteinfinite/sync-skills`).
-- **Worktree Inline Diff Comments & Serialized Merge Queue (`v1.5`)** — Click any diff line to attach review comments and dispatch targeted rework directly into the owning worktree (inspired by `BloopAI/vibe-kanban`), then run side-effect-free speculative `git merge-tree` conflict detection before serially merging into `main`.
-- **Zero lock-in, bring your own agents** — Orchestrate Claude Code, Codex, Gemini CLI, Aider, OpenCode, Ollama, LM Studio, DeepSeek, OpenRouter, or custom scripts behind **43 unified MCP tools** and one local web workbench.
-- **Self-diagnosing, self-healing & self-improving** — Runtime **0–100 Health Score**, dry-run/apply safe **Auto-Heal** (`collab_self_heal`), toggleable **Learned Guardrails** (`collab_lessons`) injected into future dispatches, per-channel Bayesian reliability + soft circuit breakers, and opt-in closed-loop **Auto-Repair DAG** steps.
-- **Zero npm dependencies, runs in 10 seconds** — Built purely on Node.js `>=22.13` built-ins (`node:sqlite`, `node:http`, `node:child_process`) across Windows, macOS, and Linux, with full upstream provenance in [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md).
+- **Host-Native 60fps SEP-1865 MCP App Cockpit (`v2.0`)** — Self-contained `ui://collab-hub/cockpit.html` (`text/html;profile=mcp-app`) with a 60fps Canvas Neural Fleet Constellation, 5 interactive tabs (Radar / Kanban & Logs / MCP Hub / Skills & Rules / Merge Queue), bidirectional `tools/call` + `ui/message` + `com.google.antigravity/toggle-aux-pane`, auto-pausing off-screen animation, and Cyber-HUD Unicode fallback (adapted from `modelcontextprotocol/ext-apps`).
+- **24-Bit TrueColor Animated TUI & Sub-100ms StatusLine HUD (`v2.0`)** — Keyboard-first animated terminal cockpit (`collab-hub tui`) and sub-10ms live `statusLine` HUD (`collab-hub hud`) with strict `NO_COLOR`/`TERM=dumb`/TTY degradation and crash-safe terminal restoration (inspired by `asheshgoplani/agent-deck` and `sirmalloc/ccstatusline`).
+- **All-Agent MCP Hub & Meta-MCP Lazy Tool Router** — Zero-secret cross-client MCP matrix across Antigravity, Codex, Claude Code, Cursor, Windsurf, and VS Code, live JSON-RPC probing with fail-closed IPv6 SSRF guard, lazy `find_tools` + `call_tool` gateway, and **Dry-Run diff + automatic `.bak` backup** safe sync.
+- **Cross-Agent Skills & Rules Sync Center** — Full directory-tree hashing & secret scanning across `SKILL.md` directories and project rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, `.windsurfrules`) with atomic temp-dir swaps and `.bak` backups.
+- **Worktree Inline Diff Comments & Serialized Merge Queue** — Click any diff line to pin comments and dispatch rework directly into the owning worktree, then run side-effect-free speculative `git merge-tree` conflict checks with atomic queue claims before serially merging into `main`.
+- **Zero npm dependencies, 45 MCP tools, 39 end-to-end tests** — Built purely on Node.js `>=22.13` built-ins with full upstream provenance in [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md).
 
 <p align="center">
   <a href="https://mortal7520.github.io/collab-hub/">

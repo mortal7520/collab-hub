@@ -12,6 +12,8 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import dns from 'node:dns/promises';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,8 +81,9 @@ function isLoopbackHost(hostname) {
 
 function isPrivateOrLinkLocalIp(ip) {
   if (!ip) return true;
-  if (net.isIPv4(ip)) {
-    const parts = ip.split('.').map(Number);
+  const clean = String(ip).trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (net.isIPv4(clean)) {
+    const parts = clean.split('.').map(Number);
     if (parts[0] === 127) return false; // loopback allowed for local MCP servers
     if (parts[0] === 10) return true;
     if (parts[0] === 169 && parts[1] === 254) return true; // cloud metadata / link-local
@@ -89,38 +92,130 @@ function isPrivateOrLinkLocalIp(ip) {
     if (parts[0] === 0) return true;
     return false;
   }
-  if (net.isIPv6(ip)) {
-    const norm = ip.toLowerCase();
-    if (norm === '::1') return false;
-    if (norm.startsWith('fe80:') || norm.startsWith('fc') || norm.startsWith('fd') || norm === '::') return true;
+  if (net.isIPv6(clean)) {
+    if (clean === '::1') return false;
+    // Unwrap IPv4-mapped IPv6 literals (both dotted ::ffff:169.254.169.254 and hex ::ffff:a9fe:a9fe)
+    const v4Dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(clean);
+    if (v4Dotted) return isPrivateOrLinkLocalIp(v4Dotted[1]);
+    const v4Hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(clean);
+    if (v4Hex) {
+      const hi = parseInt(v4Hex[1], 16);
+      const lo = parseInt(v4Hex[2], 16);
+      return isPrivateOrLinkLocalIp(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
+    if (clean.startsWith('fe80:') || clean.startsWith('fc') || clean.startsWith('fd') || clean === '::') return true;
     return false;
   }
   return true;
 }
 
 /**
- * DNS-resolve-then-verify SSRF guard for remote HTTP/SSE MCP probes & proxy calls.
- * Allows loopback (127.0.0.1 / ::1) or public HTTPS hosts; blocks cloud metadata & private LAN IPs.
+ * DNS-resolve-then-verify SSRF guard (fail-closed) for remote HTTP/SSE MCP probes & proxy calls.
+ * Strips IPv6 brackets, checks IPv4-mapped IPv6 addresses, and fails closed on DNS errors.
  */
-async function assertSafeRemoteUrl(rawUrl) {
+export async function assertSafeRemoteUrl(rawUrl) {
   const parsed = new URL(rawUrl);
-  if (isLoopbackHost(parsed.hostname)) return parsed;
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (isLoopbackHost(host)) {
+    const ipVer = net.isIP(host);
+    return { parsed, host, pinnedAddress: ipVer ? host : null, pinnedFamily: ipVer || null };
+  }
   if (parsed.protocol !== 'https:') {
     throw new Error('Security rule: remote HTTP/SSE MCP servers must use https:// (plain http:// is allowed only on loopback).');
   }
-  if (net.isIP(parsed.hostname)) {
-    if (isPrivateOrLinkLocalIp(parsed.hostname)) {
-      throw new Error(`SSRF guard: blocked private/link-local IP ${parsed.hostname}`);
+  const ipVer = net.isIP(host);
+  if (ipVer) {
+    if (isPrivateOrLinkLocalIp(host)) {
+      throw new Error(`SSRF guard: blocked private/link-local IP ${host}`);
     }
-    return parsed;
+    return { parsed, host, pinnedAddress: host, pinnedFamily: ipVer };
   }
-  const addrs = await dns.lookup(parsed.hostname, { all: true }).catch(() => []);
+  let addrs;
+  try {
+    addrs = await dns.lookup(host, { all: true });
+  } catch (err) {
+    throw new Error(`SSRF guard: DNS resolution failed for ${host} (${err.code || err.message})`);
+  }
+  if (!Array.isArray(addrs) || addrs.length === 0) {
+    throw new Error(`SSRF guard: ${host} did not resolve to any address`);
+  }
   for (const a of addrs) {
     if (isPrivateOrLinkLocalIp(a.address)) {
-      throw new Error(`SSRF guard: ${parsed.hostname} resolved to blocked private/link-local IP ${a.address}`);
+      throw new Error(`SSRF guard: ${host} resolved to blocked private/link-local IP ${a.address}`);
     }
   }
-  return parsed;
+  return { parsed, host, pinnedAddress: addrs[0].address, pinnedFamily: addrs[0].family || net.isIP(addrs[0].address) };
+}
+
+/**
+ * Connection-time DNS-pinned HTTP/HTTPS JSON-RPC POST client.
+ * Prevents DNS-rebinding TOCTOU by connecting directly to the exact IP validated by
+ * `assertSafeRemoteUrl()` while preserving TLS SNI (`servername`) & certificate verification.
+ */
+function pinnedHttpJsonPost(target, { headers = {}, body = '', timeoutMs = 10000 } = {}) {
+  const { parsed, host, pinnedAddress, pinnedFamily } = target;
+  const isHttps = parsed.protocol === 'https:';
+  const transport = isHttps ? https : http;
+  const payload = Buffer.from(body, 'utf8');
+  return new Promise((resolve, reject) => {
+    const reqOpts = {
+      protocol: parsed.protocol,
+      hostname: host,
+      port: parsed.port ? Number(parsed.port) : (isHttps ? 443 : 80),
+      path: `${parsed.pathname}${parsed.search}`,
+      method: 'POST',
+      headers: {
+        Host: parsed.host,
+        'Content-Length': String(payload.length),
+        ...headers,
+      },
+      timeout: timeoutMs,
+      ...(isHttps ? { servername: net.isIP(host) ? undefined : host, rejectUnauthorized: true } : {}),
+      ...(pinnedAddress ? {
+        lookup: (_h, opts, cb) => {
+          const callback = typeof opts === 'function' ? opts : cb;
+          if (opts && typeof opts === 'object' && opts.all) {
+            callback(null, [{ address: pinnedAddress, family: pinnedFamily || net.isIP(pinnedAddress) || 4 }]);
+          } else {
+            callback(null, pinnedAddress, pinnedFamily || net.isIP(pinnedAddress) || 4);
+          }
+        },
+      } : {}),
+    };
+    const req = transport.request(reqOpts, (res) => {
+      const status = Number(res.statusCode || 0);
+      if (status >= 300 && status < 400) {
+        res.resume();
+        return reject(new Error(`SSRF guard: HTTP redirect (${status}) disallowed for MCP endpoint`));
+      }
+      const chunks = [];
+      let total = 0;
+      res.on('data', (chunk) => {
+        if (total < MAX_PROBE_RESPONSE_BYTES) {
+          const take = Math.min(chunk.length, MAX_PROBE_RESPONSE_BYTES - total);
+          chunks.push(take === chunk.length ? chunk : chunk.subarray(0, take));
+          total += take;
+        }
+      });
+      res.on('end', () => {
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          headers: res.headers,
+          text: Buffer.concat(chunks).toString('utf8'),
+        });
+      });
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error(`HTTP MCP timed out after ${timeoutMs}ms`)));
+    req.on('error', reject);
+    req.end(payload);
+  });
+}
+
+function isAppOnlyTool(tool) {
+  const vis = tool?._meta?.ui?.visibility;
+  return Array.isArray(vis) && vis.length > 0 && !vis.includes('model');
 }
 
 /**
@@ -773,12 +868,10 @@ async function executeMcpJsonRpc(clean, { method, params = {}, timeoutMs = 8000 
     });
   }
 
-  // HTTP / Streamable-HTTP / SSE transport with DNS SSRF guard and redirects disabled
-  await assertSafeRemoteUrl(clean.url);
+  // HTTP / Streamable-HTTP / SSE transport with connection-time DNS-pinned SSRF guard and redirects disabled
+  const pinnedTarget = await assertSafeRemoteUrl(clean.url);
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
-  const initHttp = await fetch(clean.url, {
-    method: 'POST',
-    redirect: 'error',
+  const initHttp = await pinnedHttpJsonPost(pinnedTarget, {
     headers,
     body: JSON.stringify({
       jsonrpc: '2.0',
@@ -786,24 +879,20 @@ async function executeMcpJsonRpc(clean, { method, params = {}, timeoutMs = 8000 
       method: 'initialize',
       params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'collab-hub-mcp-gateway', version: APP_VERSION } },
     }),
-    signal: AbortSignal.timeout(Math.min(8000, timeoutMs)),
+    timeoutMs: Math.min(8000, timeoutMs),
   });
-  const initText = (await initHttp.text()).slice(0, MAX_PROBE_RESPONSE_BYTES);
-  const parsedInit = parseSseOrJson(initText);
+  const parsedInit = parseSseOrJson(initHttp.text);
   if (!initHttp.ok || !parsedInit?.result) {
     throw new Error(`HTTP ${initHttp.status} during MCP initialize`);
   }
-  const sessionId = initHttp.headers.get('mcp-session-id');
-  const callHeaders = { ...headers, ...(sessionId ? { 'mcp-session-id': sessionId } : {}) };
-  const callHttp = await fetch(clean.url, {
-    method: 'POST',
-    redirect: 'error',
+  const sessionId = initHttp.headers['mcp-session-id'];
+  const callHeaders = { ...headers, ...(sessionId ? { 'mcp-session-id': String(sessionId) } : {}) };
+  const callHttp = await pinnedHttpJsonPost(pinnedTarget, {
     headers: callHeaders,
     body: JSON.stringify({ jsonrpc: '2.0', id: 2, method, params }),
-    signal: AbortSignal.timeout(timeoutMs),
+    timeoutMs,
   });
-  const callText = (await callHttp.text()).slice(0, MAX_PROBE_RESPONSE_BYTES);
-  const parsedCall = parseSseOrJson(callText);
+  const parsedCall = parseSseOrJson(callHttp.text);
   if (!callHttp.ok || parsedCall?.error) {
     throw new Error(parsedCall?.error?.message || `HTTP ${callHttp.status} during MCP ${method}`);
   }
@@ -842,16 +931,26 @@ export async function probeMcpServer(db, id, { clientSpecs = null, timeoutMs = 8
     const rawTools = Array.isArray(res.result?.tools) ? res.result.tools : [];
     ok = true;
     serverInfo = res.initRes?.serverInfo || null;
-    tools = rawTools.slice(0, MAX_STORED_TOOLS).map((t) => ({
-      name: String(t.name || '').slice(0, 80),
-      description: String(t.description || '').slice(0, 180),
-      inputSchema: t.inputSchema && typeof t.inputSchema === 'object' ? {
-        required: Array.isArray(t.inputSchema.required) ? t.inputSchema.required.slice(0, 12) : [],
-        properties: t.inputSchema.properties && typeof t.inputSchema.properties === 'object'
-          ? Object.keys(t.inputSchema.properties).slice(0, 20)
-          : [],
-      } : null,
-    }));
+    tools = rawTools.slice(0, MAX_STORED_TOOLS).map((t) => {
+      const uiUri = t._meta?.ui?.resourceUri || t._meta?.['ui/resourceUri'] || null;
+      const rawVis = Array.isArray(t._meta?.ui?.visibility)
+        ? t._meta.ui.visibility.filter((v) => v === 'model' || v === 'app')
+        : null;
+      const uiMeta = {};
+      if (typeof uiUri === 'string' && uiUri.startsWith('ui://')) uiMeta.resourceUri = uiUri.slice(0, 160);
+      if (rawVis && rawVis.length > 0) uiMeta.visibility = [...new Set(rawVis)];
+      return {
+        name: String(t.name || '').slice(0, 80),
+        description: String(t.description || '').slice(0, 180),
+        inputSchema: t.inputSchema && typeof t.inputSchema === 'object' ? {
+          required: Array.isArray(t.inputSchema.required) ? t.inputSchema.required.slice(0, 12) : [],
+          properties: t.inputSchema.properties && typeof t.inputSchema.properties === 'object'
+            ? Object.keys(t.inputSchema.properties).slice(0, 20)
+            : [],
+        } : null,
+        ...(Object.keys(uiMeta).length > 0 ? { _meta: { ui: uiMeta } } : {}),
+      };
+    });
     detail = `${clean.transport.toUpperCase()} MCP ready (${serverInfo?.name || clean.id}${serverInfo?.version ? ' v' + serverInfo.version : ''}) · ${rawTools.length} tool(s)`;
   } catch (err) {
     ok = false;
@@ -886,7 +985,7 @@ export async function probeMcpServer(db, id, { clientSpecs = null, timeoutMs = 8
  * Searches cached tool catalogs across all registered MCP servers by keyword/substring without
  * loading all tool schemas into every agent's context window!
  */
-export function findMcpTools(db, { query = '', serverId = null, searchIn = 'both', limit = 30 } = {}) {
+export function findMcpTools(db, { query = '', serverId = null, searchIn = 'both', limit = 30, includeAppOnly = false } = {}) {
   const servers = listRegisteredMcpServers(db).filter((s) => s.enabled && (!serverId || s.id === serverId));
   const needle = String(query || '').trim().toLowerCase();
   const maxItems = Math.max(1, Math.min(100, Number(limit) || 30));
@@ -895,8 +994,9 @@ export function findMcpTools(db, { query = '', serverId = null, searchIn = 'both
 
   for (const srv of servers) {
     const tools = Array.isArray(srv.last_probe_tools) ? srv.last_probe_tools : [];
-    totalIndexedTools += tools.length;
     for (const tool of tools) {
+      if (!includeAppOnly && isAppOnlyTool(tool)) continue;
+      totalIndexedTools += 1;
       const name = String(tool.name || '');
       const desc = String(tool.description || '');
       let hit = !needle;
@@ -914,6 +1014,7 @@ export function findMcpTools(db, { query = '', serverId = null, searchIn = 'both
           tool_name: name,
           description: desc,
           input_hint: tool.inputSchema || null,
+          ...(tool._meta ? { _meta: tool._meta } : {}),
         });
       }
     }
@@ -931,9 +1032,10 @@ export function findMcpTools(db, { query = '', serverId = null, searchIn = 'both
 /**
  * Meta-MCP On-Demand Tool Proxy (adapted from warpdev/mcp-hub-mcp `call-tool`).
  * Calls a single tool on any registered/discovered MCP server lazily via JSON-RPC 2.0.
+ * Enforces SEP-1865 `visibility: ["app"]` boundaries so model callers cannot invoke app-only tools.
  */
 export async function callMcpServerTool(db, {
-  serverId, toolName, toolArgs = {}, clientSpecs = null, timeoutMs = 15000,
+  serverId, toolName, toolArgs = {}, clientSpecs = null, timeoutMs = 15000, callerRole = 'model',
 } = {}) {
   const safeId = assertValidMcpId(serverId);
   if (typeof toolName !== 'string' || !/^[A-Za-z0-9._:/-]{1,128}$/.test(toolName.trim())) {
@@ -944,6 +1046,15 @@ export async function callMcpServerTool(db, {
   const server = snap.servers.find((s) => s.id === safeId);
   if (!server) throw new Error(`MCP server not found: ${safeId}`);
   if (!server.enabled) throw new Error(`MCP server "${safeId}" is disabled`);
+
+  // Enforce SEP-1865 app-only visibility against cached probe catalog
+  if (callerRole !== 'app') {
+    const cachedTool = (Array.isArray(server.last_probe_tools) ? server.last_probe_tools : [])
+      .find((t) => t.name === safeTool);
+    if (cachedTool && isAppOnlyTool(cachedTool)) {
+      throw new Error(`APP_ONLY_TOOL_FORBIDDEN: tool "${safeTool}" on server "${safeId}" is restricted to MCP App UI callers (visibility: ["app"]).`);
+    }
+  }
 
   const clean = validateMcpServerSpec({
     id: server.id,

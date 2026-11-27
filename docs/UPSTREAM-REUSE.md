@@ -2,6 +2,14 @@
 
 CollabHub adheres to a strict **zero-npm-runtime-dependency** core (`node >= 22.13.0` built-ins only) while standing on the shoulders of verified, maintained open-source projects. Every reused design or ported core algorithm is recorded below with its exact upstream repository, commit SHA / version, license, and local adaptation rationale.
 
+## Host-Native Animated Cockpit & TUI Adaptations (`v2.0.0`)
+
+| CollabHub Module | Upstream Project | Exact Commit / Tag | License | What Was Adapted & Why |
+| :--- | :--- | :--- | :--- | :--- |
+| [`src/mcp-app-ui.mjs`](../src/mcp-app-ui.mjs), [`src/mcp-server.mjs`](../src/mcp-server.mjs) | **[modelcontextprotocol/ext-apps](https://github.com/modelcontextprotocol/ext-apps)** | `87bcdc8cb626` (SEP-1865 `2026-01-26`) | MIT | Implemented zero-dependency SEP-1865 MCP Apps server (`resources/list`, `resources/read`, `text/html;profile=mcp-app`, `_meta.ui.resourceUri`, `com.google.antigravity/ui` `aux_pane`/`global` entrypoints) and inline iframe JSON-RPC 2.0 `postMessage` bridge (`ui/initialize`, `ui/notifications/tool-result`, `ui/notifications/host-context-changed`, `ui/notifications/size-changed`, `tools/call`, `ui/message`) working natively in Antigravity, Claude Desktop, and Codex Desktop. |
+| [`src/tui.mjs`](../src/tui.mjs) | **[asheshgoplani/agent-deck](https://github.com/asheshgoplani/agent-deck)** | `fec4fcbc55f1` | MIT | Adapted the multi-agent terminal command center layout (agent constellation/status lanes, keyboard-driven tab navigation, live log preview, MCP & worktree inspection) into a zero-dependency Node.js 24-bit TrueColor animated TUI with `NO_COLOR`/`TERM=dumb` graceful degradation. |
+| [`src/hud.mjs`](../src/hud.mjs) | **[sirmalloc/ccstatusline](https://github.com/sirmalloc/ccstatusline)** | `0c94df755665` | MIT | Adapted the sub-100ms Claude Code `statusLine` JSON-stdin + compact colored telemetry bar pattern for live fleet/MCP/Merge-Queue/health monitoring inside Claude Code CLI, Codex CLI, and WSL DSH terminals. |
+
 ## Core Multi-Agent Source Adaptations (`v1.5.0`)
 
 | CollabHub Module | Upstream Project | Exact Commit / Tag | License | What Was Adapted & Why |

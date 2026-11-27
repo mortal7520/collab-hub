@@ -110,28 +110,59 @@ function readSkillEntry(skillDir, skillName) {
   const raw = fs.readFileSync(skillMdPath, 'utf8');
   const { frontmatter, body } = parseFrontmatter(raw);
   const subFiles = [];
+  let truncated = false;
   const walk = (dir, prefix = '') => {
-    if (subFiles.length >= MAX_SKILL_FILES) return;
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       if (ent.name.startsWith('.') || ent.name.includes('.bak.') || ent.name.includes('.backup_')) continue;
-      const full = path.join(dir, ent.name);
       if (ent.isSymbolicLink()) continue;
+      const full = path.join(dir, ent.name);
       const rel = prefix ? `${prefix}/${ent.name}` : ent.name;
-      if (ent.isDirectory()) walk(full, rel);
-      else if (ent.isFile()) subFiles.push(rel);
+      if (ent.isDirectory()) {
+        walk(full, rel);
+      } else if (ent.isFile()) {
+        if (subFiles.length >= MAX_SKILL_FILES) {
+          truncated = true;
+          return;
+        }
+        subFiles.push(rel);
+      }
+      if (truncated) return;
     }
   };
   walk(skillDir);
+  const sortedFiles = subFiles.sort();
+  let secretInline = detectInlineSecret(raw);
+  let oversized = false;
+  const manifestLines = [];
+  for (const rel of sortedFiles) {
+    const abs = path.join(skillDir, rel);
+    try {
+      const fst = fs.statSync(abs);
+      if (fst.size <= MAX_SKILL_FILE_BYTES) {
+        const buf = fs.readFileSync(abs);
+        const fhash = createHash('sha256').update(buf).digest('hex').slice(0, 16);
+        manifestLines.push(`${rel}:${fhash}`);
+        if (!secretInline && !buf.includes(0)) {
+          if (detectInlineSecret(buf.toString('utf8'))) secretInline = true;
+        }
+      } else {
+        oversized = true;
+        manifestLines.push(`${rel}:size=${fst.size}`);
+      }
+    } catch { /* skip unreadable */ }
+  }
   return {
     name: skillName,
     title: frontmatter.name || skillName,
     description: String(frontmatter.description || '').slice(0, 220),
-    hash: sha256Short(raw),
+    hash: sha256Short(`${raw}\n---\n${manifestLines.join('\n')}`),
     body_preview: body.trim().slice(0, 320),
     bytes: Buffer.byteLength(raw, 'utf8'),
-    files_count: subFiles.length,
-    files: subFiles.sort(),
-    secret_inline: detectInlineSecret(raw),
+    files_count: sortedFiles.length,
+    files: sortedFiles,
+    truncated,
+    oversized,
+    secret_inline: secretInline,
     updated_at: st.mtime.toISOString(),
   };
 }
@@ -336,9 +367,31 @@ export function syncSkillAcrossClients(db, {
   if (!srcDir || !fs.existsSync(path.join(srcDir, 'SKILL.md'))) {
     throw new Error(`Skill "${safeSkill}" not found in source client "${sourceClient}"`);
   }
+  const srcEntry = readSkillEntry(srcDir, safeSkill);
   const srcSkillMd = fs.readFileSync(path.join(srcDir, 'SKILL.md'), 'utf8');
-  if (detectInlineSecret(srcSkillMd)) {
-    throw new Error(`Security rule: inline secret detected inside skill "${safeSkill}". Remove secrets before syncing.`);
+  if (srcEntry?.truncated) {
+    throw new Error(`Security rule: skill "${safeSkill}" exceeds MAX_SKILL_FILES (${MAX_SKILL_FILES}) and cannot be fully secret-scanned; refusing partial sync.`);
+  }
+  if (srcEntry?.oversized) {
+    throw new Error(`Security rule: skill "${safeSkill}" contains a file exceeding ${MAX_SKILL_FILE_BYTES} bytes that could bypass secret scanning.`);
+  }
+  if (srcEntry?.secret_inline || detectInlineSecret(srcSkillMd)) {
+    throw new Error(`Security rule: inline secret detected inside skill "${safeSkill}" (SKILL.md or supporting file). Remove secrets before syncing.`);
+  }
+
+  // Build ONE bounded verified byte manifest so only bytes that passed inspection are ever staged/published!
+  const verifiedManifest = [];
+  for (const rel of (srcEntry?.files || ['SKILL.md'])) {
+    const abs = path.join(srcDir, rel);
+    const lst = fs.lstatSync(abs);
+    if (lst.isSymbolicLink() || !lst.isFile() || lst.size > MAX_SKILL_FILE_BYTES) {
+      throw new Error(`Security rule: skill file "${rel}" changed or exceeded limits during verification.`);
+    }
+    const buf = fs.readFileSync(abs);
+    if (!buf.includes(0) && detectInlineSecret(buf.toString('utf8'))) {
+      throw new Error(`Security rule: inline secret detected inside skill file "${rel}". Remove secrets before syncing.`);
+    }
+    verifiedManifest.push({ rel, buf });
   }
 
   const targetIds = Array.isArray(targetClients) && targetClients.length > 0
@@ -362,26 +415,33 @@ export function syncSkillAcrossClients(db, {
 
     if (confirmed === true) {
       fs.mkdirSync(tRoot, { recursive: true });
-      if (fs.existsSync(tDir)) {
-        fs.cpSync(tDir, backupDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(tDir, { recursive: true });
-      // Copy regular non-symlink, non-backup files safely within skill folder
-      const copySafe = (from, to) => {
-        for (const ent of fs.readdirSync(from, { withFileTypes: true })) {
-          if (ent.name.startsWith('.') || ent.name.includes('.bak.') || ent.name.includes('.backup_')) continue;
-          if (ent.isSymbolicLink()) continue;
-          const s = path.join(from, ent.name);
-          const d = path.join(to, ent.name);
-          if (ent.isDirectory()) {
-            fs.mkdirSync(d, { recursive: true });
-            copySafe(s, d);
-          } else if (ent.isFile() && fs.statSync(s).size <= MAX_SKILL_FILE_BYTES) {
-            fs.copyFileSync(s, d);
-          }
+      const suffix = `${process.pid}.${Date.now()}`;
+      const tmpDir = path.join(tRoot, `.${safeSkill}.collabhub-tmp.${suffix}`);
+      const prevDir = path.join(tRoot, `.${safeSkill}.collabhub-prev.${suffix}`);
+      fs.mkdirSync(tmpDir, { recursive: true });
+      let movedLiveAside = false;
+      try {
+        for (const { rel, buf } of verifiedManifest) {
+          const dest = path.join(tmpDir, rel);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, buf);
         }
-      };
-      copySafe(srcDir, tDir);
+        if (fs.existsSync(tDir)) {
+          fs.cpSync(tDir, backupDir, { recursive: true, force: true });
+          fs.renameSync(tDir, prevDir);
+          movedLiveAside = true;
+        }
+        fs.renameSync(tmpDir, tDir);
+        if (movedLiveAside) {
+          try { fs.rmSync(prevDir, { recursive: true, force: true }); } catch {}
+        }
+      } catch (err) {
+        if (movedLiveAside && !fs.existsSync(tDir) && fs.existsSync(prevDir)) {
+          try { fs.renameSync(prevDir, tDir); } catch {}
+        }
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+        throw err;
+      }
     }
 
     plans.push({

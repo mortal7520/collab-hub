@@ -1,6 +1,6 @@
 {
   "name": "collab-hub",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "files": [
     "bin/",
     "public/",
@@ -10,7 +10,7 @@
     "README.zh-CN.md",
     "LICENSE"
   ],
-  "description": "Zero-dependency, local-first multi-agent orchestration workbench (43 MCP tools) with All-Agent MCP Hub & Meta-MCP lazy tool proxy, cross-agent Skills/Rules sync, Worktree inline diff comments & serialized Merge Queue, Precision Mission Control UI, live SVG DAGs, and self-healing diagnostics.",
+  "description": "Zero-dependency, local-first multi-agent Mission Control (45 MCP tools) with host-native 60fps SEP-1865 MCP App Cockpit (Antigravity, Claude Desktop, Codex Desktop), 24-bit TrueColor animated TUI & StatusLine HUD (Claude Code, Codex CLI, WSL DSH), All-Agent MCP Hub & Meta-MCP router, Skills/Rules sync, and Worktree Merge Queue.",
   "type": "module",
   "license": "MIT",
   "author": "Mortal",

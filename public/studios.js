@@ -37,6 +37,10 @@ const STUDIO_I18N = {
     'bento.mqTitle': 'Agent Merge Queue',
     'bento.mqSub': '{ready} ready · {conflict} conflict · {comments} open diff comments',
     'bento.open': 'Open Studio →',
+    'radar.title': 'Neural Fleet Constellation & 4-Host Native Cockpits',
+    'radar.sub': '60fps live agent topology — also embedded natively inside Antigravity, Claude Desktop, Codex Desktop (MCP App) and CLI/WSL DSH (24-bit TUI + StatusLine HUD).',
+    'radar.openCockpit': 'Preview MCP App →',
+    'radar.hint': 'Click any orbiting agent node · pauses automatically when tab is hidden',
     'mcp.title': 'All-Agent MCP Hub & Meta-MCP Gateway',
     'mcp.sub': 'Unified zero-secret registry, drift matrix across Antigravity / Codex / Claude / Cursor / VS Code, lazy tool router, and Dry-Run .bak safe sync.',
     'mcp.refresh': 'Scan clients',
@@ -141,6 +145,10 @@ const STUDIO_I18N = {
     'bento.mqTitle': '串行合并队列',
     'bento.mqSub': '{ready} 个就绪 · {conflict} 个冲突 · {comments} 条待处理批注',
     'bento.open': '进入工作台 →',
+    'radar.title': '神经舰队拓扑雷达与四端宿主原生驾驶舱',
+    'radar.sub': '60fps 实时多 Agent 轨道拓扑 —— 已同步内嵌至 Antigravity、Claude Desktop、Codex Desktop（MCP App）与终端/WSL DSH（24-bit 真彩 TUI + StatusLine HUD）。',
+    'radar.openCockpit': '预览 MCP App →',
+    'radar.hint': '点击任意轨道节点查看 Agent · 后台标签自动休眠零耗电',
     'mcp.title': '全 Agent MCP 中心与 Meta-MCP 懒加载网关',
     'mcp.sub': '跨 Antigravity / Codex / Claude / Cursor / VS Code 扫描漂移、零明文密钥、Meta-MCP 按需搜调工具、Dry-Run 差异预演 + .bak 备份安全写回。',
     'mcp.refresh': '扫描客户端',
@@ -384,8 +392,135 @@ export function createStudiosController(ctx) {
     });
   }
 
+  /* ---------- Overview 60fps Neural Fleet Constellation Canvas ---------- */
+  let ovRadarPhase = 0;
+  let ovRadarRaf = null;
+  const ovRadarNodes = [];
+  const reducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function drawOverviewConstellation() {
+    const canvas = $('#ovFleetCanvas');
+    if (!canvas) return;
+    if (state.view !== 'overview') return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth || 560;
+    const h = canvas.clientHeight || 228;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+    const ctx2d = canvas.getContext('2d');
+    if (!ctx2d) return;
+    ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx2d.clearRect(0, 0, w, h);
+
+    const cx = w * 0.5;
+    const cy = h * 0.5;
+    const rx = Math.min(w * 0.37, 210);
+    const ry = Math.min(h * 0.36, 82);
+    const isLight = document.documentElement.dataset.theme === 'light';
+
+    // Concentric orbital guides
+    ctx2d.strokeStyle = isLight ? 'rgba(79, 70, 229, 0.14)' : 'rgba(129, 140, 248, 0.16)';
+    ctx2d.lineWidth = 1;
+    for (const s of [0.52, 1.0]) {
+      ctx2d.beginPath();
+      ctx2d.ellipse(cx, cy, rx * s, ry * s, 0, 0, Math.PI * 2);
+      ctx2d.stroke();
+    }
+
+    const members = state.members || [];
+    const activeSet = new Set((state.tasks || []).filter((tk) => ['running', 'dispatched', 'dispatching'].includes(tk.state)).map((tk) => tk.member));
+    ovRadarNodes.length = 0;
+
+    const stateColor = (st) => (st === 'online' ? '#34d399' : (st === 'idle' ? '#38bdf8' : (st === 'cooldown' || st === 'stale' ? '#fbbf24' : '#64748b')));
+
+    members.forEach((m, i) => {
+      const angle = (Math.PI * 2 * i) / Math.max(1, members.length) - Math.PI / 2 + (reducedMotion ? 0 : Math.sin(ovRadarPhase * 0.3 + i) * 0.04);
+      const nx = cx + Math.cos(angle) * rx;
+      const ny = cy + Math.sin(angle) * ry;
+      const busy = activeSet.has(m.member);
+      ovRadarNodes.push({ m, x: nx, y: ny, r: 17 });
+
+      ctx2d.strokeStyle = busy ? 'rgba(56, 189, 248, 0.65)' : (['online', 'idle'].includes(m.state) ? 'rgba(129, 140, 248, 0.34)' : 'rgba(100, 116, 139, 0.2)');
+      ctx2d.lineWidth = busy ? 1.8 : 1;
+      ctx2d.beginPath();
+      ctx2d.moveTo(cx, cy);
+      ctx2d.lineTo(nx, ny);
+      ctx2d.stroke();
+
+      if (!reducedMotion && (busy || m.state === 'online')) {
+        const p = (ovRadarPhase * (busy ? 0.55 : 0.22) + i * 0.23) % 1;
+        ctx2d.fillStyle = busy ? '#38bdf8' : '#34d399';
+        ctx2d.beginPath();
+        ctx2d.arc(cx + (nx - cx) * p, cy + (ny - cy) * p, busy ? 3.2 : 2.1, 0, Math.PI * 2);
+        ctx2d.fill();
+      }
+    });
+
+    // Core Orb
+    const pulse = reducedMotion ? 1 : 1 + Math.sin(ovRadarPhase * 1.4) * 0.08;
+    const grad = ctx2d.createRadialGradient(cx, cy, 4, cx, cy, 30 * pulse);
+    grad.addColorStop(0, 'rgba(129, 140, 248, 0.92)');
+    grad.addColorStop(0.55, 'rgba(99, 102, 241, 0.3)');
+    grad.addColorStop(1, 'rgba(99, 102, 241, 0)');
+    ctx2d.fillStyle = grad;
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, 30 * pulse, 0, Math.PI * 2);
+    ctx2d.fill();
+
+    ctx2d.fillStyle = '#6366f1';
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, 16, 0, Math.PI * 2);
+    ctx2d.fill();
+    ctx2d.fillStyle = '#ffffff';
+    ctx2d.font = '700 9.5px ui-monospace, Consolas, monospace';
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'middle';
+    ctx2d.fillText('HUB', cx, cy + 0.5);
+
+    for (const np of ovRadarNodes) {
+      const col = stateColor(np.m.state);
+      const busy = activeSet.has(np.m.member);
+      if (busy) {
+        const halo = np.r + (reducedMotion ? 5 : 4 + Math.sin(ovRadarPhase * 2.5) * 3);
+        ctx2d.strokeStyle = 'rgba(56, 189, 248, 0.52)';
+        ctx2d.lineWidth = 1.6;
+        ctx2d.beginPath();
+        ctx2d.arc(np.x, np.y, halo, 0, Math.PI * 2);
+        ctx2d.stroke();
+      }
+      ctx2d.fillStyle = isLight ? '#ffffff' : '#0f1424';
+      ctx2d.strokeStyle = col;
+      ctx2d.lineWidth = 2;
+      ctx2d.beginPath();
+      ctx2d.arc(np.x, np.y, np.r, 0, Math.PI * 2);
+      ctx2d.fill();
+      ctx2d.stroke();
+
+      ctx2d.fillStyle = isLight ? '#0f172a' : '#eef2ff';
+      ctx2d.font = '700 9.5px ui-monospace, Consolas, monospace';
+      ctx2d.fillText(String(np.m.member || '').toUpperCase().slice(0, 5), np.x, np.y + 0.5);
+    }
+
+    if (!reducedMotion && !document.hidden && state.view === 'overview') {
+      ovRadarPhase += 0.024;
+      ovRadarRaf = requestAnimationFrame(drawOverviewConstellation);
+    } else {
+      ovRadarRaf = null;
+    }
+  }
+
+  function startOverviewConstellation() {
+    if (ovRadarRaf !== null) return;
+    if (state.view === 'overview' && !document.hidden) drawOverviewConstellation();
+  }
+
   /* ---------- Overview Bento Studio Cards ---------- */
   function renderOverviewBento(overviewData) {
+    startOverviewConstellation();
+    const standaloneLink = $('#btnOpenStandaloneCockpit');
+    if (standaloneLink) standaloneLink.hidden = Boolean(state.static);
     const host = $('#studioBento');
     if (!host) return;
     const mcpSum = overviewData?.mcp_hub_summary || sState.mcp?.summary || { servers_count: 0, clients_detected: 0, drift_count: 0, cached_tools_total: 0 };
@@ -1012,6 +1147,14 @@ export function createStudiosController(ctx) {
   /* ---------- Event Wiring ---------- */
   function bindEvents() {
     initRail();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.view === 'overview') startOverviewConstellation();
+    });
+    $('#ovFleetCanvas')?.addEventListener('click', (e) => {
+      const rect = e.target.getBoundingClientRect();
+      const hit = ovRadarNodes.find((np) => Math.hypot(np.x - (e.clientX - rect.left), np.y - (e.clientY - rect.top)) <= np.r + 6);
+      if (hit) toast(`${hit.m.name || hit.m.member}: ${hit.m.state} · ${hit.m.detail || hit.m.channel}`, 'info', 3000);
+    });
 
     // MCP Hub studio buttons & tabs
     $('#btnMcpRefresh')?.addEventListener('click', () => loadMcpHub());
@@ -1277,6 +1420,7 @@ export function createStudiosController(ctx) {
   }
 
   function onViewEnter(viewId) {
+    if (viewId === 'overview') startOverviewConstellation();
     if (viewId === 'mcphub') loadMcpHub({ quiet: true });
     if (viewId === 'skills') loadSkillsHub({ quiet: true });
     if (viewId === 'worktrees') loadMergeQueue({ quiet: true });

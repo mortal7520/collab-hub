@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.0.0 (2026-11-27)
+
+**Host-Native Animated Cockpits Everywhere: 60fps SEP-1865 MCP App Cockpit inside Antigravity / Claude Desktop / Codex Desktop, 24-bit TrueColor Animated Terminal TUI & Sub-10ms StatusLine HUD for Claude Code / Codex CLI / WSL DSH, plus 6 Team-Audited Security & Protocol Fixes — built & adversarially audited concurrently by `AGY` + `WSL DSH` + `Cloud Muse`.**
+
+### Highlights
+- **Host-Native 60fps SEP-1865 MCP App Cockpit (`src/mcp-app-ui.mjs`, `src/mcp-server.mjs`, `collab_cockpit` #44, `collab_cockpit_state` #45)**:
+  - Full SEP-1865 (`2026-01-26`) MCP Apps support: `capabilities.resources`, `resources/list`, `resources/read` serving `ui://collab-hub/cockpit.html` (`text/html;profile=mcp-app`), `_meta.ui.resourceUri`, `com.google.antigravity/ui` `aux_pane` + `global` sidebar entrypoints, `notifications/cancelled` tracking, and Cyber-HUD Unicode fallback card.
+  - Self-contained zero-dependency HTML app featuring a 60fps HTML5 Canvas Neural Fleet Constellation (auto-pauses when hidden or on non-Radar tabs), animated SVG Health Score ring, 5 interactive tabs (Fleet Radar / Kanban & Logs / MCP Hub / Skills & Rules / Merge Queue), two-step Cancel confirmation, debounced 8px-threshold `ResizeObserver`, and bidirectional JSON-RPC 2.0 `postMessage` (`tools/call`, `ui/message`, `com.google.antigravity/toggle-aux-pane`).
+- **24-Bit TrueColor Animated TUI Cockpit & Sub-10ms StatusLine HUD (`src/tui.mjs`, `src/hud.mjs`, `collab-hub tui`, `collab-hub hud`)** — built by WSL DSH in isolated worktree `wt_v20_tui`:
+  - Sub-10ms pure-SQLite `collectHudSnapshot` powering Claude Code `statusLine` (`~/.claude/settings.json`), Codex CLI, and WSL DSH terminals with width-adaptive collapsing (`<80` cols), `NO_COLOR`/`TERM=dumb` compliance, and 4fps `--watch` mode.
+  - Full-screen 24-bit TrueColor interactive terminal cockpit (`collab-hub tui`) with pulsing orbital Agent Constellation, 5 keyboard tabs (`1–5`/`Tab`), live task log tail, dirty-frame diff rendering, and `SIGINT`/`SIGTERM`/`exit`/`uncaughtException` terminal raw-mode restoration.
+- **6 Team-Audited Security, Integrity & Performance Fixes**:
+  - **IPv6 & IPv4-mapped IPv6 SSRF Fix** (`src/mcp-hub.mjs`): strips `[...]` brackets, classifies `::ffff:` dotted/hex IPv4-mapped addresses, and fails closed on DNS errors; preserves upstream `_meta.ui.resourceUri` through Meta-MCP discovery.
+  - **Skills Sub-File Integrity & Atomic Sync** (`src/skills-hub.mjs`): hashes and scans all supporting skill files (not just `SKILL.md`) for drift and inline secrets, and performs atomic temp-dir staging + swap.
+  - **Merge Queue TOCTOU & Atomic Claim** (`src/merge-queue.mjs`): verifies live HEAD matches validated `head_sha`, separates exit-code `1` conflicts from operational git errors, and atomically claims `ready → validating`.
+  - **Dashboard Perf & Live Preview** (`src/dashboard.mjs`, `public/`): 15s TTL caching for Mail/MCP summaries, compact `GET /api/statusline`, standalone `GET /cockpit`, SSE `retry: 3000` + 10s keepalive, and 60fps Neural Fleet Constellation embedded on Overview.
+
 ## v1.5.0 (2026-11-27)
 
 **All-Agent Multi-Tool Collaboration Suite & Precision Mission Control Redesign: All-Agent MCP Hub + Meta-MCP Lazy Tool Router, Cross-Agent Skills & Rules Sync Center, Worktree Inline Diff Comments + Serialized Speculative Merge Queue, 43 unified MCP tools, and zero npm dependencies.**

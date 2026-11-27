@@ -12,6 +12,7 @@ import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './docto
 import { hubBus } from './event-bus.mjs';
 import { awaitActiveRuns, cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, reconcileTask, sweepOrphanTasks } from './executors.mjs';
 import { releaseMailPaths } from './mail-sync.mjs';
+import { buildCockpitAppHtml } from './mcp-app-ui.mjs';
 import {
   buildMcpHubSnapshot, callMcpServerTool, findMcpTools, generateClientSnippet,
   getMcpHubSummary, importDiscoveredMcpServers, probeMcpServer,
@@ -714,6 +715,27 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
   };
   hubBus.on('hub-event', onHubEvent);
 
+  let cachedMail = null;
+  let cachedMailAt = 0;
+  let cachedMcpSum = null;
+  let cachedMcpSumAt = 0;
+
+  const getCachedMail = async (force = false) => {
+    const now = Date.now();
+    if (!force && cachedMail && (now - cachedMailAt) < PROBE_MIN_INTERVAL_MS) return cachedMail;
+    cachedMail = await probeMailHub().catch(() => ({ ok: false }));
+    cachedMailAt = now;
+    return cachedMail;
+  };
+
+  const getCachedMcpSummary = (force = false) => {
+    const now = Date.now();
+    if (!force && cachedMcpSum && (now - cachedMcpSumAt) < PROBE_MIN_INTERVAL_MS) return cachedMcpSum;
+    cachedMcpSum = getMcpHubSummary(db, { clientSpecs: dispatchDeps.mcpClientSpecs });
+    cachedMcpSumAt = now;
+    return cachedMcpSum;
+  };
+
   const getCachedCass = async (force = false) => {
     const now = Date.now();
     if (!force && cachedCassStats && (now - cachedCassAt) < CASS_STATS_TTL_MS) return cachedCassStats;
@@ -729,8 +751,8 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
     'Content-Security-Policy': CONTENT_SECURITY_POLICY,
   };
 
-  const sendJson = (res, status, obj) => {
-    const body = JSON.stringify(obj, null, 2);
+  const sendJson = (res, status, obj, { compact = false } = {}) => {
+    const body = compact ? JSON.stringify(obj) : JSON.stringify(obj, null, 2);
     res.writeHead(status, { ...baseHeaders, 'Content-Type': 'application/json; charset=utf-8' });
     res.end(body);
   };
@@ -876,8 +898,9 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
           lastEventId = Math.max(lastEventId, tipEventId);
           lastLogId = Math.max(lastLogId, tipLogId);
         }
-        const hb = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 25000);
+        const hb = setInterval(() => { try { res.write(': keepalive\n\n'); } catch {} }, 10000);
         hb.unref();
+        try { res.write('retry: 3000\n\n'); } catch {}
         sseClients.set(res, { hb });
         startDbSseTail();
         req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
@@ -974,7 +997,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/health') {
-        const mail = await probeMailHub();
+        const mail = await getCachedMail(true);
         sendJson(res, 200, { ok: true, version: APP_VERSION, pid: process.pid, uptime_s: Math.round(process.uptime()), db_path: DB_PATH, mail_hub: mail, toolkit: getToolkitStatus() });
         return;
       }
@@ -984,8 +1007,43 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         sendJson(res, 200, buildDemoOverview());
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/cockpit') {
+        const html = buildCockpitAppHtml();
+        res.writeHead(200, {
+          ...baseHeaders,
+          'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+          'Content-Type': 'text/html; charset=utf-8',
+        });
+        res.end(html);
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/statusline') {
+        const members = getMemberStatuses(db);
+        const tasks = db.prepare('SELECT state FROM tasks ORDER BY updated_at DESC LIMIT 200').all();
+        const mq = listMergeQueue(db);
+        const si = getSelfImproveSummary(db, { worktreeDir: dispatchDeps.worktreeRoot });
+        const mcpCount = Number(db.prepare('SELECT COUNT(*) AS c FROM mcp_servers WHERE enabled = 1').get()?.c || 0);
+        const mailAge = Date.now() - cachedMailAt;
+        const mailFresh = Boolean(cachedMail && mailAge < PROBE_MIN_INTERVAL_MS * 4);
+        if (!mailFresh) getCachedMail().catch(() => {});
+        sendJson(res, 200, {
+          v: APP_VERSION,
+          at: new Date().toISOString(),
+          agents_ready: members.filter((m) => ['online', 'idle'].includes(m.state)).length,
+          agents_total: members.length,
+          fleet: members.map((m) => ({ id: m.member, s: m.state })),
+          tasks_active: tasks.filter((t) => ['running', 'dispatching', 'dispatched'].includes(t.state)).length,
+          tasks_failed: tasks.filter((t) => ['failed', 'stalled', 'uncertain'].includes(t.state)).length,
+          merge_ready: mq.filter((q) => q.status === 'ready').length,
+          merge_conflict: mq.filter((q) => q.status === 'conflict').length,
+          mcp_registered: mcpCount,
+          health: si.health_score,
+          mail_ok: mailFresh ? Boolean(cachedMail.ok) : null,
+        }, { compact: true });
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/overview') {
-        const [mail, cassStats] = await Promise.all([probeMailHub(), getCachedCass()]);
+        const [mail, cassStats] = await Promise.all([getCachedMail(), getCachedCass()]);
         const members = getMemberStatuses(db);
         const tasks = db.prepare('SELECT * FROM tasks ORDER BY updated_at DESC LIMIT 100').all().map(parseTaskRow);
         const batches = buildBatchSummaries(tasks);
@@ -995,7 +1053,7 @@ export function createDashboardServer(db, { host = DASHBOARD_HOST, port = DASHBO
         const metrics = buildMetrics(members, tasks, worktrees, notesCount, cassStats);
         const telemetry = computeAgentTelemetry(db, { days: 30 });
         const selfImprove = getSelfImproveSummary(db, { worktreeDir: dispatchDeps.worktreeRoot });
-        const mcpHubSummary = getMcpHubSummary(db, { clientSpecs: dispatchDeps.mcpClientSpecs });
+        const mcpHubSummary = getCachedMcpSummary();
         const mergeQueue = listMergeQueue(db);
         const openComments = Number(db.prepare("SELECT COUNT(*) AS c FROM worktree_comments WHERE status = 'open'").get()?.c || 0);
         sendJson(res, 200, {

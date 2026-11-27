@@ -247,8 +247,12 @@ function speculativeMergeTree(repoDir, baseCommit, headSha) {
   try {
     const out = runGit(repoDir, ['merge-tree', '--write-tree', '--name-only', baseCommit, headSha]);
     const treeOid = out.split(/\r?\n/)[0]?.trim() || null;
-    return { clean: true, tree_oid: treeOid, conflict_files: [] };
+    return { clean: true, tree_oid: treeOid, conflict_files: [], error: null };
   } catch (err) {
+    // Only exit code 1 from `git merge-tree` indicates merge conflicts; other exits/ENOENT/timeouts are operational errors
+    if (err.status !== 1) {
+      return { clean: false, tree_oid: null, conflict_files: [], error: String(err.code || err.message || err).slice(0, 140) };
+    }
     const stdout = String(err.stdout || '');
     const lines = stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const conflicts = [];
@@ -263,7 +267,7 @@ function speculativeMergeTree(repoDir, baseCommit, headSha) {
         if (!/^[0-9a-f]{40}$/i.test(l) && !l.startsWith('Auto-merging')) conflicts.push(l);
       }
     }
-    return { clean: false, tree_oid: null, conflict_files: [...new Set(conflicts)].slice(0, 20) };
+    return { clean: false, tree_oid: null, conflict_files: [...new Set(conflicts)].slice(0, 20), error: null };
   }
 }
 
@@ -293,9 +297,9 @@ export function validateMergeQueue(db) {
     } catch (err) {
       for (const item of group) {
         const summary = `Base ref ${baseRef} unreachable: ${String(err.message || err).slice(0, 120)}`;
-        db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ?")
-          .run(summary, now, item.task_id);
-        results.push({ task_id: item.task_id, status: 'failed', summary, conflict_files: [] });
+        const upd = db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ? AND status = ? AND updated_at = ?")
+          .run(summary, now, item.task_id, item.status, item.updated_at);
+        if (upd.changes) results.push({ task_id: item.task_id, status: 'failed', summary, conflict_files: [] });
       }
       continue;
     }
@@ -305,38 +309,44 @@ export function validateMergeQueue(db) {
       const wt = db.prepare('SELECT * FROM worktrees WHERE task_id = ?').get(item.task_id);
       if (!wt || wt.state !== 'active' || !fs.existsSync(wt.worktree_path)) {
         const summary = 'Worktree no longer active on disk';
-        db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ?")
-          .run(summary, now, item.task_id);
-        results.push({ task_id: item.task_id, status: 'failed', summary, conflict_files: [] });
+        const upd = db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ? AND status = ? AND updated_at = ?")
+          .run(summary, now, item.task_id, item.status, item.updated_at);
+        if (upd.changes) results.push({ task_id: item.task_id, status: 'failed', summary, conflict_files: [] });
         continue;
       }
 
       const currentHead = runGit(wt.worktree_path, ['rev-parse', 'HEAD']);
       const check = speculativeMergeTree(repoDir, rollingBaseCommit, currentHead);
 
-      if (check.clean && check.tree_oid) {
-        // Build an ephemeral unreferenced commit object representing the combined queue state
-        // so the NEXT queued worktree is checked against the real merged result!
-        try {
-          rollingBaseCommit = runGit(repoDir, [
-            'commit-tree', check.tree_oid, '-p', rollingBaseCommit, '-p', currentHead,
-            '-m', `speculative queue check ${item.task_id}`,
-          ]);
-        } catch { /* fallback: keep previous rolling base */ }
+      if (check.error) {
+        const summary = `Speculative merge-tree error: ${check.error}`;
+        const upd = db.prepare("UPDATE merge_queue SET head_sha = ?, status = 'failed', check_summary = ?, conflict_files_json = '[]', updated_at = ? WHERE task_id = ? AND status = ? AND updated_at = ?")
+          .run(currentHead, summary, now, item.task_id, item.status, item.updated_at);
+        if (upd.changes) results.push({ task_id: item.task_id, status: 'failed', summary, conflict_files: [] });
+      } else if (check.clean && check.tree_oid) {
         const summary = priorCount === 0
           ? `Clean speculative merge onto ${baseRef} (HEAD ${currentHead.slice(0, 10)})`
           : `Clean cumulative merge after ${priorCount} preceding queued branch(es) (HEAD ${currentHead.slice(0, 10)})`;
-        priorCount += 1;
-        db.prepare("UPDATE merge_queue SET head_sha = ?, status = 'ready', check_summary = ?, conflict_files_json = '[]', updated_at = ? WHERE task_id = ?")
-          .run(currentHead, summary, now, item.task_id);
-        results.push({ task_id: item.task_id, status: 'ready', summary, conflict_files: [] });
+        // CAS write guarded by observed status + updated_at so a stale validator can NEVER overwrite an in-flight 'validating' claim!
+        const upd = db.prepare("UPDATE merge_queue SET head_sha = ?, status = 'ready', check_summary = ?, conflict_files_json = '[]', updated_at = ? WHERE task_id = ? AND status = ? AND updated_at = ?")
+          .run(currentHead, summary, now, item.task_id, item.status, item.updated_at);
+        if (upd.changes) {
+          try {
+            rollingBaseCommit = runGit(repoDir, [
+              'commit-tree', check.tree_oid, '-p', rollingBaseCommit, '-p', currentHead,
+              '-m', `speculative queue check ${item.task_id}`,
+            ]);
+          } catch { /* fallback: keep previous rolling base */ }
+          priorCount += 1;
+          results.push({ task_id: item.task_id, status: 'ready', summary, conflict_files: [] });
+        }
       } else {
         const summary = priorCount === 0
           ? `Conflicts with ${baseRef}: ${check.conflict_files.join(', ') || 'merge conflict'}`
           : `Collides with preceding queued branch(es) on ${check.conflict_files.join(', ') || 'overlapping edits'}`;
-        db.prepare("UPDATE merge_queue SET head_sha = ?, status = 'conflict', check_summary = ?, conflict_files_json = ?, updated_at = ? WHERE task_id = ?")
-          .run(currentHead, summary, JSON.stringify(check.conflict_files), now, item.task_id);
-        results.push({ task_id: item.task_id, status: 'conflict', summary, conflict_files: check.conflict_files });
+        const upd = db.prepare("UPDATE merge_queue SET head_sha = ?, status = 'conflict', check_summary = ?, conflict_files_json = ?, updated_at = ? WHERE task_id = ? AND status = ? AND updated_at = ?")
+          .run(currentHead, summary, JSON.stringify(check.conflict_files), now, item.task_id, item.status, item.updated_at);
+        if (upd.changes) results.push({ task_id: item.task_id, status: 'conflict', summary, conflict_files: check.conflict_files });
       }
     }
   }
@@ -384,22 +394,42 @@ export function processMergeQueue(db, {
   const now = new Date().toISOString();
 
   for (const item of readyItems) {
+    // Atomic claim with unique owner marker prevents concurrent processors or stale validators from stealing ownership
+    const claimMarker = `${new Date().toISOString()}#${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    const claim = db.prepare("UPDATE merge_queue SET status = 'validating', updated_at = ? WHERE task_id = ? AND status = 'ready'")
+      .run(claimMarker, item.task_id);
+    if (!claim.changes) continue;
+
     try {
-      // Refresh reviewed_head_sha binding right before serialized merge
-      reviewWorktree(db, { taskId: item.task_id, maxDiffChars: 2000 });
+      const wt = db.prepare('SELECT * FROM worktrees WHERE task_id = ?').get(item.task_id);
+      if (!wt || wt.state !== 'active' || !fs.existsSync(wt.worktree_path)) {
+        throw new Error(`Worktree ${item.task_id} is no longer active on disk`);
+      }
+      const liveHead = runGit(wt.worktree_path, ['rev-parse', 'HEAD']);
+      if (liveHead !== item.head_sha) {
+        throw new Error(`Worktree HEAD moved after speculative validation (${item.head_sha.slice(0, 10)} -> ${liveHead.slice(0, 10)}); re-run validate before merging.`);
+      }
+      // Bind reviewed_head_sha ONLY to the exact validated SHA (no silent re-stamping of moved commits)
+      if (wt.reviewed_head_sha !== item.head_sha) {
+        reviewWorktree(db, { taskId: item.task_id, maxDiffChars: 2000 });
+        const afterRevHead = runGit(wt.worktree_path, ['rev-parse', 'HEAD']);
+        if (afterRevHead !== item.head_sha) {
+          throw new Error(`Worktree HEAD changed during review (${item.head_sha.slice(0, 10)} -> ${afterRevHead.slice(0, 10)}).`);
+        }
+      }
       const res = mergeWorktree(db, {
         taskId: item.task_id,
         confirmed: true,
         cleanup,
         requireVerified,
       });
-      db.prepare("UPDATE merge_queue SET status = 'merged', check_summary = ?, updated_at = ? WHERE task_id = ?")
-        .run(`Merged into ${item.base_ref} at ${now}`, now, item.task_id);
+      db.prepare("UPDATE merge_queue SET status = 'merged', check_summary = ?, updated_at = ? WHERE task_id = ? AND status = 'validating' AND updated_at = ?")
+        .run(`Merged into ${item.base_ref} at ${now}`, now, item.task_id, claimMarker);
       merged.push({ task_id: item.task_id, branch_name: item.branch_name, result: res });
     } catch (err) {
       const msg = String(err.message || err).slice(0, 260);
-      db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ?")
-        .run(msg, now, item.task_id);
+      db.prepare("UPDATE merge_queue SET status = 'failed', check_summary = ?, updated_at = ? WHERE task_id = ? AND status = 'validating' AND updated_at = ?")
+        .run(msg, now, item.task_id, claimMarker);
       failed.push({ task_id: item.task_id, branch_name: item.branch_name, error: msg });
       if (stopOnFailure) break;
     }

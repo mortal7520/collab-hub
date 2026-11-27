@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "allowedWorkspaceRoot": "D:\\workspace",
+  "allowedWorktreeRoot": "D:\\Apps\\CollabHub/worktrees",
+  "claudeCliAllowedRoots": [
+    "D:\\workspace",
+    "D:\\Apps\\CollabHub/worktrees"
+  ],
+  "claudeCooldownSeconds": 1800
+}

@@ -20,6 +20,31 @@ export function openHubDb(dbPath = DB_PATH) {
 }
 
 /**
+ * Fast read-only handle for HUD / TUI renderers.
+ * Avoids WAL write locks and falls back to SQLite `immutable=1` over cross-OS
+ * network/9P mounts (e.g. WSL2 reading a Windows NTFS hub.db under /mnt/d/...).
+ */
+export function openHubDbReadOnly(dbPath = DB_PATH) {
+  if (!fs.existsSync(dbPath)) return openHubDb(dbPath);
+  try {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    db.exec('PRAGMA busy_timeout = 2000;');
+    db.prepare('SELECT 1').get();
+    return db;
+  } catch (err) {
+    const msg = String(err?.message || err?.errstr || '');
+    if (err?.code === 'ERR_SQLITE_ERROR' || /disk I\/O|readonly|locked|busy/i.test(msg)) {
+      const normalized = dbPath.replaceAll('\\', '/');
+      const uri = `file:${encodeURI(normalized).replaceAll('#', '%23').replaceAll('?', '%3F')}?immutable=1`;
+      const db = new DatabaseSync(uri, { readOnly: true });
+      db.prepare('SELECT 1').get();
+      return db;
+    }
+    throw err;
+  }
+}
+
+/**
  * Cross-platform PID liveness probe (treats EPERM as alive, ESRCH as dead).
  */
 export function isProcessAlive(pid) {

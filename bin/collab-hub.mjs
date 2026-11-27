@@ -4,10 +4,12 @@ import {
   APP_ROOT, APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT, ensureRuntimeDirs,
 } from '../src/config.mjs';
 import { createDashboardServer, startReadOnlyAutoPoller } from '../src/dashboard.mjs';
-import { openHubDb, parseTaskRow, pruneRetentionTables } from '../src/db.mjs';
+import { openHubDb, openHubDbReadOnly, parseTaskRow, pruneRetentionTables } from '../src/db.mjs';
 import { discoverLocalAgents } from '../src/discovery.mjs';
+import { createCollabRoom } from '../src/workspace-room.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from '../src/doctor.mjs';
 import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, sweepOrphanTasks } from '../src/executors.mjs';
+import { runHudCli } from '../src/hud.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
 import { buildMcpHubSnapshot, findMcpTools, importDiscoveredMcpServers, probeMcpServer, syncMcpToClient } from '../src/mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
@@ -23,6 +25,7 @@ import {
   convertDocToMd, getCassStats, getToolkitStatus, packRepoRepomix,
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from '../src/toolkit.mjs';
+import { startInteractiveTui } from '../src/tui.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
 import { verifyWorktree } from '../src/worktree.mjs';
 
@@ -60,8 +63,9 @@ if (cmd === 'mcp') {
     poller = startReadOnlyAutoPoller(db);
   });
 } else {
-  ensureRuntimeDirs();
-  const db = openHubDb();
+  const isReadOnlyUi = cmd === 'hud' || cmd === 'tui';
+  if (!isReadOnlyUi) ensureRuntimeDirs();
+  const db = isReadOnlyUi ? openHubDbReadOnly() : openHubDb();
 
   function parseArgs(argv) {
     const positionals = [];
@@ -301,6 +305,37 @@ if (cmd === 'mcp') {
       else if (sub === 'sync-skill') console.log(JSON.stringify(syncSkillAcrossClients(db, { skillName: flag('skill') || positionals[1], sourceClient: flag('from'), targetClients: flag('to') ? String(flag('to')).split(',') : [], confirmed: flags.confirm === true }), null, 2));
       else if (sub === 'sync-rule') console.log(JSON.stringify(syncRuleAcrossTargets(db, { projectDir: flag('dir') || WORKSPACE_ROOT, sourceRuleId: flag('from', 'agents-md'), targetRuleIds: flag('to') ? String(flag('to')).split(',') : [], confirmed: flags.confirm === true }), null, 2));
       else throw new Error(`Unknown skills-hub subcommand "${sub}". Use: snapshot | sync-skill | sync-rule`);
+    } else if (cmd === 'tui') {
+      await startInteractiveTui(db, {
+        demo: Boolean(flags.demo),
+        fps: Number(flag('fps', '8')),
+        width: flag('width') ? Number(flag('width')) : undefined,
+        height: flag('height') ? Number(flag('height')) : undefined,
+        projectDir: flag('dir') || WORKSPACE_ROOT,
+      });
+    } else if (cmd === 'hud') {
+      await runHudCli(db, {
+        format: flag('format', 'statusline'),
+        watch: Boolean(flags.watch),
+        intervalMs: Number(flag('interval', '250')),
+        width: flag('width') ? Number(flag('width')) : undefined,
+      });
+    } else if (cmd === 'room') {
+      const sub = positionals[0] || 'create';
+      if (sub === 'create') {
+        console.log(JSON.stringify(await createCollabRoom(db, {
+          name: positionals[1] || flag('name'),
+          goal: flag('goal', ''),
+          agents: flag('agents') ? String(flag('agents')).split(',').map((s) => s.trim()).filter(Boolean) : ['agy', 'codex', 'claude', 'dsh', 'muse'],
+          createGitRepo: flags['no-git'] !== true,
+          autoRegisterClis: flag('cli') ? String(flag('cli')).split(',').map((s) => s.trim()).filter(Boolean) : [],
+          launchApps: flag('launch') ? String(flag('launch')).split(',').map((s) => s.trim()).filter(Boolean) : [],
+          confirmed: flags.confirm === true,
+          workspaceRoot: flag('root') || WORKSPACE_ROOT,
+        }), null, 2));
+      } else {
+        throw new Error(`Unknown room subcommand "${sub}". Use: create <name> [--goal G --cli id1,id2 --launch app1 --confirm]`);
+      }
     } else if (cmd === 'merge-queue') {
       const sub = positionals[0] || 'list';
       if (sub === 'list') console.log(JSON.stringify({ queue: listMergeQueue(db) }, null, 2));
@@ -310,10 +345,12 @@ if (cmd === 'mcp') {
       else throw new Error(`Unknown merge-queue subcommand "${sub}". Use: list | enqueue | validate | process`);
     } else {
       console.log([
-        `CollabHub v${APP_VERSION} — Zero-Dependency Local-First Multi-Agent Workbench`,
+        `CollabHub v${APP_VERSION} — Zero-Dependency Host-Native Multi-Agent Mission Control`,
         'Commands:',
+        '  tui [--demo --fps 8]                         Launch 24-bit TrueColor animated Terminal Cockpit (Codex/Claude/DSH)',
+        '  hud [--format statusline|card|json --watch]  Sub-100ms live StatusLine & Cyber-HUD (Claude Code / tmux / WSL)',
         '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
-        '  mcp                                          Start the 43-tool MCP stdio server',
+        '  mcp                                          Start the 45-tool SEP-1865 MCP Apps stdio server (AGY/Claude/Codex)',
         '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub & Meta-MCP tool discovery',
         '  skills-hub snapshot|sync-skill|sync-rule     Cross-Agent Skills & Rules sync hub',
         '  merge-queue list|enqueue|validate|process    Speculative Git Merge Queue',

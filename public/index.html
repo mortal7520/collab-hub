@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CollabHub v1.5 · Precision Multi-Agent Mission Control</title>
-<meta name="description" content="CollabHub v1.5 — zero-dependency, local-first multi-agent orchestration workbench with All-Agent MCP Hub & Meta-MCP router, cross-agent Skills/Rules sync, Worktree inline diff comments & serialized Merge Queue." />
+<title>CollabHub v2.0 · Host-Native Multi-Agent Mission Control</title>
+<meta name="description" content="CollabHub v2.0 — zero-dependency, local-first multi-agent Mission Control with 60fps SEP-1865 MCP App Cockpit (AGY / Claude / Codex), 24-bit Animated TUI & StatusLine HUD (DSH / CLI), All-Agent MCP Hub, Skills/Rules sync & Merge Queue." />
 <meta name="color-scheme" content="dark light" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235e6ad2'/%3E%3Cpath d='M12 12 6.5 7M12 12l5.5-5M12 12v6' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='12' r='2.2' fill='%23fff'/%3E%3Ccircle cx='6' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='18' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='12' cy='19' r='1.5' fill='%23fff'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/assets/styles.css" />
@@ -24,7 +24,7 @@
       </span>
       <span class="brand-text">
         <span class="brand-name">CollabHub</span>
-        <span class="brand-version" id="brandVersion">v1.5</span>
+        <span class="brand-version" id="brandVersion">v2.0</span>
       </span>
       <button type="button" class="rail-toggle" id="btnCollapseRail" title="Toggle compact rail ([)" aria-label="Toggle compact navigation rail">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
@@ -97,7 +97,7 @@
         <div class="crumb">
           <div class="crumb-line">
             <span class="crumb-title" id="viewTitle" data-i18n="view.overview.title">Overview</span>
-            <span class="crumb-badge">v1.5 Studio</span>
+            <span class="crumb-badge">v2.0 Mission Control</span>
           </div>
           <span class="crumb-sub" id="viewSubtitle" data-i18n="view.overview.sub">Agents, throughput, and live workbench health</span>
         </div>
@@ -137,6 +137,45 @@
         </div>
 
         <section class="kpi-grid" id="kpiBar"></section>
+        <section class="panel neural-radar-panel" id="neuralRadarPanel">
+          <div class="panel-head">
+            <div>
+              <h2 data-i18n="radar.title">Neural Fleet Constellation &amp; 4-Host Native Cockpits</h2>
+              <p data-i18n="radar.sub">60fps live agent topology — also embedded natively inside Antigravity, Claude Desktop, Codex Desktop (MCP App) and CLI/WSL DSH (24-bit TUI + StatusLine HUD).</p>
+            </div>
+            <div class="panel-tools">
+              <span class="pill ok">AGY · Claude · Codex · DSH</span>
+              <a class="btn ghost sm" href="/cockpit" target="_blank" rel="noopener" id="btnOpenStandaloneCockpit" data-i18n="radar.openCockpit">Preview MCP App →</a>
+            </div>
+          </div>
+          <div class="neural-radar-grid">
+            <div class="neural-canvas-wrap">
+              <canvas id="ovFleetCanvas"></canvas>
+              <div class="neural-canvas-foot">
+                <span data-i18n="radar.hint">Hover or click any orbiting agent node · pauses automatically when tab is hidden</span>
+                <span class="mono">SEP-1865 · 60fps</span>
+              </div>
+            </div>
+            <div class="host-matrix-cards" id="hostMatrixCards">
+              <div class="host-card">
+                <div class="host-card-top"><strong>Antigravity (AGY)</strong><span class="pill ok">MCP App</span></div>
+                <div class="meta">Inline chat · Side Pane (<code>aux_pane</code>) · Left Sidebar Fullscreen (<code>global</code>). Call <code>collab_cockpit</code>!</div>
+              </div>
+              <div class="host-card">
+                <div class="host-card-top"><strong>Claude Desktop &amp; Code</strong><span class="pill demo">MCP App + HUD</span></div>
+                <div class="meta">Desktop renders <code>ui://collab-hub/cockpit.html</code>; CLI runs <code>collab-hub tui</code> &amp; <code>statusLine</code> HUD.</div>
+              </div>
+              <div class="host-card">
+                <div class="host-card-top"><strong>Codex Desktop &amp; CLI</strong><span class="pill demo">MCP App + TUI</span></div>
+                <div class="meta">Desktop renders SEP-1865 Cockpit; Windows Terminal runs 24-bit animated <code>collab-hub tui</code>.</div>
+              </div>
+              <div class="host-card">
+                <div class="host-card-top"><strong>WSL DSH Terminal</strong><span class="pill ok">24-bit TUI</span></div>
+                <div class="meta">Run <code>node /mnt/d/workspace/collab-hub/bin/collab-hub.mjs tui</code> or <code>hud --watch</code> in WSL.</div>
+              </div>
+            </div>
+          </div>
+        </section>
         <section class="bento-studio-grid" id="studioBento"></section>
         <section class="self-strip" id="selfStrip" hidden></section>
         <section class="toolkit-strip" id="toolkitStrip"></section>
