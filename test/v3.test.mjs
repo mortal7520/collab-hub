@@ -627,6 +627,21 @@ test('v3.0 chat-adjacent embedding: inline chat-strip MCP App, GET /api/route/re
     assert.ok(vsPkg.contributes.viewsContainers.panel.some((p) => p.id === 'collabhub-panel'));
     assert.ok(vsPkg.contributes.chatParticipants.some((p) => p.name === 'collabhub'));
     assert.ok(fs.existsSync(path.resolve('extensions/terminal-hud/tmux-sidebar.sh')));
+
+    // 5. Windows UTF-8 BOM JSON config tolerance across setup & mcp-hub
+    const bomClaude = path.join(tmp.dir, '.claude', 'settings.json');
+    const bomMcp = path.join(tmp.dir, 'bom-cursor.json');
+    fs.mkdirSync(path.dirname(bomClaude), { recursive: true });
+    fs.writeFileSync(bomClaude, '\uFEFF' + JSON.stringify({ theme: 'dark', statusLine: { type: 'command', command: 'echo ok' } }), 'utf8');
+    fs.writeFileSync(bomMcp, '\uFEFF' + JSON.stringify({ mcpServers: { existing: { command: 'node', args: ['a.js'] } } }), 'utf8');
+    const bomPlan = await planSetup(hub.db, {
+      homedir: tmp.dir,
+      clientSpecs: [{ id: 'cursor', name: 'Cursor', format: 'json', rootKey: 'mcpServers', paths: [bomMcp] }],
+      discoveryDeps: { locateBinary: async () => null, probeLocalEndpoint: async () => ({ reachable: false, models: [] }) },
+    });
+    assert.equal(bomPlan.claude_statusline.parse_error, null);
+    assert.equal(bomPlan.claude_statusline.current_command, 'echo ok');
+    assert.equal(bomPlan.detected_clients[0].server_count, 1);
   } finally {
     await hub.close();
     tmp.cleanup();

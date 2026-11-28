@@ -43,7 +43,7 @@ function planClaudeStatusLine({ homedir = os.homedir(), cliPath = CLI_BIN_PATH }
   let parseError = null;
   if (exists) {
     try {
-      current = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      current = JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, ''));
     } catch (err) {
       parseError = err.message;
     }
@@ -188,7 +188,7 @@ export async function applySetup(db, {
     let backupPath = null;
     if (fs.existsSync(slPath)) {
       const raw = fs.readFileSync(slPath, 'utf8');
-      existing = JSON.parse(raw);
+      existing = JSON.parse(raw.replace(/^\uFEFF/, ''));
       backupPath = `${slPath}.bak.${Date.now()}`;
       fs.writeFileSync(backupPath, raw, { encoding: 'utf8', mode: 0o600 });
     }

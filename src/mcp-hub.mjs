@@ -488,7 +488,7 @@ export function parseCodexTomlMcpServers(tomlText) {
 
 function parseJsonMcpServers(jsonText, preferredRootKey = 'mcpServers') {
   let parsed;
-  try { parsed = JSON.parse(jsonText); } catch { return {}; }
+  try { parsed = JSON.parse(String(jsonText || '').replace(/^\uFEFF/, '')); } catch { return {}; }
   if (!parsed || typeof parsed !== 'object') return {};
   const map = parsed[preferredRootKey]
     || parsed.mcpServers
@@ -1321,7 +1321,7 @@ export function syncMcpToClient(db, {
   } else {
     let parsed = {};
     if (beforeText.trim()) {
-      try { parsed = JSON.parse(beforeText); } catch (err) {
+      try { parsed = JSON.parse(beforeText.replace(/^\uFEFF/, '')); } catch (err) {
         throw new Error(`Target JSON config is invalid and cannot be safely merged: ${err.message}`);
       }
     }
