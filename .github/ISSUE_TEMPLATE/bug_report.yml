@@ -1,35 +1,18 @@
 name: Bug Report
-description: Report a reproducible bug or security-safe edge case in CollabHub
-title: "[Bug]: "
+description: Report a reproducible issue in CollabHub v3.0
 labels: ["bug"]
 body:
-  - type: textarea
-    id: description
-    attributes:
-      label: What happened?
-      description: A clear and concise description of the bug.
-    validations:
-      required: true
-  - type: textarea
-    id: repro
-    attributes:
-      label: Steps to reproduce
-      placeholder: |
-        1. Run `npm start` or `node bin/collab-hub.mjs ...`
-        2. Trigger ...
-        3. Observe error
-    validations:
-      required: true
   - type: input
     id: env
     attributes:
-      label: Environment
-      placeholder: "OS (Windows/macOS/Linux), Node.js version (`node -v`), CollabHub version"
+      label: OS, Node.js version & AI Client(s)
+      placeholder: "e.g. macOS 15, Node 22.14, Claude Code + Cursor"
     validations:
       required: true
   - type: textarea
-    id: logs
+    id: steps
     attributes:
-      label: Relevant logs or doctor output
-      description: Paste output from `npm run doctor` (scrub any personal paths or secrets first).
-      render: shell
+      label: Steps to reproduce & output
+      placeholder: "Paste sanitized output from `npx collab-hub doctor` or test failure..."
+    validations:
+      required: true

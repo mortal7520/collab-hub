@@ -225,7 +225,7 @@ export async function dispatchBackgroundTask(db, {
   // Strictly pre-send only — never retries or resends an already-sent task!
   let routedFrom = null;
   if (member === 'auto') {
-    const plan = planDispatch(db, { role, requireBackgroundAuto: true });
+    const plan = planDispatch(db, { role, prompt, title, requireBackgroundAuto: true });
     if (!plan.recommended) {
       throw new Error(`Auto-routing found no online background agent for role="${role}" (skipped: ${plan.skipped.map((s) => `${s.member}:${s.reason}`).join(', ')})`);
     }
@@ -241,7 +241,7 @@ export async function dispatchBackgroundTask(db, {
         && (!stRow.cooldown_channel || stRow.cooldown_channel === ch);
       const unavailable = !candidate || !candidate.enabled || cdActive || ['offline', 'dormant'].includes(stRow?.state);
       if (unavailable) {
-        const plan = planDispatch(db, { role, exclude: [member], requireBackgroundAuto: true });
+        const plan = planDispatch(db, { role, prompt, title, exclude: [member], requireBackgroundAuto: true });
         if (plan.recommended) {
           routedFrom = `${member}(${cdActive ? 'cooldown' : (stRow?.state || 'unavailable')})`;
           member = plan.recommended.member;

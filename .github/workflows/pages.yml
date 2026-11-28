@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'public/**'
+      - 'src/mcp-app-ui.mjs'
+      - 'src/config.mjs'
+      - 'package.json'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -25,21 +28,28 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Build static interactive demo bundle
+      - name: Build static interactive demo bundle (+ Standalone Cockpit)
         run: |
           node --input-type=module -e "
           import fs from 'node:fs';
           import path from 'node:path';
+          import { buildCockpitAppHtml } from './src/mcp-app-ui.mjs';
           fs.mkdirSync('_site', { recursive: true });
-          for (const f of ['styles.css', 'i18n.js', 'app.js', 'studios.js']) {
-            fs.copyFileSync(path.join('public', f), path.join('_site', f));
+          for (const f of ['styles.css', 'i18n.js', 'app.js', 'studios.js', 'ops-studio.js', 'llms.txt', 'manifest.webmanifest']) {
+            let content = fs.readFileSync(path.join('public', f), 'utf8');
+            if (f === 'manifest.webmanifest') content = content.replace('./cockpit?mode=dock', './cockpit.html?mode=dock');
+            fs.writeFileSync(path.join('_site', f), content, 'utf8');
           }
           let html = fs.readFileSync(path.join('public', 'index.html'), 'utf8');
           html = html
             .replaceAll('href=\"/assets/styles.css\"', 'href=\"./styles.css\"')
             .replaceAll('src=\"/assets/app.js\"', 'src=\"./app.js\"')
+            .replaceAll('href=\"/manifest.webmanifest\"', 'href=\"./manifest.webmanifest\"')
+            .replaceAll('href=\"/cockpit\"', 'href=\"./cockpit.html\"')
             .replace('</head>', '<meta http-equiv=\"Content-Security-Policy\" content=\"default-src \x27self\x27; script-src \x27self\x27; style-src \x27self\x27 \x27unsafe-inline\x27; connect-src \x27self\x27; img-src \x27self\x27 data:; object-src \x27none\x27; base-uri \x27none\x27\" />\n<meta name=\"collabhub-static-demo\" content=\"1\" />\n</head>');
           fs.writeFileSync(path.join('_site', 'index.html'), html, 'utf8');
+          let cockpitHtml = buildCockpitAppHtml().replace('</head>', '<meta name=\"collabhub-static-demo\" content=\"1\" />\n</head>');
+          fs.writeFileSync(path.join('_site', 'cockpit.html'), cockpitHtml, 'utf8');
           fs.writeFileSync(path.join('_site', '.nojekyll'), '', 'utf8');
           console.log('Built _site interactive demo:', fs.readdirSync('_site'));
           "

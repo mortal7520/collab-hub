@@ -1,0 +1,42 @@
+# CollabHub v3.0.0 — LLM & Agent Index
+
+> Local-first, zero-npm-dependency multi-agent Mission Control, Live Cross-Agent Usage & Cost Ledger, Model-Strength Smart Router, and Sticky Native Host Plugins.
+
+- Homepage / Live Demo: https://mortal7520.github.io/collab-hub/
+- Standalone Cockpit Demo: https://mortal7520.github.io/collab-hub/cockpit.html
+- Repository: https://github.com/mortal7520/collab-hub
+- License: MIT
+- Runtime: Node.js >= 22.13.0 (built-ins only, 0 npm runtime deps, built-in `node:sqlite`)
+
+## Quick CLI Commands
+
+- `npx collab-hub setup --profile cockpit --confirm` — Detect 14 AI clients & install zero-secret MCP + Claude Code `statusLine` HUD (with `.bak` backups)
+- `npx collab-hub install-plugins --confirm` — Install sticky Always-On native extension into VS Code, Cursor, Windsurf, Antigravity IDE, and Kiro
+- `npx collab-hub cockpit --dock` — Launch floating frameless Resident HUD window
+- `npx collab-hub autostart install --confirm` — Install zero-admin LaunchAgent / systemd user unit / Task Scheduler daemon
+- `npx collab-hub usage` — Live cross-agent token, burn-rate & cost report (strictly metadata-only, zero prompt text)
+- `npx collab-hub plan --prompt "..." --strategy balanced|quality|cost|speed` — Model-strength intelligent agent routing
+- `npx collab-hub tui` — 24-bit TrueColor animated terminal cockpit
+- `npx collab-hub hud --format statusline` — Sub-30ms terminal StatusLine HUD
+- `npx collab-hub mcp --profile core|cockpit|full` — Stdio MCP server (13 / 23 / 53 tools)
+- `npx collab-hub start` — Start Web Workbench (`http://127.0.0.1:5290`), SSE & Streamable HTTP `/mcp`
+
+## Supported 14 Market MCP Clients
+
+antigravity, codex, claude-code, claude-desktop, cursor, windsurf, vscode, gemini-cli, cline, roo-code, opencode, zed, continue, kiro
+
+## MCP Tool Profiles
+
+- `core` (13 tools): collab_cockpit, collab_roster, collab_plan, collab_dispatch, collab_poll, collab_cancel, collab_tasks, collab_room, collab_handoff_pack, collab_worktree_create, collab_worktree_verify, collab_worktree_merge, collab_usage
+- `cockpit` (23 tools): core + collab_cockpit_state, collab_consensus, collab_artifacts, collab_budget, collab_triggers, collab_webhooks, collab_mcp_hub, collab_mcp_find_tools, collab_skills_hub, collab_merge_queue, collab_self_check, collab_self_heal
+- `full` (53 tools): All coordination, memory FTS5, toolkit (`ast-grep`, `repomix`, `markitdown`, `beads`, `cass`), playbooks, DAG workflows, Mail Hub & Agent Registry tools.
+
+## Key HTTP Endpoints (Loopback Only)
+
+- `POST/GET/DELETE /mcp?profile=core|cockpit|full` — Streamable HTTP MCP endpoint
+- `GET /api/usage/live` — Live cross-agent tokens, burn rate & cost ledger
+- `GET /api/route/matrix`, `POST /api/route/recommend` — Model-strength smart router
+- `GET /api/plugins/plan`, `POST /api/plugins/install` — Cross-IDE native plugin installer
+- `GET /api/setup/plan`, `POST /api/setup/apply` — Guided multi-client onboarding wizard
+- `GET /api/autostart/status`, `POST /api/autostart/install` — Resident daemon autostart
+- `GET /api/webhooks`, `POST /api/webhooks/save|delete|test` — SSRF-guarded HMAC-SHA256 webhooks

@@ -950,8 +950,12 @@ export function renderTuiFrame(data, uiState = {}) {
   const roomsChip = roomsVisible
     ? `   ${s('ROOMS', P.slate)} ${s(String(activeClaims), activeClaims > 0 ? P.emerald : P.slate, { bold: activeClaims > 0 })} ${s('claims', P.slate)}`
     : '';
+  const usageChip = Number(stats.mcp_calls) > 0 || Number(stats.connected_clients) > 0
+    ? `   ${s('CLIENTS', P.slate)} ${s(String(stats.connected_clients || 0), P.emerald)}/${s(`${stats.mcp_calls || 0}c`, P.cyan)}`
+    : '';
   const statRight = `${s('MCP', P.slate)} ${s(String(stats.mcp_registered || 0), P.indigo)}`
     + `   ${s('SKILLS', P.slate)} ${s(String(stats.skills_total || 0), P.indigo)}`
+    + usageChip
     + roomsChip
     + `   ${s(timeOf(d.generated_at), P.slate)} `;
   lines.push(boxRow(inner, statLeft, statRight, s));
@@ -1235,6 +1239,8 @@ export function collectTuiData(db, { demo = false, colorLevel = 0, width = 100, 
     skills_total: Number(skills.summary?.skills_total) || 0,
     rooms_claims: rooms.active_claims,
     budget_policies: rooms.budget_policies,
+    connected_clients: Number(hud.usage?.connected_clients) || 0,
+    mcp_calls: Number(hud.usage?.mcp_calls) || 0,
   };
 
   return {

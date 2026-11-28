@@ -14,6 +14,7 @@
 import { APP_VERSION } from './config.mjs';
 
 export const COCKPIT_RESOURCE_URI = 'ui://collab-hub/cockpit.html';
+export const CHAT_STRIP_RESOURCE_URI = 'ui://collab-hub/chat-strip.html';
 export const MCP_APP_MIME_TYPE = 'text/html;profile=mcp-app';
 
 /**
@@ -111,7 +112,7 @@ html, body {
   font-size: 12.5px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 
@@ -124,7 +125,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   margin: 0 auto;
 }
 
-/* Header HUD */
+/* Always-On Sticky Header HUD (follows scroll inside every IDE/Desktop host) */
+.cockpit-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 2px;
+  background: linear-gradient(180deg, var(--bg) 72%, rgba(7, 9, 16, 0));
+}
 .hud-bar {
   display: flex;
   align-items: center;
@@ -134,10 +145,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 12px;
   border: 1px solid var(--bd);
   background: var(--glass);
-  backdrop-filter: blur(12px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 24px -14px rgba(0,0,0,0.6);
   flex-wrap: wrap;
 }
+.usage-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--bd);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.usage-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.u-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--bd); background: var(--bg3);
+  font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.u-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg3); }
+.u-dot.active { background: var(--emerald); box-shadow: 0 0 8px var(--emerald); }
+.u-dot.recent { background: var(--cyan); }
+body.dock-mode .shell { max-width: 460px; padding: 8px; gap: 8px; }
+body.dock-mode .radar-grid { grid-template-columns: 1fr; }
+body.dock-mode .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.dock-mode .kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .brand { display: flex; align-items: center; gap: 9px; }
 .brand-orb {
   width: 28px; height: 28px; border-radius: 8px;
@@ -332,26 +370,33 @@ button, input, select, textarea { font: inherit; color: inherit; }
 </head>
 <body>
 <div class="shell">
-  <header class="hud-bar">
-    <div class="brand">
-      <div class="brand-orb">⚡</div>
-      <div>
-        <div class="brand-title">CollabHub <span style="color:var(--accent)">v${APP_VERSION}</span></div>
-        <div class="brand-sub"><span class="live-dot"></span><span id="hostBadge">MCP App · Neural Mission Control</span></div>
+  <div class="cockpit-sticky">
+    <header class="hud-bar">
+      <div class="brand">
+        <div class="brand-orb">⚡</div>
+        <div>
+          <div class="brand-title">CollabHub <span style="color:var(--accent)">v${APP_VERSION}</span></div>
+          <div class="brand-sub"><span class="live-dot"></span><span id="hostBadge">MCP App · Neural Mission Control</span></div>
+        </div>
       </div>
-    </div>
-    <div class="hud-right">
-      <div class="ring-chip" title="Runtime Health Score">
-        <svg class="ring-svg" viewBox="0 0 20 20"><circle class="ring-track" cx="10" cy="10" r="8"/><circle class="ring-fill" id="healthRing" cx="10" cy="10" r="8"/></svg>
-        <span id="healthVal">—</span>
+      <div class="hud-right">
+        <div class="ring-chip" title="Runtime Health Score">
+          <svg class="ring-svg" viewBox="0 0 20 20"><circle class="ring-track" cx="10" cy="10" r="8"/><circle class="ring-fill" id="healthRing" cx="10" cy="10" r="8"/></svg>
+          <span id="healthVal">—</span>
+        </div>
+        <button type="button" class="btn cyan" id="btnRefresh">↻ Sync</button>
+        <button type="button" class="btn ok" id="btnProbe">◎ Probe</button>
+        <button type="button" class="btn warn" id="btnHeal">✚ Heal</button>
+        <button type="button" class="btn" id="btnLang">EN/中</button>
+        <button type="button" class="btn cyan" id="btnAttachCtx" title="Attach fleet state pill into chat box" hidden>📌 Attach</button>
+        <button type="button" class="btn primary" id="btnAskHost" hidden>↗ Send to Chat</button>
       </div>
-      <button type="button" class="btn cyan" id="btnRefresh">↻ Sync</button>
-      <button type="button" class="btn ok" id="btnProbe">◎ Probe</button>
-      <button type="button" class="btn warn" id="btnHeal">✚ Heal</button>
-      <button type="button" class="btn" id="btnLang">EN/中</button>
-      <button type="button" class="btn primary" id="btnAskHost" hidden>↗ Send to Chat</button>
+    </header>
+    <div class="usage-strip" id="cockpitUsageStrip">
+      <div class="usage-chips" id="cockpitUsageChips"><span class="card-sub">Live usage initializing…</span></div>
+      <div class="mono" id="cockpitUsageTotals" style="font-size:10.5px;color:var(--cyan)">0 tok · $0.00</div>
     </div>
-  </header>
+  </div>
 
   <nav class="tabs" role="tablist">
     <button type="button" class="tab active" data-tab="radar"><span data-i18n="tRadar">Fleet Radar</span> <span class="badge ok" id="bAgents">0</span></button>
@@ -389,16 +434,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
         </div>
       </div>
       <div class="search-bar">
-        <select class="input" id="qdMember" style="max-width:130px"><option value="auto">auto</option></select>
-        <select class="input" id="qdRole" style="max-width:120px">
+        <select class="input" id="qdMember" aria-label="Target agent" style="max-width:130px"><option value="auto">auto</option></select>
+        <select class="input" id="qdRole" aria-label="Dispatch role" style="max-width:120px">
           <option value="researcher">researcher</option>
           <option value="reviewer">reviewer</option>
           <option value="implementer">implementer</option>
           <option value="tester">tester</option>
         </select>
-        <select class="input" id="qdProject" style="max-width:165px"><option value="">Select project…</option></select>
-        <input class="input" id="qdPrompt" placeholder="Enter bounded goal & deliverable…" />
-        <button type="button" class="btn primary" id="btnQdSend" data-i18n="qdSend">Dispatch</button>
+        <select class="input" id="qdProject" aria-label="Target workspace project" style="max-width:165px"><option value="">Select project…</option></select>
+        <input class="input" id="qdPrompt" aria-label="Dispatch goal" placeholder="Enter bounded goal & deliverable…" />
+        <button type="button" class="btn primary" id="btnQdSend" style="white-space:nowrap;flex:none" data-i18n="qdSend">Dispatch</button>
       </div>
     </div>
   </section>
@@ -416,7 +461,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
           <button type="button" class="btn cyan" id="btnTdPoll">Poll</button>
           <button type="button" class="btn" id="btnTdLogs">Live Logs</button>
           <button type="button" class="btn warn" id="btnTdCancel">Cancel</button>
-          <button type="button" class="btn" id="btnTdClose">×</button>
+          <button type="button" class="btn" id="btnTdClose" aria-label="Close task details">×</button>
         </div>
       </div>
       <pre class="pre" id="tdBody"></pre>
@@ -604,6 +649,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
     if (sc.mcp_hub_summary && !appState.data.mcp_hub) appState.data.mcp_hub_summary = sc.mcp_hub_summary;
     if (sc.skills_hub) appState.data.skills_hub = sc.skills_hub;
     if (sc.self_improve) appState.data.self_improve = sc.self_improve;
+    if (sc.live_usage) appState.data.live_usage = sc.live_usage;
+    if (Array.isArray(sc.rooms)) appState.data.rooms = sc.rooms;
+    if (Array.isArray(sc.artifacts)) appState.data.artifacts = sc.artifacts;
+    if (sc.budget_summary) appState.data.budget_summary = sc.budget_summary;
+    if (Array.isArray(sc.triggers)) appState.data.triggers = sc.triggers;
+    if (Array.isArray(sc.consensus)) appState.data.consensus = sc.consensus;
     if (Array.isArray(sc.workspaces)) appState.workspaces = sc.workspaces;
     if (sc.project_dir) appState.projectDir = sc.project_dir;
     if (!appState.projectDir && appState.workspaces.length) appState.projectDir = appState.workspaces[0].path || '';
@@ -645,6 +696,29 @@ button, input, select, textarea { font: inherit; color: inherit; }
       if (res?.isError) throw new Error(res.content?.[0]?.text || 'Tool call failed');
       if (res?.structuredContent) return res.structuredContent;
       try { return JSON.parse(res?.content?.[0]?.text || '{}'); } catch { return res; }
+    }
+    if (appState.isStaticDemo) {
+      if (name === 'collab_cockpit_state' || name === 'collab_roster') {
+        return appState.data;
+      }
+      if (name === 'collab_mcp_find_tools') {
+        const q = String(args.query || '').toLowerCase();
+        const demoTools = [
+          { server: 'collab-hub', name: 'collab_plan', description: 'Model-strength smart dispatch planner' },
+          { server: 'collab-hub', name: 'collab_usage', description: 'Live cross-agent token & cost telemetry' },
+          { server: 'github', name: 'create_pull_request', description: 'Open PR from verified worktree branch' },
+        ];
+        return { matches: q ? demoTools.filter((t) => (t.name + ' ' + t.description).toLowerCase().includes(q)) : demoTools };
+      }
+      if (name === 'collab_handoff_pack') {
+        return { markdown: '# CollabHub Demo Handoff Pack\\n- Active Room: v3-launch\\n- Health: 96/100\\n- Next: Run locally via npx -y collab-hub start' };
+      }
+      return {
+        ok: true,
+        demo_preview: true,
+        action: name,
+        note: 'Interactive static demo preview: mutations run against your local daemon (collab-hub start).',
+      };
     }
     // Standalone HTTP fallback when previewed at /cockpit
     if (name === 'collab_cockpit_state' || name === 'collab_roster') {
@@ -926,6 +1000,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
       { l: tr('kMcp'), v: String(mcpCount), c: 'var(--accent)' },
       { l: tr('kQueue'), v: String(mq.length), c: mq.some((q) => q.status === 'conflict') ? 'var(--rose)' : 'var(--fg)' },
     ].map((k) => '<div class="kpi"><span class="kpi-l">' + esc(k.l) + '</span><span class="kpi-v" style="color:' + k.c + '">' + esc(k.v) + '</span></div>').join('');
+
+    // Sticky Live Cross-Agent Usage Strip
+    const lu = d.live_usage || {};
+    const luTot = lu.totals || {};
+    const luAgents = lu.agents || [];
+    const fmtU = (n) => n >= 1000000 ? (n / 1000000).toFixed(2) + 'M' : (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n || 0));
+    if ($('#cockpitUsageChips')) {
+      $('#cockpitUsageChips').innerHTML = luAgents.slice(0, 6).map((a) =>
+        '<span class="u-chip"><span class="u-dot ' + esc(a.status) + '"></span><strong>' + esc(a.name) + '</strong><span class="mono">' + esc(fmtU(a.today_tokens || a.total_7d_tokens)) + '</span></span>'
+      ).join('') || '<span class="card-sub">Connect any AI client to stream live usage</span>';
+    }
+    if ($('#cockpitUsageTotals')) {
+      $('#cockpitUsageTotals').textContent = fmtU(luTot.today_tokens || 0) + ' today · ' + fmtU(luTot.tokens_per_min || 0) + '/m · $' + Number(luTot.est_cost_usd_today || 0).toFixed(2) + ' · ' + (luTot.mcp_calls_total || 0) + ' calls';
+    }
 
     // Agent list + Quick Dispatch dropdown
     const sel = appState.selectedAgent;
@@ -1375,7 +1463,55 @@ button, input, select, textarea { font: inherit; color: inherit; }
   /* ------------------------------------------------------------------ */
   /* Boot: SEP-1865 Handshake OR Standalone HTTP Preview                */
   /* ------------------------------------------------------------------ */
+  function loadStaticDemoCockpit() {
+    appState.isStaticDemo = true;
+    ingestPayload({
+      members: [
+        { member: 'codex', name: 'Codex', driver: 'desktop-native', channel: 'desktop-native', state: 'online', detail: 'Active · security & coding flagship' },
+        { member: 'claude', name: 'Claude Code', driver: 'claude-dual', channel: 'desktop-native', state: 'online', detail: 'Active · architecture & UX' },
+        { member: 'agy', name: 'Antigravity', driver: 'desktop-native', channel: 'desktop-native', state: 'online', detail: 'Active · long-context & copywriting' },
+        { member: 'cursor', name: 'Cursor IDE', driver: 'generic-cli', channel: 'http', state: 'idle', detail: 'Connected via Streamable /mcp' },
+      ],
+      tasks: [
+        { task_id: 'demo-1', member: 'codex', state: 'running', title: 'Audit SSRF & /mcp origin checks' },
+        { task_id: 'demo-2', member: 'claude', state: 'completed', title: 'Verify sticky sidebar Webview UX' },
+      ],
+      workspaces: [{ name: 'collab-hub', path: '/workspace/collab-hub' }],
+      project_dir: '/workspace/collab-hub',
+      self_improve: { health_score: 96 },
+      mcp_hub: {
+        summary: { total_servers: 6 },
+        servers: [
+          { id: 'collab-hub', transport: 'http', cached_tools_count: 23, status: 'healthy' },
+          { id: 'github', transport: 'stdio', cached_tools_count: 18, status: 'healthy' },
+        ],
+      },
+      skills_hub: {
+        summary: { skills_total: 12 },
+        skills: [{ name: 'workers-best-practices', clients: ['claude-code', 'codex', 'cursor'] }],
+        rules: [{ target_id: 'claude-md', status: 'in_sync' }],
+      },
+      merge_queue: [{ branch_name: 'collab/v3/smart-router', status: 'ready', check_summary: 'Clean merge onto main' }],
+      rooms: [{ name: 'v3-launch', active_claims: 2, log_entries: 9, goal: 'Always-on multi-agent cockpit' }],
+      artifacts: [{ name: 'security-audit.md', author: 'codex', bytes: 2480 }],
+      budget_summary: { action: 'allow', global_calls_24h: 186, global_tokens_24h: 412800 },
+      triggers: [{ name: 'nightly-health-check', action: 'doctor', interval_sec: 1800, enabled: true }],
+      consensus: [{ topic: 'Enable cockpit MCP profile by default', status: 'approved', votes: [{ member: 'agy', stance: 'approve' }, { member: 'codex', stance: 'approve' }] }],
+      live_usage: {
+        totals: { today_tokens: 412800, tokens_per_min: 1420, est_cost_usd_today: 2.18, mcp_calls_total: 186 },
+        agents: [
+          { name: 'Claude Code', status: 'active', today_tokens: 168400 },
+          { name: 'Codex', status: 'active', today_tokens: 124600 },
+          { name: 'Antigravity', status: 'active', today_tokens: 68200 },
+          { name: 'Cursor', status: 'recent', today_tokens: 29400 },
+        ],
+      },
+    });
+  }
+
   async function boot() {
+    const qp = new URLSearchParams(location.search);
+    if (qp.get('mode') === 'dock') document.body.classList.add('dock-mode');
     applyI18n();
     drawFleetCanvas();
     if (inIframe) {
@@ -1389,9 +1525,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
         appState.hostCaps = initRes?.hostCapabilities || {};
         if (initRes?.hostContext) applyHostContext(initRes.hostContext);
         if (appState.hostCaps?.message) $('#btnAskHost').hidden = false;
+        if (appState.hostCaps?.updateModelContext) $('#btnAttachCtx').hidden = false;
+        $('#btnAttachCtx')?.addEventListener('click', async () => {
+          const members = appState.data.members || [];
+          const online = members.filter((m) => ['online', 'idle'].includes(m.state)).map((m) => m.member).join(', ') || 'none';
+          const tot = appState.data.live_usage?.totals || {};
+          const health = appState.data.self_improve?.health_score ?? 100;
+          const summary = '[CollabHub Live Context] Health=' + health + '/100 | Online=' + online + ' | Today=' + fmtTok(tot.today_tokens || 0) + ' tok ($' + Number(tot.est_cost_usd_today || 0).toFixed(2) + ') | Active Tasks=' + (appState.data.tasks || []).filter((t) => t.state === 'running').length;
+          try {
+            await sendRpcRequest('ui/update-model-context', { content: [{ type: 'text', text: summary }] });
+            showToast('Attached live CollabHub pill to chat box');
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
         $('#hostBadge').textContent = 'MCP App · ' + (initRes?.hostInfo?.name || 'Native Host');
         sendRpcNotification('ui/notifications/initialized', {});
-        // Debounced + thresholded ResizeObserver prevents inline iframe resize jitter loops
         if (typeof ResizeObserver !== 'undefined') {
           let lastSentH = 0;
           let resizeTimer = null;
@@ -1407,19 +1556,271 @@ button, input, select, textarea { font: inherit; color: inherit; }
           });
           ro.observe(document.body);
         }
-        // Pull fresh state if initial tool result wasn't pushed yet
         setTimeout(() => { if (!appState.data.members.length) refreshState(); }, 350);
         return;
       } catch {
-        // Fall through to standalone mode if not hosted by an MCP Apps host
+        // Fall through to standalone mode
       }
     }
     appState.mode = 'standalone';
-    $('#hostBadge').textContent = 'Standalone Cockpit Preview';
-    refreshState();
+    $('#hostBadge').textContent = qp.get('mode') === 'dock' ? 'Resident Dock HUD · Live' : 'Standalone Cockpit Preview';
+    const isStaticMeta = document.querySelector('meta[name="collabhub-static-demo"]')?.content === '1';
+    if (isStaticMeta) {
+      $('#hostBadge').textContent = 'Interactive Static Demo · GitHub Pages';
+      loadStaticDemoCockpit();
+      return;
+    }
+    try {
+      const fresh = await callServer('collab_cockpit_state', {});
+      ingestPayload(fresh);
+    } catch {
+      loadStaticDemoCockpit();
+    }
+    setInterval(() => {
+      if (!document.hidden && appState.mode === 'standalone') {
+        callServer('collab_cockpit_state', {}).then(ingestPayload).catch(() => {});
+      }
+    }, 5000);
   }
 
   boot();
+})();
+</script>
+</body>
+</html>`;
+}
+
+/**
+ * Compact SEP-1865 In-Conversation HUD Strip (`ui://collab-hub/chat-strip.html`).
+ * Renders inline inside agent conversations beside/after `collab_plan` or `collab_usage`
+ * calls, auto-resizes cleanly (~190px), and exposes 1-click `ui/update-model-context`
+ * so users can attach live routing/usage state as a pill right in their chat box.
+ */
+export function buildChatStripAppHtml() {
+  return `<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CollabHub Chat Strip</title>
+<style>
+  :root {
+    --bg: var(--color-background-primary, #0b1020);
+    --bg2: var(--color-background-secondary, #12182d);
+    --fg: var(--color-text-primary, #e2e8f0);
+    --fg2: var(--color-text-secondary, #94a3b8);
+    --bd: var(--color-border-primary, rgba(148, 163, 184, 0.18));
+    --accent: #818cf8;
+    --cyan: #38bdf8;
+    --green: #34d399;
+    --font: var(--font-sans, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  :root[data-theme="light"] {
+    --bg: var(--color-background-primary, #f8fafc);
+    --bg2: var(--color-background-secondary, #ffffff);
+    --fg: var(--color-text-primary, #0f172a);
+    --fg2: var(--color-text-secondary, #475569);
+    --bd: var(--color-border-primary, rgba(15, 23, 42, 0.12));
+    --accent: #4f46e5;
+    --cyan: #0284c7;
+    --green: #059669;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  body { background: transparent; color: var(--fg); font-family: var(--font); font-size: 12px; padding: 4px; overflow-x: clip; }
+  .strip {
+    border: 1px solid var(--bd);
+    border-radius: 11px;
+    background: var(--bg2);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 7px; font-weight: 700; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .pill { font-size: 10.5px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--bd); color: var(--fg2); }
+  .pill.hi { color: var(--green); border-color: rgba(52, 211, 153, 0.35); }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .cell { border: 1px solid var(--bd); border-radius: 8px; background: var(--bg); padding: 6px 8px; }
+  .lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg2); display: block; }
+  .val { font-size: 13px; font-weight: 700; font-family: var(--mono); }
+  .route-box {
+    border: 1px solid rgba(129, 140, 248, 0.36);
+    border-radius: 8px;
+    padding: 7px 9px;
+    background: rgba(99, 102, 241, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid var(--bd); background: var(--bg); color: var(--fg);
+    border-radius: 7px; padding: 4px 9px; font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.cy { color: var(--cyan); border-color: rgba(56, 189, 248, 0.35); }
+  .status { font-size: 11px; color: var(--fg2); }
+</style>
+</head>
+<body>
+  <div class="strip">
+    <div class="top">
+      <div class="brand"><span class="dot"></span><span>CollabHub In-Chat HUD</span><span class="pill" id="stripMode">v${APP_VERSION}</span></div>
+      <div class="chips" id="agentChips"></div>
+    </div>
+    <div class="grid">
+      <div class="cell"><span class="lbl">Today Tokens</span><span class="val" id="kTok">0</span></div>
+      <div class="cell"><span class="lbl">Est. Cost</span><span class="val" id="kCost">$0.00</span></div>
+      <div class="cell"><span class="lbl">Burn / Calls</span><span class="val" id="kCalls">0/m · 0</span></div>
+    </div>
+    <div class="route-box" id="routeBox" hidden>
+      <div style="display:flex;justify-content:space-between;gap:6px;align-items:center">
+        <strong id="routePick">Recommended: —</strong>
+        <span class="pill hi" id="routeScore">score —</span>
+      </div>
+      <div class="status" id="routeReasons"></div>
+    </div>
+    <div class="actions">
+      <span class="status" id="stripNote">Metadata-only live strip</span>
+      <div class="btn-row">
+        <button type="button" class="btn cy" id="btnAttachPill" hidden>📌 Attach to Chat</button>
+        <button type="button" class="btn pri" id="btnOpenCockpit">◧ Open Side Cockpit</button>
+      </div>
+    </div>
+  </div>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const fmtTok = (n) => { const x = Number(n) || 0; return x >= 1e6 ? (x / 1e6).toFixed(2) + 'M' : (x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : String(x)); };
+  const inIframe = window.parent && window.parent !== window;
+  let seq = 1;
+  const pending = new Map();
+  let lastPayload = null;
+  let hostCaps = {};
+
+  function sendReq(method, params) {
+    return new Promise((resolve, reject) => {
+      const id = 'cs_' + (++seq);
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('timeout')); }, 5000);
+      pending.set(id, { resolve, reject, timer });
+      window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    });
+  }
+
+  function applyCtx(ctx) {
+    if (!ctx) return;
+    if (ctx.theme === 'light' || ctx.theme === 'dark') document.documentElement.setAttribute('data-theme', ctx.theme);
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars && typeof vars === 'object') {
+      for (const [k, v] of Object.entries(vars)) {
+        if (k.startsWith('--') && typeof v === 'string') document.documentElement.style.setProperty(k, v);
+      }
+    }
+  }
+
+  function renderData(sc) {
+    if (!sc || typeof sc !== 'object') return;
+    lastPayload = sc;
+    const tot = sc.totals || sc.live_usage?.totals || {};
+    const agents = sc.agents || sc.live_usage?.agents || sc.eligible || [];
+    $('#kTok').textContent = fmtTok(tot.today_tokens || tot.total_7d_tokens || 0);
+    $('#kCost').textContent = '$' + Number(tot.est_cost_usd_today || 0).toFixed(2);
+    $('#kCalls').textContent = fmtTok(tot.tokens_per_min || 0) + '/m · ' + String(tot.mcp_calls_total || 0);
+    $('#agentChips').innerHTML = (Array.isArray(agents) ? agents : []).slice(0, 4).map((a) => {
+      const lbl = a.name || a.member || a.agent_id || 'agent';
+      return '<span class="pill">' + esc(lbl) + (a.today_tokens ? ' ' + esc(fmtTok(a.today_tokens)) : '') + '</span>';
+    }).join('');
+    if (sc.recommended) {
+      $('#routeBox').hidden = false;
+      $('#routePick').textContent = 'Recommended: ' + (sc.recommended.name || sc.recommended.member) + ' (' + (sc.recommended.model_tier || 'flagship') + ')';
+      $('#routeScore').textContent = (sc.task_classification?.category || 'route') + ' · ' + String(sc.recommended.score ?? '');
+      $('#routeReasons').textContent = (sc.recommended.routing_reasons || []).join(' · ');
+    }
+  }
+
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window.parent) return;
+    const m = ev.data;
+    if (!m || m.jsonrpc !== '2.0') return;
+    if (m.id !== undefined && (m.result !== undefined || m.error !== undefined)) {
+      const slot = pending.get(m.id);
+      if (!slot) return;
+      pending.delete(m.id);
+      clearTimeout(slot.timer);
+      if (m.error) slot.reject(new Error(m.error.message || 'RPC error'));
+      else slot.resolve(m.result);
+      return;
+    }
+    if (m.method === 'ui/notifications/tool-result') {
+      const sc = m.params?.structuredContent || null;
+      if (sc) renderData(sc);
+    } else if (m.method === 'ui/notifications/host-context-changed') {
+      applyCtx(m.params);
+    } else if (m.method === 'ping' && m.id !== undefined) {
+      window.parent.postMessage({ jsonrpc: '2.0', id: m.id, result: {} }, '*');
+    }
+  });
+
+  $('#btnAttachPill').addEventListener('click', async () => {
+    const rec = lastPayload?.recommended;
+    const summary = rec
+      ? '[CollabHub Smart Route] ' + (rec.name || rec.member) + ' (score=' + rec.score + ', ' + (lastPayload?.task_classification?.category || '') + ') :: ' + (rec.routing_reasons || []).join('; ')
+      : '[CollabHub Live HUD] Today=' + $('#kTok').textContent + ' tok (' + $('#kCost').textContent + ')';
+    try {
+      await sendReq('ui/update-model-context', { content: [{ type: 'text', text: summary }] });
+      $('#stripNote').textContent = 'Attached pill to next chat message!';
+    } catch (err) {
+      $('#stripNote').textContent = err.message;
+    }
+  });
+
+  $('#btnOpenCockpit').addEventListener('click', async () => {
+    if (inIframe) {
+      try {
+        await sendReq('tools/call', { name: 'collab_cockpit', arguments: {} });
+        $('#stripNote').textContent = 'Opened CollabHub Side Cockpit';
+      } catch (err) { $('#stripNote').textContent = err.message; }
+    } else {
+      window.open('/cockpit?mode=dock', '_blank', 'width=460,height=840');
+    }
+  });
+
+  async function init() {
+    if (inIframe) {
+      try {
+        const res = await sendReq('ui/initialize', {
+          protocolVersion: '2026-01-26',
+          appInfo: { name: 'CollabHub Chat Strip', version: '${APP_VERSION}' },
+          appCapabilities: {},
+        });
+        hostCaps = res?.hostCapabilities || {};
+        if (res?.hostContext) applyCtx(res.hostContext);
+        if (hostCaps.updateModelContext) $('#btnAttachPill').hidden = false;
+        window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*');
+        if (typeof ResizeObserver !== 'undefined') {
+          new ResizeObserver(() => {
+            const h = Math.max(150, Math.min(340, Math.ceil(document.body.scrollHeight)));
+            window.parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/size-changed', params: { height: h } }, '*');
+          }).observe(document.body);
+        }
+        return;
+      } catch {}
+    }
+    try {
+      const live = await fetch('/api/usage/live?local=1').then((r) => r.json());
+      renderData(live);
+    } catch {
+      renderData({ totals: { today_tokens: 412800, tokens_per_min: 1420, est_cost_usd_today: 2.18, mcp_calls_total: 186 }, agents: [{ name: 'Claude', today_tokens: 168400 }, { name: 'Codex', today_tokens: 124600 }] });
+    }
+  }
+  init();
 })();
 </script>
 </body>

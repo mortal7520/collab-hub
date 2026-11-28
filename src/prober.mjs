@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { evaluateBudget } from './budget.mjs';
-import { INTEGRATIONS, MAIL_BASE_URL, VALID_ROLES } from './config.mjs';
+import { INTEGRATIONS, MAIL_BASE_URL, VALID_ROLES, isOptionalIntegrationConfigured } from './config.mjs';
 import { getMemberStatuses, logEvent, upsertMemberStatus } from './db.mjs';
 import { listAgents, probeCustomAgent } from './registry.mjs';
+import { classifyTaskIntent, getAgentCapabilityProfile, scoreAgentForTask } from './router.mjs';
 import { computeAgentTelemetry } from './telemetry.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -31,9 +32,13 @@ async function runQuiet(file, args, timeout = 10000) {
   }
 }
 
-export async function probeDsh(runner = runQuiet) {
+export async function probeDsh(runner = runQuiet, opts = {}) {
+  const configured = opts.isConfigured !== undefined ? Boolean(opts.isConfigured) : isOptionalIntegrationConfigured('dsh');
+  if (!configured) {
+    return { member: 'dsh', channel: 'dsh-baton', state: 'unconfigured', detail: 'Optional WSL DSH bridge not configured (integrations.json / env)' };
+  }
   if (process.platform !== 'win32' || !INTEGRATIONS.wslDistro || !INTEGRATIONS.wslUser || !INTEGRATIONS.dshSocket) {
-    return { member: 'dsh', channel: 'dsh-baton', state: 'dormant', detail: 'WSL DSH adapter not configured (optional integrations.json)' };
+    return { member: 'dsh', channel: 'dsh-baton', state: 'unconfigured', detail: 'Optional WSL DSH adapter not configured' };
   }
   const py = [
     'import json, os, stat, subprocess, sys',
@@ -60,9 +65,10 @@ export async function probeDsh(runner = runQuiet) {
   }
 }
 
-export async function probeMuse(runner = runQuiet) {
-  if (!INTEGRATIONS.museOperatorClient || !INTEGRATIONS.musePublisherSocket || !INTEGRATIONS.musePeerIp) {
-    return { member: 'muse', channel: 'muse-tailnet', state: 'dormant', detail: 'Muse Tailnet adapter not configured (optional integrations.json)' };
+export async function probeMuse(runner = runQuiet, opts = {}) {
+  const configured = opts.isConfigured !== undefined ? Boolean(opts.isConfigured) : isOptionalIntegrationConfigured('muse');
+  if (!configured) {
+    return { member: 'muse', channel: 'muse-tailnet', state: 'unconfigured', detail: 'Optional Cloud Muse bridge not configured (integrations.json / env)' };
   }
   const [opRes, tsRes] = await Promise.all([
     runner('wsl.exe', [
@@ -270,18 +276,29 @@ export async function probeAllMembers(db, { desktopObservations = null, runner =
 }
 
 /**
- * Choose best currently fresh & online agent(s) for a role across ALL registered agents (built-in + custom).
+ * Choose best currently fresh & online agent(s) for a role across ALL registered agents (built-in + custom),
+ * incorporating Model-Strength & Task-Capability routing when task intent (`prompt`/`title`/`taskCategory`) is provided.
  */
 export function planDispatch(db, {
   role, prefer = [], exclude = [], requireLocalFiles = false, requireLinux = false, requireBackgroundAuto = false, desktopTtlMs,
+  prompt = '', title = '', taskCategory = null, complexity = null, strategy = 'balanced', projectDir = null,
 }) {
   if (!VALID_ROLES.has(role)) throw new Error(`Invalid role: ${role}`);
   const statuses = getMemberStatuses(db, desktopTtlMs !== undefined ? { desktopTtlMs } : {});
   const teleReport = computeAgentTelemetry(db, { days: 30 });
-  const telemetry = teleReport.agents;
   const channelTelemetry = teleReport.channels || {};
   const excludeSet = new Set(exclude || []);
   const preferList = Array.isArray(prefer) ? prefer : [];
+  const useCapabilityRouting = Boolean(
+    (typeof prompt === 'string' && prompt.trim())
+    || (typeof title === 'string' && title.trim())
+    || taskCategory
+    || complexity
+    || (strategy && strategy !== 'balanced'),
+  );
+  const classification = useCapabilityRouting
+    ? classifyTaskIntent({ prompt, title, role, taskCategory, complexity })
+    : null;
 
   const eligible = [];
   const skipped = [];
@@ -316,7 +333,7 @@ export function planDispatch(db, {
       skipped.push({ member: m.member, reason: `in_cooldown_${m.cooldown_remaining_s}s`, detail: m.cooldown_reason });
       continue;
     }
-    if (['offline', 'dormant', 'unknown', 'stale'].includes(m.state)) {
+    if (['offline', 'dormant', 'unconfigured', 'unknown', 'stale'].includes(m.state)) {
       skipped.push({ member: m.member, reason: `state_${m.state}`, detail: m.detail });
       continue;
     }
@@ -326,7 +343,7 @@ export function planDispatch(db, {
     if (prefIdx >= 0) score += 100 - prefIdx * 10;
     if (m.state === 'online') score += 40;
     else if (m.state === 'idle') score += 30;
-    if (m.member === 'claude' && m.channel === 'desktop-native' && m.state === 'online') score += 15;
+    if (!classification && m.member === 'claude' && m.channel === 'desktop-native' && m.state === 'online') score += 15;
     const chanKey = `${m.member}::${m.channel || 'default'}`;
     // Strict per-channel isolation: cold-start channels stay neutral (0) and NEVER inherit penalties from another channel!
     const tStats = channelTelemetry[chanKey] || null;
@@ -334,12 +351,19 @@ export function planDispatch(db, {
     // Soft circuit-breaker penalty on >=3 consecutive recent non-429, non-needs_input failures/stalls on THIS channel
     if (tStats?.circuit_state === 'open') score -= 8;
 
-    const budgetCheck = evaluateBudget(db, { member: m.member });
+    const budgetCheck = evaluateBudget(db, { member: m.member, ...(projectDir ? { projectDir } : {}) });
     if (budgetCheck.action === 'block') {
       skipped.push({ member: m.member, reason: 'budget_exceeded_blocked', detail: budgetCheck.matched_policies });
       continue;
     }
     if (budgetCheck.action === 'downgrade') score -= 25;
+
+    const capInfo = classification
+      ? scoreAgentForTask(m, { category: classification.category, complexity: classification.complexity, strategy })
+      : getAgentCapabilityProfile(m);
+    if (classification && Number.isFinite(capInfo.delta)) {
+      score += capInfo.delta;
+    }
 
     const executionMode = (m.channel === 'desktop-native') ? 'desktop_native_bridge' : 'background_auto';
     eligible.push({
@@ -350,6 +374,11 @@ export function planDispatch(db, {
       execution_mode: executionMode,
       state: m.state,
       score,
+      capability_score: capInfo.capability_score ?? null,
+      model_family: capInfo.model_family,
+      model_tier: capInfo.tier,
+      cost_tier: capInfo.cost_tier,
+      routing_reasons: capInfo.reasons || [],
       success_rate: tStats?.success_rate ?? null,
       circuit_state: tStats?.circuit_state ?? 'closed',
       avg_latency_ms: tStats?.avg_latency_ms ?? null,
@@ -360,6 +389,7 @@ export function planDispatch(db, {
   eligible.sort((a, b) => b.score - a.score);
   return {
     role,
+    ...(classification ? { task_classification: classification, strategy } : {}),
     recommended: eligible[0] || null,
     candidates: eligible,
     skipped,

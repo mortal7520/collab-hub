@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CollabHub v2.2 · Host-Native Multi-Agent Mission Control</title>
-<meta name="description" content="CollabHub v2.2 — zero-dependency, local-first multi-agent Mission Control with 60fps 6-Tab SEP-1865 MCP App Cockpit (AGY / Claude / Codex), Command TUI v2 & Live HUD (DSH / CLI), Living Shared Rooms, 51 MCP tools, Artifact Vault, Consensus, Budgets & Triggers." />
+<title>CollabHub v3.0 · Host-Native Multi-Agent Mission Control</title>
+<meta name="description" content="CollabHub v3.0 — zero-dependency, local-first multi-agent Mission Control with Sticky Native Host Plugins (VS Code/Cursor/Windsurf/AGY/Kiro), 60fps SEP-1865 Cockpit, Real-Time Cross-Agent Usage & Cost Ledger, Model-Strength Smart Router, 53 MCP tools & Rooms." />
 <meta name="color-scheme" content="dark light" />
+<link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%235e6ad2'/%3E%3Cpath d='M12 12 6.5 7M12 12l5.5-5M12 12v6' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='12' r='2.2' fill='%23fff'/%3E%3Ccircle cx='6' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='18' cy='6.5' r='1.5' fill='%23fff'/%3E%3Ccircle cx='12' cy='19' r='1.5' fill='%23fff'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="/assets/styles.css" />
 </head>
@@ -24,7 +25,7 @@
       </span>
       <span class="brand-text">
         <span class="brand-name">CollabHub</span>
-        <span class="brand-version" id="brandVersion">v2.2</span>
+        <span class="brand-version" id="brandVersion">v3.0</span>
       </span>
       <button type="button" class="rail-toggle" id="btnCollapseRail" title="Toggle compact rail ([)" aria-label="Toggle compact navigation rail">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
@@ -63,6 +64,10 @@
         <span class="nav-copy"><span class="nav-title" data-i18n="nav.worktrees">Worktrees &amp; Queue</span><span class="nav-en" data-i18n="nav.worktreesAlt"></span></span>
         <span class="nav-count" id="navWtCount">0</span>
       </button>
+      <button type="button" class="nav-item" data-view="rooms" title="Rooms & Ops">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 9h8M8 13h5"></path></svg>
+        <span class="nav-copy"><span class="nav-title" data-i18n="nav.rooms">Rooms &amp; Ops</span><span class="nav-en" data-i18n="nav.roomsAlt"></span></span>
+      </button>
 
       <div class="nav-label" data-i18n="nav.system">Platform</div>
       <button type="button" class="nav-item" data-view="toolkit" title="Toolkit & Memory">
@@ -82,11 +87,11 @@
         <kbd>R</kbd>
       </button>
       <div class="side-meta">
-        <span data-i18n="brand.foot">CollabHub v2.2</span>
+        <span data-i18n="brand.foot">CollabHub v3.0</span>
         <span class="dot-sep">·</span>
         <span data-i18n="brand.deps">0 npm deps</span>
       </div>
-      <div class="side-meta side-compat" data-i18n="brand.upgrade">4-Host Native Cockpit · 51 MCP tools</div>
+      <div class="side-meta side-compat" data-i18n="brand.upgrade">Resident IDE + MCP App + TUI · 53 MCP tools</div>
     </div>
   </aside>
 
@@ -97,7 +102,7 @@
         <div class="crumb">
           <div class="crumb-line">
             <span class="crumb-title" id="viewTitle" data-i18n="view.overview.title">Overview</span>
-            <span class="crumb-badge">v2.2 Mission Control</span>
+            <span class="crumb-badge">v3.0 Mission Control</span>
           </div>
           <span class="crumb-sub" id="viewSubtitle" data-i18n="view.overview.sub">Agents, throughput, and live workbench health</span>
         </div>
@@ -131,6 +136,7 @@
           <button type="button" class="quick-btn" data-goto-view="mcphub"><span class="quick-ico">⌘</span><span data-i18n="quick.mcphub">MCP Hub</span></button>
           <button type="button" class="quick-btn" data-goto-view="skills"><span class="quick-ico">❖</span><span data-i18n="quick.skills">Skills &amp; Rules</span></button>
           <button type="button" class="quick-btn" data-goto-view="worktrees"><span class="quick-ico">⑂</span><span data-i18n="quick.queue">Merge Queue</span></button>
+          <button type="button" class="quick-btn" data-goto-view="rooms"><span class="quick-ico">◈</span><span data-i18n="quick.rooms">Rooms &amp; Ops</span></button>
           <button type="button" class="quick-btn" data-goto-view="dag"><span class="quick-ico">⇄</span><span data-i18n="quick.dag">Run DAG</span></button>
           <button type="button" class="quick-btn" data-action="memory"><span class="quick-ico">✎</span><span data-i18n="quick.memory">Write memory</span></button>
           <button type="button" class="quick-btn" data-action="events"><span class="quick-ico">◉</span><span data-i18n="quick.events">Event stream</span></button>
@@ -171,7 +177,7 @@
               </div>
               <div class="host-card">
                 <div class="host-card-top"><strong>WSL DSH Terminal</strong><span class="pill ok">24-bit TUI</span></div>
-                <div class="meta">Run <code>node /mnt/d/workspace/collab-hub/bin/collab-hub.mjs tui</code> or <code>hud --watch</code> in WSL.</div>
+                <div class="meta">Run <code>collab-hub tui</code> or <code>collab-hub hud --watch</code> inside WSL.</div>
               </div>
             </div>
           </div>

@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-label="CollabHub v3.0 — 24-bit Command TUI v2 & Always-On Terminal HUD">
+  <rect width="1200" height="600" rx="16" fill="#070910" stroke="#334155"/>
+
+  <!-- Top: Always-On Claude Code StatusLine & tmux/Zsh/PowerShell HUD -->
+  <g transform="translate(28,24)">
+    <text x="0" y="16" fill="#94a3b8" font-family="ui-sans-serif, sans-serif" font-size="12" font-weight="700" letter-spacing="0.7">ALWAYS-ON TERMINAL HUD (CLAUDE CODE STATUSLINE · TMUX · ZSH · POWERSHELL · &lt;30MS SQLITE-ONLY)</text>
+    <rect x="0" y="28" width="1144" height="44" rx="10" fill="#0e1424" stroke="#4f46e5"/>
+    <text x="18" y="55" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="14.5" font-weight="600">
+      <tspan fill="#34d399">◉ COLLAB HUB</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#34d399">♥98</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#818cf8">AGY● COD● CLD● DSH●</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#38bdf8">⚡2 </tspan>
+      <tspan fill="#64748b">⛔0 ⏸0</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#a78bfa">WT2</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#34d399">MQ 2✓</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#818cf8">MCP16</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#34d399">CLI 6/186c</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#94a3b8">12s</tspan>
+    </text>
+  </g>
+
+  <!-- Main 24-bit Interactive Command TUI Frame -->
+  <g transform="translate(28,120)">
+    <rect x="0" y="0" width="1144" height="450" rx="14" fill="#0b0f1b" stroke="#6366f1" stroke-width="1.6"/>
+    <!-- Window Header -->
+    <text x="20" y="34" font-family="ui-monospace, monospace" font-size="15" font-weight="700">
+      <tspan fill="#34d399">◉ COLLAB HUB</tspan>
+      <tspan fill="#64748b"> · </tspan>
+      <tspan fill="#f8fafc">MISSION CONTROL v3.0</tspan>
+    </text>
+    <text x="900" y="34" font-family="ui-monospace, monospace" font-size="15" font-weight="700">
+      <tspan fill="#34d399">● LIVE </tspan>
+      <tspan fill="#34d399">♥98 █████████░</tspan>
+    </text>
+
+    <line x1="0" y1="52" x2="1144" y2="52" stroke="#1e293b"/>
+
+    <!-- Stats Row -->
+    <text x="20" y="76" font-family="ui-monospace, monospace" font-size="13.5">
+      <tspan fill="#38bdf8">⚡ 2 active</tspan>
+      <tspan fill="#64748b">   ⛔ 0   ⏸ 0   ▦ 2 wt   ⧉ </tspan>
+      <tspan fill="#34d399">2 ready</tspan>
+      <tspan fill="#64748b">                MCP 16 · SKILLS 14 · CLIENTS </tspan>
+      <tspan fill="#34d399">6/186c</tspan>
+      <tspan fill="#64748b"> · ROOMS </tspan>
+      <tspan fill="#34d399">2 claims</tspan>
+    </text>
+
+    <line x1="0" y1="92" x2="1144" y2="92" stroke="#1e293b"/>
+
+    <!-- Tabs -->
+    <g transform="translate(18,104)" font-family="ui-monospace, monospace" font-size="13.5" font-weight="700">
+      <rect x="0" y="0" width="108" height="28" rx="6" fill="#6366f1"/>
+      <text x="12" y="19" fill="#0b0f1b">[1] RADAR</text>
+      <text x="134" y="19" fill="#94a3b8">[2] KANBAN</text>
+      <text x="256" y="19" fill="#94a3b8">[3] MCP HUB</text>
+      <text x="386" y="19" fill="#94a3b8">[4] SKILLS</text>
+      <text x="506" y="19" fill="#94a3b8">[5] MERGE QUEUE</text>
+    </g>
+
+    <line x1="0" y1="142" x2="1144" y2="142" stroke="#1e293b"/>
+
+    <!-- Left Orbit + Right Live Tasks -->
+    <g transform="translate(24,162)">
+      <text x="0" y="16" fill="#818cf8" font-family="ui-monospace, monospace" font-size="13" font-weight="700">NEURAL FLEET CONSTELLATION (24-BIT TRUECOLOR · 8 FPS)</text>
+      <rect x="0" y="28" width="480" height="214" rx="10" fill="#070a13" stroke="#1e293b"/>
+      <text x="36" y="68" fill="#34d399" font-family="ui-monospace, monospace" font-size="13.5">         [CLD ● 168k]───┐</text>
+      <text x="36" y="96" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="13.5">   [COD ● 124k]───────(HUB)───────[AGY ● 68k]</text>
+      <text x="36" y="124" fill="#a78bfa" font-family="ui-monospace, monospace" font-size="13.5">         [DSH ●  42k]───┴───[CUR ◐ 29k]</text>
+      <text x="36" y="166" fill="#64748b" font-family="ui-monospace, monospace" font-size="12.5">Live Cross-Agent Usage: 412.8k today · $2.18 · 0 leaked secrets</text>
+      <text x="36" y="192" fill="#34d399" font-family="ui-monospace, monospace" font-size="12.5">Smart Router: Security→Codex | Copy→AGY | Linux→DSH</text>
+      <text x="36" y="218" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="12.5">Command: node bin/collab-hub.mjs tui</text>
+
+      <text x="510" y="16" fill="#818cf8" font-family="ui-monospace, monospace" font-size="13" font-weight="700">ACTIVE WORKTREES &amp; MERGE QUEUE</text>
+      <rect x="510" y="28" width="584" height="214" rx="10" fill="#070a13" stroke="#1e293b"/>
+      <text x="530" y="64" fill="#34d399" font-family="ui-monospace, monospace" font-size="13">▶ #1 collab/v3/smart-router   [READY]   codex   tests PASS</text>
+      <text x="530" y="92" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="13">▶ #2 collab/v3/live-usage     [RUNNING] dsh     wt isolated</text>
+      <text x="530" y="120" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="13">▶ #3 collab/v3/vscode-ext     [VERIFY]  claude  CSP audited</text>
+      <text x="530" y="156" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="12.5">── Press [Enter] Log Drawer · [m] Merge Check · [h] Auto-Heal ──</text>
+      <text x="530" y="186" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12.5">✓ No OSC/CSI escape injection (sanitizeTerminalText active)</text>
+      <text x="530" y="212" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12.5">✓ Read-only SQLite snapshot fallback on locked Windows DBs</text>
+    </g>
+
+    <!-- Footer Keyhints -->
+    <line x1="0" y1="414" x2="1144" y2="414" stroke="#1e293b"/>
+    <text x="20" y="437" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="12.5">1-5/Tab · ↑↓/jk · ⏎ detail · x cancel · h/H health · m merge · r refresh · q quit   frame 0412 · 8fps</text>
+  </g>
+</svg>

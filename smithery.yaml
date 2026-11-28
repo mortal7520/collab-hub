@@ -1,0 +1,19 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      profile:
+        type: string
+        enum: [core, cockpit, full]
+        default: cockpit
+        description: "Context-budget profile: core (13 tools), cockpit (23 tools), or full (53 tools)"
+      workspace:
+        type: string
+        description: "Workspace directory for multi-agent worktree & skills discovery"
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "collab-hub", "mcp", "--profile", config.profile || "cockpit"],
+      env: config.workspace ? { COLLAB_HUB_WORKSPACE: config.workspace } : {}
+    })

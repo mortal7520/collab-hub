@@ -1,5 +1,9 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { getAutostartStatus, installAutostart, removeAutostart } from '../src/autostart.mjs';
 import {
   APP_ROOT, APP_VERSION, DASHBOARD_HOST, DASHBOARD_PORT, WORKSPACE_ROOT, ensureRuntimeDirs,
 } from '../src/config.mjs';
@@ -13,12 +17,14 @@ import { createConsensusRound, listConsensusRounds, recordConsensusVote, synthes
 import { cancelTask, dispatchBackgroundTask, getTaskLogs, pollBackgroundTask, pollBatchTasks, sweepOrphanTasks } from '../src/executors.mjs';
 import { buildHandoffPack } from '../src/handoff-pack.mjs';
 import { runHudCli } from '../src/hud.mjs';
+import { getLiveAgentUsageAsync } from '../src/live-usage.mjs';
+import { installNativePlugins, planPluginInstall } from '../src/plugin-installer.mjs';
+import { planDispatch, probeAllMembers } from '../src/prober.mjs';
 import { startMcpStdioServer } from '../src/mcp-server.mjs';
 import { buildMcpHubSnapshot, findMcpTools, importDiscoveredMcpServers, probeMcpServer, syncMcpToClient } from '../src/mcp-hub.mjs';
 import { listMemoryNotes, searchMemoryNotes, writeMemoryNote } from '../src/memory.mjs';
 import { enqueueMergeQueue, listMergeQueue, processMergeQueue, validateMergeQueue } from '../src/merge-queue.mjs';
 import { runPlaybook } from '../src/playbooks.mjs';
-import { probeAllMembers } from '../src/prober.mjs';
 import { deleteRecipe, listRecipes, saveRecipe } from '../src/recipes.mjs';
 import { listAgents, registerAgent, removeAgent } from '../src/registry.mjs';
 import { applySelfHeal, diagnoseSystem, listIncidentLessons, reconcileStaleTasks, saveIncidentLesson, toggleIncidentLesson } from '../src/self-improve.mjs';
@@ -29,7 +35,9 @@ import {
   reindexSessionsCass, runBeads, searchAstGrep, searchSessionsCass,
 } from '../src/toolkit.mjs';
 import { deleteTrigger, listTriggers, runTriggerNow, saveTrigger, startTriggerScheduler } from '../src/triggers.mjs';
+import { applySetup, planSetup } from '../src/setup.mjs';
 import { startInteractiveTui } from '../src/tui.mjs';
+import { VALID_WEBHOOK_FORMATS, deleteWebhook, deliverWebhook, listWebhooks, saveWebhook, startWebhookDispatcher } from '../src/webhooks.mjs';
 import { buildBatchMarkdownReport, resumeDagWorkflow, runDagWorkflow } from '../src/workflows.mjs';
 import {
   appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, listCollabRooms,
@@ -40,7 +48,13 @@ import { verifyWorktree } from '../src/worktree.mjs';
 const [cmd, ...rawArgs] = process.argv.slice(2);
 
 if (cmd === 'mcp') {
-  startMcpStdioServer();
+  const profIdx = rawArgs.indexOf('--profile');
+  const profile = profIdx >= 0 && rawArgs[profIdx + 1] ? rawArgs[profIdx + 1] : null;
+  const toolsIdx = rawArgs.indexOf('--tools');
+  const allowlist = toolsIdx >= 0 && rawArgs[toolsIdx + 1]
+    ? rawArgs[toolsIdx + 1].split(',').map((s) => s.trim()).filter(Boolean)
+    : null;
+  startMcpStdioServer({ profile, allowlist });
 } else if (cmd === 'start') {
   ensureRuntimeDirs();
   const db = openHubDb();
@@ -51,9 +65,11 @@ if (cmd === 'mcp') {
   const server = createDashboardServer(db, { host: DASHBOARD_HOST, port });
   let poller = null;
   let triggerSched = null;
+  let webhookDisp = null;
   const gracefulExit = async () => {
     poller?.stop();
     triggerSched?.stop();
+    webhookDisp?.stop();
     await server.shutdown();
     try { db.close(); } catch {}
     process.exit(0);
@@ -72,6 +88,7 @@ if (cmd === 'mcp') {
     probeAllMembers(db).catch(() => {});
     poller = startReadOnlyAutoPoller(db);
     triggerSched = startTriggerScheduler(db);
+    webhookDisp = startWebhookDispatcher(db);
   });
 } else {
   const isReadOnlyUi = cmd === 'hud' || cmd === 'tui';
@@ -428,6 +445,132 @@ if (cmd === 'mcp') {
         note: flag('note', ''),
         confirmed: flags.confirm === true,
       }), null, 2));
+    } else if (cmd === 'setup') {
+      const profile = flag('profile', 'cockpit');
+      const clients = flag('clients') ? String(flag('clients')).split(',').map((s) => s.trim()).filter(Boolean) : null;
+      const installHud = flags['no-hud'] !== true;
+      const regClis = flags['no-clis'] !== true;
+      const out = flags.confirm === true
+        ? await applySetup(db, {
+          profile, clients, installClaudeStatusLine: installHud, registerLocalClis: regClis, confirmed: true,
+        })
+        : await planSetup(db, {
+          profile, clients, installClaudeStatusLine: installHud, registerLocalClis: regClis,
+        });
+      if (flags.autostart === true && flags.confirm === true) {
+        out.autostart = await installAutostart({ confirmed: true, force: flags.force === true });
+      }
+      console.log(JSON.stringify(out, null, 2));
+    } else if (cmd === 'cockpit' || cmd === 'open') {
+      const targetPort = Number(flag('port', String(DASHBOARD_PORT))) || DASHBOARD_PORT;
+      const baseUrl = `http://${DASHBOARD_HOST}:${targetPort}`;
+      const isDock = flags.dock === true || cmd === 'cockpit';
+      const targetUrl = isDock ? `${baseUrl}/cockpit?mode=dock` : baseUrl;
+      const checkAlive = async () => {
+        try {
+          const r = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(900) });
+          return r.ok;
+        } catch { return false; }
+      };
+      let alive = await checkAlive();
+      if (!alive && !flags['no-start']) {
+        const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'start', '--port', String(targetPort)], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        child.unref();
+        for (let i = 0; i < 15; i += 1) {
+          await new Promise((r) => setTimeout(r, 200));
+          alive = await checkAlive();
+          if (alive) break;
+        }
+      }
+      const trySpawn = (exe, args) => {
+        try {
+          const p = spawn(exe, args, { detached: true, stdio: 'ignore', windowsHide: false });
+          p.unref();
+          return true;
+        } catch { return false; }
+      };
+      if (flags.split === true) {
+        const cliSelf = fileURLToPath(import.meta.url);
+        let splitMode = 'manual';
+        if (process.platform === 'win32') {
+          if (trySpawn('wt.exe', ['-w', '0', 'sp', '-V', '-s', '0.28', process.execPath, cliSelf, 'hud', '--watch'])) {
+            splitMode = 'windows-terminal-split';
+          }
+        } else if (process.env.TMUX) {
+          if (trySpawn('tmux', ['split-window', '-h', '-l', '36', '-d', `${process.execPath} "${cliSelf}" hud --watch`])) {
+            splitMode = 'tmux-sidebar';
+          }
+        }
+        console.log(JSON.stringify({ ok: true, daemon_online: alive, url: targetUrl, mode: 'split-hud', launcher: splitMode }, null, 2));
+      } else {
+        let launcher = 'manual';
+        if (!flags['no-launch']) {
+          if (process.platform === 'win32') {
+            const edge = [
+              path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+              path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            ].find((p) => fs.existsSync(p));
+            const chrome = [
+              path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+              path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            ].find((p) => fs.existsSync(p));
+            const browserExe = chrome || edge;
+            if (browserExe && isDock && trySpawn(browserExe, [`--app=${targetUrl}`, '--window-size=440,860'])) {
+              launcher = path.basename(browserExe) + ' --app';
+              if (flags.pin === true) {
+                const psPin = `Add-Type -Name W -Namespace N -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);'; for($i=0;$i -lt 16;$i++){ $p = Get-Process | Where-Object { $_.MainWindowTitle -like '*CollabHub*' } | Select-Object -First 1; if($p -and $p.MainWindowHandle -ne 0){ [N.W]::SetWindowPos($p.MainWindowHandle, [IntPtr](-1), 0, 0, 0, 0, 3); break }; Start-Sleep -Milliseconds 400 }`;
+                trySpawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psPin]);
+                launcher += ' --pin-topmost';
+              }
+            } else {
+              trySpawn('cmd.exe', ['/c', 'start', '', targetUrl]);
+              launcher = 'shell-open';
+            }
+          } else if (process.platform === 'darwin') {
+            trySpawn('open', [targetUrl]);
+            launcher = 'open';
+          } else {
+            trySpawn('xdg-open', [targetUrl]);
+            launcher = 'xdg-open';
+          }
+        }
+        console.log(JSON.stringify({ ok: true, daemon_online: alive, url: targetUrl, mode: isDock ? 'resident-dock' : 'workbench', launcher }, null, 2));
+      }
+    } else if (cmd === 'autostart') {
+      const sub = positionals[0] || 'status';
+      if (sub === 'status') console.log(JSON.stringify(await getAutostartStatus(), null, 2));
+      else if (sub === 'install') console.log(JSON.stringify(await installAutostart({ confirmed: flags.confirm === true, force: flags.force === true }), null, 2));
+      else if (sub === 'remove') console.log(JSON.stringify(await removeAutostart({ confirmed: flags.confirm === true }), null, 2));
+      else throw new Error(`Unknown autostart subcommand "${sub}". Use: status | install | remove`);
+    } else if (cmd === 'usage') {
+      console.log(JSON.stringify(await getLiveAgentUsageAsync(db, {
+        includeLocalScan: !flags['no-scan'],
+        includeOllama: flags.ollama !== false,
+      }), null, 2));
+    } else if (cmd === 'plan') {
+      console.log(JSON.stringify(planDispatch(db, {
+        role: flag('role', 'researcher'),
+        prompt: flag('prompt', positionals.join(' ')),
+        title: flag('title', ''),
+        taskCategory: flag('category'),
+        complexity: flag('complexity'),
+        strategy: flag('strategy', 'balanced'),
+        requireBackgroundAuto: flags.bg === true,
+      }), null, 2));
+    } else if (cmd === 'install-plugins') {
+      const ides = flag('ides') ? String(flag('ides')).split(',').map((s) => s.trim()).filter(Boolean) : null;
+      console.log(JSON.stringify(installNativePlugins({ confirmed: flags.confirm === true, ides }), null, 2));
+    } else if (cmd === 'webhooks') {
+      const sub = positionals[0] || 'list';
+      if (sub === 'list') console.log(JSON.stringify({ webhooks: listWebhooks(db), formats: [...VALID_WEBHOOK_FORMATS] }, null, 2));
+      else if (sub === 'save') console.log(JSON.stringify({ webhook: await saveWebhook(db, { name: flag('name') || positionals[1], format: flag('format', 'generic'), url: flag('url'), secretEnv: flag('secret-env'), events: flag('events') ? String(flag('events')).split(',') : ['*'] }) }, null, 2));
+      else if (sub === 'delete') console.log(JSON.stringify(deleteWebhook(db, positionals[1] || flag('id')), null, 2));
+      else if (sub === 'test') console.log(JSON.stringify(await deliverWebhook(db, positionals[1] || flag('id'), { event_type: 'webhook.test', actor: 'cli', payload: { message: 'CollabHub CLI webhook test' } }), null, 2));
+      else throw new Error(`Unknown webhooks subcommand "${sub}". Use: list | save | delete | test`);
     } else if (cmd === 'merge-queue') {
       const sub = positionals[0] || 'list';
       if (sub === 'list') console.log(JSON.stringify({ queue: listMergeQueue(db) }, null, 2));
@@ -439,6 +582,10 @@ if (cmd === 'mcp') {
       console.log([
         `CollabHub v${APP_VERSION} — Zero-Dependency Host-Native Multi-Agent Mission Control`,
         'Commands:',
+        '  setup [--profile core|cockpit|full --clients a,b --confirm --autostart]  Auto-detect 14 AI clients & install CollabHub + HUD',
+        '  cockpit [--dock --port 5290]                 Auto-start hub & pop out Always-On Resident Floating Cockpit',
+        '  autostart [status|install|remove --confirm]  Manage zero-admin OS autostart (LaunchAgent / systemd / Task Scheduler)',
+        '  usage [--no-scan]                            Real-time cross-agent usage, token burn rate & est. USD cost',
         '  tui [--demo --fps 8]                         Launch 24-bit TrueColor animated Terminal Cockpit (Codex/Claude/DSH)',
         '  hud [--format statusline|card|json --watch]  Sub-100ms live StatusLine & Cyber-HUD (Claude Code / tmux / WSL)',
         '  room create|list|status|claim|renew|release|log|promote|reconcile-stale  Living shared room lifecycle',
@@ -447,10 +594,11 @@ if (cmd === 'mcp') {
         '  artifacts list|get|put|delete|prune          Shared redacted Artifact Vault',
         '  budget list|evaluate|set|delete              Token & call budget guardrails',
         '  triggers list|save|run|delete                Safe allowlisted periodic triggers',
+        '  webhooks list|save|delete|test               Signed outbound webhooks (Slack/Discord/Feishu/DingTalk/Telegram)',
         '  reconcile-stale [--confirm --resolution R]   Batch-archive aged non-terminal tasks',
-        '  start [--port 5290]                          Start the interactive Web Workbench & SSE server',
-        '  mcp                                          Start the 51-tool SEP-1865 MCP Apps stdio server (AGY/Claude/Codex)',
-        '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub & Meta-MCP tool discovery',
+        '  start [--port 5290]                          Start Web Workbench, SSE & Streamable HTTP /mcp server',
+        '  mcp [--profile core|cockpit|full --tools ..] Start 53-tool SEP-1865 MCP stdio server (AGY/Claude/Codex/14 clients)',
+        '  mcp-hub snapshot|import|probe|find-tools|sync  All-Agent MCP Hub (14 clients) & Meta-MCP tool discovery',
         '  skills-hub snapshot|sync-skill|sync-rule     Cross-Agent Skills & Rules sync hub',
         '  merge-queue list|enqueue|validate|process    Speculative Git Merge Queue',
         '  init                                         Initialize runtime directories & SQLite ledger',

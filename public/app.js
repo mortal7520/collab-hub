@@ -9,8 +9,10 @@
  */
 'use strict';
 import { I18N } from './i18n.js';
+import { createOpsStudioController, registerOpsStudioI18n } from './ops-studio.js';
 import { createStudiosController, registerStudioI18n } from './studios.js';
 let studios = null;
+let opsStudio = null;
 
 /* ------------------------------------------------------------------ */
 /* Utilities                                                           */
@@ -204,6 +206,7 @@ const VIEWS = {
   mcphub: { titleKey: 'nav.mcphub', subKey: 'view.mcphub.sub' },
   skills: { titleKey: 'nav.skills', subKey: 'view.skills.sub' },
   worktrees: { titleKey: 'nav.worktrees', subKey: 'view.worktrees.sub' },
+  rooms: { titleKey: 'nav.rooms', subKey: 'view.rooms.sub' },
   toolkit: { titleKey: 'nav.toolkit', subKey: 'view.toolkit.sub' },
   system: { titleKey: 'nav.ops', subKey: 'view.ops.sub' },
 };
@@ -399,6 +402,7 @@ function refreshDynamicI18n() {
   if (state.sim.running || state.sim.batchId) renderDagBatchSelect();
   studios?.onLanguageChanged();
   studios?.renderOverviewBento(state.overviewRaw);
+  opsStudio?.onLanguageChanged();
   refreshDrawer();
 }
 
@@ -456,6 +460,7 @@ function setView(id, { silent = false, focus = false } = {}) {
     renderToolkitMeta();
   }
   studios?.onViewEnter(key);
+  opsStudio?.onViewEnter(key);
   closeMobileNav();
   if (!silent && typeof window.scrollTo === 'function') window.scrollTo({ top: 0, behavior: 'smooth' });
   if (focus) {
@@ -721,6 +726,29 @@ function buildDemoFixture() {
       { project: 'collab-demo', slug: 'release-checklist', title: t('demo.note1.title'), preview: t('demo.note1.preview'), tags: 'release,checklist', author: 'atlas', file_path: '/workspace/.collabhub/memory/demo/release-checklist.md', updated_at: at(40), content: note1 },
       { project: 'collab-demo', slug: 'dag-conventions', title: t('demo.note2.title'), preview: t('demo.note2.preview'), tags: 'dag,conventions', author: 'cipher', file_path: '/workspace/.collabhub/memory/demo/dag-conventions.md', updated_at: at(75), content: note2 },
     ],
+    live_usage: {
+      scanned_at: at(0),
+      privacy_note: 'metadata_only_no_prompts',
+      totals: {
+        connected_agents: 6,
+        active_agents: 4,
+        today_tokens: 412800,
+        total_7d_tokens: 1894500,
+        est_cost_usd_today: 2.18,
+        est_cost_usd_7d: 9.84,
+        tokens_per_min: 1420,
+        mcp_calls_total: 186,
+      },
+      hourly_buckets: [14, 18, 9, 4, 2, 1, 3, 12, 34, 48, 62, 55, 42, 51, 68, 74, 82, 91, 64, 58, 77, 89, 104, 118].map((v) => v * 1200),
+      agents: [
+        { agent_id: 'claude-code', name: 'Claude Code', status: 'active', sources: ['mcp', 'local-jsonl'], transport: 'stdio', profile: 'cockpit', last_tool: 'collab_cockpit', last_model: 'claude-sonnet-4', mcp_calls: 64, today_tokens: 168400, total_7d_tokens: 742000, est_cost_usd_today: 0.92, est_cost_usd_7d: 4.15, tokens_per_min: 620, last_seen_at: at(0) },
+        { agent_id: 'codex', name: 'Codex', status: 'active', sources: ['mcp', 'local-jsonl', 'tasks'], transport: 'stdio', profile: 'full', last_tool: 'collab_worktree_verify', last_model: 'gpt-5-codex', mcp_calls: 49, today_tokens: 124600, total_7d_tokens: 589000, est_cost_usd_today: 0.74, est_cost_usd_7d: 3.42, tokens_per_min: 480, last_seen_at: at(1) },
+        { agent_id: 'antigravity', name: 'Antigravity', status: 'active', sources: ['mcp', 'tasks'], transport: 'stdio', profile: 'full', last_tool: 'collab_room', last_model: 'gemini-2.5-pro', mcp_calls: 38, today_tokens: 68200, total_7d_tokens: 312000, est_cost_usd_today: 0.31, est_cost_usd_7d: 1.48, tokens_per_min: 210, last_seen_at: at(1) },
+        { agent_id: 'cursor', name: 'Cursor', status: 'active', sources: ['mcp'], transport: 'http', profile: 'core', last_tool: 'collab_handoff_pack', last_model: 'claude-sonnet-4', mcp_calls: 21, today_tokens: 29400, total_7d_tokens: 141000, est_cost_usd_today: 0.14, est_cost_usd_7d: 0.56, tokens_per_min: 110, last_seen_at: at(2) },
+        { agent_id: 'windsurf', name: 'Windsurf', status: 'recent', sources: ['mcp'], transport: 'http', profile: 'cockpit', last_tool: 'collab_skills_hub', last_model: 'swe-1', mcp_calls: 9, today_tokens: 14800, total_7d_tokens: 71500, est_cost_usd_today: 0.05, est_cost_usd_7d: 0.19, tokens_per_min: 0, last_seen_at: at(28) },
+        { agent_id: 'cline', name: 'Cline', status: 'recent', sources: ['mcp'], transport: 'stdio', profile: 'core', last_tool: 'collab_usage', last_model: 'deepseek-r1', mcp_calls: 5, today_tokens: 7400, total_7d_tokens: 39000, est_cost_usd_today: 0.02, est_cost_usd_7d: 0.04, tokens_per_min: 0, last_seen_at: at(95) },
+      ],
+    },
   };
 }
 
@@ -813,7 +841,7 @@ function isStaticHost() {
 async function detectMode() {
   // The Pages pipeline injects <meta name="collabhub-static-demo" content="1">,
   // so a meta hit means "this document has no backend" — go static with zero traffic.
-  if (META_STATIC_HINT || isStaticHost()) {
+  if (META_STATIC_HINT || isStaticHost() || Boolean(window.COLLAB_HUB_DEMO)) {
     state.demo = true;
     state.static = true;
     return;
@@ -1082,6 +1110,7 @@ function applyOverviewData(data) {
   setLastUpdated(data.generated_at);
   studios?.renderOverviewBento(data);
   studios?.renderMergeQueue();
+  opsStudio?.renderOverviewData(data);
 }
 
 function applyDemoFixture(fixture) {
@@ -1109,6 +1138,7 @@ function applyDemoFixture(fixture) {
   renderMail(enriched.mail_hub);
   studios?.renderOverviewBento(enriched);
   studios?.renderMergeQueue();
+  opsStudio?.renderOverviewData(enriched);
 }
 
 /* Content signature of every panel renderAll() paints. `generated_at` is
@@ -2607,7 +2637,7 @@ async function loadDoctor(force = false) {
 
 async function loadHealth() {
   if (state.demo) {
-    state.health = { ok: true, version: '1.2.0', pid: 'demo', uptime_s: 3 * 86400 + 4 * 3600, mail_hub: { ok: true, version: '1.4.2' }, toolkit: state.toolkit || {} };
+    state.health = { ok: true, version: '3.0.0', pid: 'demo', uptime_s: 3 * 86400 + 4 * 3600, mail_hub: { ok: true, version: '1.4.2' }, toolkit: state.toolkit || {} };
     renderHealth();
     state.flags.healthLoaded = true;
     return;
@@ -4454,6 +4484,7 @@ function markDemoPill() {
 
 async function boot() {
   registerStudioI18n(I18N);
+  registerOpsStudioI18n(I18N);
   LANG = initialLang();
   state.lang = LANG;
   initTheme();
@@ -4463,6 +4494,11 @@ async function boot() {
     $, $$, esc, t, state, apiGet, apiPost, toast, setView, openModal, closeModal, loadOverview,
   });
   studios.bindEvents();
+
+  opsStudio = createOpsStudioController({
+    $, $$, esc, t, state, apiGet, apiPost, toast, setView,
+  });
+  opsStudio.bindEvents();
 
   applyStaticI18n();
   state.dagTemplates = state.demo ? [] : loadDagTemplates();

@@ -1,194 +1,154 @@
 <div align="center">
 
-<img src="docs/assets/banner.svg" alt="CollabHub — 本地优先的多 Agent 协作工程工作台" width="100%" />
+# ⚡ CollabHub v3.0
 
-<h3>把你已在使用的 AI 编程 Agent 统一到一个本地优先的 MCP 协作中枢 —— 实时流式日志、可视化 SVG DAG、断点续跑与 Git Worktree 测试闸门，零 npm 运行时依赖。</h3>
+**一套本地优先、全端常驻的多 Agent 统一大脑 —— 跨 Agent 实时用量监控、模型能力智能路由、14 款主流客户端 MCP 中枢、以及真正嵌进各大 Agent 内部的原生常驻插件。**
 
-<p>
-  <a href="https://mortal7520.github.io/collab-hub/"><img src="https://img.shields.io/badge/%E5%9C%A8%E7%BA%BF%E4%BA%A4%E4%BA%92%E6%BC%94%E7%A4%BA-%E7%82%B9%E5%87%BB%E7%AB%8B%E5%8D%B3%E4%BD%93%E9%AA%8C-5e6ad2?style=for-the-badge" alt="在线交互演示" /></a>
-</p>
+[![CI Matrix (Ubuntu + Windows · Node 22/24)](https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml)
+[![Interactive Live Demo](https://img.shields.io/badge/在线互动演示-GitHub_Pages-6366f1?style=flat&logo=githubpages)](https://mortal7520.github.io/collab-hub/)
+[![Cockpit Preview](https://img.shields.io/badge/Cockpit_演示-SEP--1865_MCP_App-38bdf8?style=flat)](https://mortal7520.github.io/collab-hub/cockpit.html)
+[![Zero Dependencies](https://img.shields.io/badge/npm_运行时依赖-0-34d399?style=flat)](./package.json)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.13-34d399?style=flat&logo=nodedotjs)](./package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](./LICENSE)
 
-<p>
-  <a href="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml"><img src="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/mortal7520/collab-hub/releases/latest"><img src="https://img.shields.io/github/v/release/mortal7520/collab-hub?color=5e6ad2" alt="Latest Release" /></a>
-  <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-51%20Tools%20%2B%20Apps-8b5cf6" alt="MCP 51 Tools + SEP-1865 Apps" />
-  <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="零 npm 依赖" />
-</p>
+[**English**](./README.md) · 简体中文 · [**在线打开交互式 Workbench →**](https://mortal7520.github.io/collab-hub/) · [**直接体验 6 标签 Cockpit →**](https://mortal7520.github.io/collab-hub/cockpit.html)
 
-<p>
-  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="https://mortal7520.github.io/collab-hub/">在线演示</a> · <a href="docs/UPSTREAM-REUSE.md">开源复用溯源</a> · <a href="CHANGELOG.md">更新日志</a> · <a href="CONTRIBUTING.md">参与贡献</a>
-</p>
+<br/>
+
+<img src="./docs/assets/social-preview.svg" alt="CollabHub v3.0 架构与旗舰功能总览" width="100%" />
 
 </div>
 
 ---
 
-> **不用切浏览器 —— 四端宿主原生炫酷动效驾驶舱（`v2.2.0`）：**
-> - **Antigravity (AGY) · Claude Desktop · Codex Desktop**：直接调用 `collab_cockpit`（或在 Antigravity 左侧全局栏 / 右侧 `+` 侧栏点击 **CollabHub**），宿主内原生渲染 **6 页签 60fps SEP-1865 MCP App 神经拓扑驾驶舱**（`ui://collab-hub/cockpit.html`）！
-> - **Claude Code CLI · Codex CLI · WSL DSH 终端**：运行 `node bin/collab-hub.mjs tui` 启动 **交互式命令 TUI v2**（`Enter` 任务日志抽屉、防误触 `x` 两步中止、`h`/`H` 体检自愈、`m` 队列预演、WSL 快照自动刷新）；在 Claude Code 底部接入 `node bin/collab-hub.mjs hud --format statusline`（实测 `<10ms` 读取 SQLite 零阻塞）！
-> - **在线浏览器交互演示**：[**点击即刻体验 →**](https://mortal7520.github.io/collab-hub/)
+## 为什么做 CollabHub v3.0？
 
-- **活的共享协作房间与六大全新闭环引擎（`v2.2.0`）** —— SQLite + Markdown 双层安全共享协作房（`collab_room`：`CLAIMS.md` / `ROOM-LOG.md` 原子租约与 `inbox/<agent>/` 安全晋升）、自动脱敏 **Artifact Vault**（`collab_artifacts`）、沙箱隔离 **上下文交接包**（`collab_handoff_pack`）、P0 一票否决 **多 Agent 共识裁决**（`collab_consensus`）、原子事务 **Token/调用预算熔断**（`collab_budget`）与白名单 **定时巡检触发器**（`collab_triggers`），外加被动桌面心跳与带时效保护的滞留任务清理。
-- **四端原生 6 页签 60fps SEP-1865 MCP App 驾驶舱（`v2.2.0`）** —— 自包含单文件 `ui://collab-hub/cockpit.html`（`text/html;profile=mcp-app`），内置 60fps Canvas 神经舰队拓扑雷达、6 个高密度交互页签（舰队雷达 / 看板日志 / MCP 中心 / 技能规范 / 合并队列 / **协作房间**）、一键导入本机 MCP、400ms 防抖两步确认与双向 `tools/call` + `ui/message` + AGY `toggle-aux-pane`（借鉴 `modelcontextprotocol/ext-apps`）。
-- **命令式交互 TUI v2 & `<10ms` StatusLine HUD（`v2.2.0`）** —— 键盘驱动的交互终端指挥舱（`collab-hub tui`）与实时底部状态栏（`collab-hub hud`），内置防 OSC 52/CSI 终端转义注入清洗、Bracketed Paste 防粘贴误触与 WSL 只读快照轮换刷新（借鉴 `asheshgoplani/agent-deck` 与 `sirmalloc/ccstatusline`）。
-- **全 Agent MCP 中心 + Meta-MCP 懒加载路由** —— 跨 Antigravity / Codex / Claude / Cursor / Windsurf / VS Code 零密钥漂移对比、fail-closed IPv6 SSRF 防护、按需工具路由与 Dry-Run + `.bak` 安全写回。
-- **跨 Agent Skills / Rules 同步中心 & Worktree 串行合并队列** —— 全子文件哈希与密钥扫描、原子目录替换、行级 Diff 批注打回返工，以及零副作用 `git merge-tree` 累计冲突预演 + 原子队列抢占合并。
-- **零 npm 运行依赖 · 51 个 MCP 工具 · 42 项端到端测试** —— 全部开源复用 Commit 与协议完整记录于 [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md)。
+当你同时使用 **Claude Code**、**Codex**、**Antigravity**、**Cursor**、**Windsurf**、**Cline**、**Ollama** 协作开发时，最痛的往往是这四件事：
 
-<p align="center">
-  <a href="https://mortal7520.github.io/collab-hub/">
-    <img src="docs/assets/workbench-overview.png" alt="CollabHub v1.2 工作台总览 — 实时舰队遥测、KPI 指标与 Agent 名册" width="100%" />
-  </a>
-</p>
+1. **看不到真实消耗与实时速率**：各客户端各自为战，今日烧了多少 Tokens、当前速率 (`tok/min`)、哪个客户端最活跃全是一笔糊涂账。
+2. **控制面板如果不“常驻在工作流里”，做了等于白做**：关掉网页就忘了看；真正好用的界面应该像原生插件一样，**直接嵌进你的 IDE 侧边栏与底部状态栏、Desktop 边栏与终端提示行里，跟着滚动始终可见**。
+3. **配置重复与上下文灾难**：14 款工具各自维护一套 `mcpServers` JSON/TOML、技能目录和项目规则，一不小心还会泄露明文密钥；多 Agent 并发改同一份代码更是直接冲突。
+4. **“用谁干什么”全靠拍脑袋**：长篇双语文档、架构设计、安全审计、Docker Linux 排障、还是本地免费小模型快速格式化——应该根据各个 Agent 和底层模型的强项自动匹配。
+
+**CollabHub v3.0 用纯原生 Node.js (>=22.13，`0` npm 运行时依赖) 一次性解决：**
 
 ---
 
-## 在线演示预览
+## 60 秒极速上手
 
-### 全 Agent MCP 中心、Meta-MCP 懒加载路由与 Dry-Run `.bak` 安全同步（`v1.5`）
-一屏对比 Antigravity（`JSON`）、Codex（`TOML`）、Claude Code（`JSON`）、Cursor、Windsurf 与 VS Code 的 MCP 漂移状态；通过 Meta-MCP 网关按需检索与调用工具；写回前强制 Dry-Run 差异预览并自动创建 `.bak` 备份。
-
-<p align="center">
-  <img src="docs/assets/workbench-mcphub.png" alt="CollabHub v1.5 — 全 Agent MCP 中心、跨端漂移矩阵与 Meta-MCP 懒加载路由" width="100%" />
-</p>
-
-### 实时 SVG DAG 状态联动与断点续跑
-多阶段工作流运行时，右侧 `Flow Canvas` 实时点亮每个节点状态（`Completed · 2.2s ✓`、脉冲动画 `Running` 环、虚线依赖流）；支持保存自定义 DAG 模板，某一步失败时一键从断点续跑，直接复用已完成的上游产出。
-
-<p align="center">
-  <img src="docs/assets/workbench-dag-live.png" alt="CollabHub v1.2 — 实时 SVG DAG 执行联动与自定义模板" width="100%" />
-</p>
-
-### 实时流式日志终端与进程中止
-点击看板卡片或 DAG 节点即可打开任务详情抽屉，通过 SSE 实时查看 stdout/stderr 输出流、一键复制日志，或在任务跑偏时点击 **中止（Cancel）** 直接结束对应 CLI 进程树或 HTTP 请求。
-
-<p align="center">
-  <img src="docs/assets/workbench-live-logs.png" alt="CollabHub v1.2 — 实时流式日志终端与中止操作" width="100%" />
-</p>
-
-### 账本表格 + 4 列 Kanban 看板与批次回执
-在「排队/派发中」「执行中」「需关注/阻塞」「已结束」四条泳道中追踪所有委派任务；Worktree 抽屉支持彩色 Diff 审阅，支持一键导出 Markdown 批次战报。
-
-<p align="center">
-  <img src="docs/assets/workbench-kanban.png" alt="CollabHub v1.2 — 4 列 Kanban 看板与批次回执账本" width="100%" />
-</p>
-
----
-
-## 快速开始
-
-### 1. 10 秒本地启动（无需 `npm install`）
-
-仅需 **Node.js `>=22.13.0`**（使用内置 `node:sqlite`）与 `git`：
+仅需 **Node.js >= 22.13.0**（使用内置 `node:sqlite`，无任何第三方运行时依赖）：
 
 ```bash
-git clone https://github.com/mortal7520/collab-hub.git
-cd collab-hub
-npm start
+# 推荐全局安装（确保开机自启与 IDE 扩展写入持久路径，避免 npx 临时缓存失效）
+npm install -g collab-hub
+# 或直接克隆源码运行：git clone https://github.com/mortal7520/collab-hub.git && cd collab-hub
+
+# 1. 自动扫描本机 14 款主流 AI 客户端 + 写入零密钥 MCP 配置 + 安装 Claude Code 状态栏 (.bak 自动备份)
+collab-hub setup --profile cockpit --confirm
+
+# 2. 一键把零依赖“原生常驻扩展”安装进 VS Code / Cursor / Windsurf / Antigravity IDE / Kiro
+collab-hub install-plugins --confirm
+
+# 3. 自动拉起后台常驻守护进程，并弹出无边框悬浮 Cockpit 小窗
+collab-hub cockpit --dock
 ```
 
-- **本地零隐私安全预览模式（纯内存数据）**：`http://127.0.0.1:5290/?demo=1`
-- **真实本地工作台**：`http://127.0.0.1:5290`
-- 按 `Ctrl+K` / `Cmd+K` 呼出命令面板，点击顶栏 `EN / 中` 即时切换中英双语，点击主题图标切换深浅双色。
-
-### 2. 接入任意 MCP 客户端
-
-将 CollabHub 注册到 Claude Code、Codex、Antigravity、Cursor 或任何支持 MCP 的宿主中：
-
-```json
-{
-  "mcpServers": {
-    "collab-hub": {
-      "command": "node",
-      "args": ["/absolute/path/to/collab-hub/bin/collab-hub.mjs", "mcp"]
-    }
-  }
-}
-```
-
-### 3. 自动发现本机 Agent 与运行测试
+更多常驻与命令行玩法：
 
 ```bash
-# 自动探测本机已安装的编程 CLI 与 OpenAI 兼容端点（Ollama、LM Studio 等）
-node bin/collab-hub.mjs discover
+# 零配置体验 24-bit 真彩动画终端驾驶舱（新机器可直接使用 --demo）
+npx -y collab-hub tui --demo
 
-# 运行完整自动化测试套件（29 项端到端测试，零外部依赖）
-npm test
+# 配置跨平台免管理员开机自启（macOS LaunchAgent / Linux systemd --user / Windows Task Scheduler）
+collab-hub autostart install --confirm
+
+# Docker 一键部署（端口 5290 同时提供 Web 工作台与 Streamable HTTP /mcp）
+docker build -t collab-hub . && docker run --rm -p 5290:5290 -v collabhub-data:/data collab-hub
 ```
 
 ---
 
-## 系统架构
+## 一、真正嵌进各大 Agent 内部的“常驻可见 UI”
 
-```mermaid
-flowchart LR
-  Host["当前宿主协调器\n(Claude / Codex / AGY / Cursor)"] -->|MCP stdio · 34 工具| MCP["CollabHub MCP Server"]
-  User["工程师"] -->|HTTP + SSE · :5290| UI["中英双语 Web 工作台\n(EN/中 · 深浅色 · Kanban · Live SVG DAG)"]
+<img src="./docs/assets/cockpit-v3-showcase.svg" alt="CollabHub v3.0 原生 IDE 侧边栏 + SEP-1865 Cockpit + 智能路由" width="100%" />
 
-  MCP --> Core["CollabHub 核心引擎\n(智能路由 · DAG 与续跑 · 中止 · 日志流 · 体检)"]
-  UI --> Core
+| 常驻与贴边交互形态 | 覆盖宿主 | 嵌进聊天框旁 / 对话内能力 |
+| :--- | :--- | :--- |
+| **对话内嵌 HUD 条与一键贴入 Pill** (`ui://collab-hub/chat-strip.html`, `cockpit.html`) | **Antigravity（对话内/`aux_pane`/`global`）、Claude Desktop、Codex Desktop、VS Code Chat** | 调用 `collab_plan` / `collab_usage` 直接在对话消息内展示紧凑用量与推荐理由卡片，支持 **`ui/update-model-context`** 一键把当前状态作为上下文 Pill 贴进输入框，或一键展开侧栏指挥舱。 |
+| **Web AI 聊天框旁 Shadow DOM 伴侣扩展** (`extensions/collab-hub-browser/`) | **claude.ai、chatgpt.com、gemini.google.com、muse.ai、DeepSeek、Grok、Perplexity** | 零依赖 Chrome/Edge MV3 扩展，用 **Shadow DOM** 把实时用量胶囊悬浮停靠在聊天框右下角，支持读取草稿智能路由（`"Route Draft"`）和一键插入上下文，绝不读取网页 Cookie。 |
+| **通用 IDE 原生扩展** (`extensions/collab-hub-vscode/`) | **VS Code、Cursor、Windsurf、Antigravity IDE、Kiro** | 底部 StatusBar + 侧边栏/底栏（可拖入右侧 Auxiliary Bar 贴着 Chat 常驻）+ **`@collabhub`** 原生对话参与者（`/route`, `/usage`, `/roster`）+ **`Ctrl+Alt+C` 贴 Chat 分屏**与一键复制上下文。 |
+| **终端侧边分屏 HUD 与 TUI** (`extensions/terminal-hud/`) | **Claude Code CLI (`statusLine`)、Codex CLI、Gemini CLI、OpenCode、tmux、Zsh、PowerShell、WSL** | `<30ms` SQLite `statusLine`、`tmux` 36 列/Windows Terminal 聊天框右侧实时分屏（`collab-hub cockpit --split`）及 24-bit 终端驾驶舱。 |
+| **桌面置顶悬浮 Dock & PWA** (`?mode=dock`, `manifest.webmanifest`) | **macOS / Windows / Linux 桌面** | `collab-hub cockpit --dock --pin` 弹出 440px 置顶悬浮窗紧贴 Claude/Codex Desktop 窗口旁；支持桌面 PWA 固定。 |
+| **全功能 Web Workbench** (`http://127.0.0.1:5290`) | **任意浏览器（及 GitHub Pages 静态演示）** | 全 9 大视图顶部常驻 Live Usage & Fleet 吸顶栏、明暗 Obsidian/Alabaster 双主题、中英文切换、`Ctrl+K` 命令面板。 |
 
-  Core --> DB[("SQLite + FTS5\n回执账本 · 工作流计划 · 共享记忆 · 遥测")]
-  Core --> WT["Git Worktree 隔离引擎\n(.worktreeinclude · 测试闸门 · 彩色 Diff · 合并)"]
-  Core --> TK["可选开源工具链\n(cass · ast-grep · repomix · beads · markitdown)"]
+<img src="./docs/assets/tui-v2-showcase.svg" alt="CollabHub v3.0 24-bit 终端驾驶舱与 StatusLine HUD" width="100%" />
 
-  Core -->|generic-cli| CLI["Gemini CLI / Aider / OpenCode / 自定义脚本"]
-  Core -->|openai-http| HTTP["Ollama / LM Studio / DeepSeek / OpenRouter"]
-  Core -->|desktop-native| Native["本地 IDE / Desktop 真实对话节点"]
+---
+
+## 二、全面支持市面上 14 款主流客户端 + 本地开源模型
+
+CollabHub 原生兼容每家不同的配置结构（`mcpServers` TOML/JSON、`servers`、`mcp`、`context_servers`），提供发现、零密钥检测、统一导入与 `.bak` 安全同步：
+
+`Antigravity` · `Claude Code` · `Claude Desktop` · `Codex` · `Cursor` · `Windsurf` · `VS Code Copilot` · `Gemini CLI` · `Cline` · `Roo Code` · `OpenCode` · `Zed` · `Continue` · `Kiro`
+
+同时支持自动探测本机 **Ollama**、**LM Studio**、**vLLM**、**Aider**、**Qwen CLI** 以及环境变量就绪的 **OpenAI / DeepSeek / OpenRouter / SiliconFlow**（仅检查布尔存在性，**绝不读取或打印任何密钥值**）。
+
+---
+
+## 三、跨 Agent 实时用量统计 + 模型能力强度智能路由
+
+### 1. 跨 Agent 实时用量与成本引擎（严格只读元数据）
+- **实时接入即统计**：所有通过 stdio 或 Streamable HTTP `/mcp` 接入的客户端（Cursor、Claude Code、Codex、Antigravity、Windsurf、Cline、Kiro 等）在握手与每次调用时自动落入 `client_usage_telemetry`。
+- **本地会话数值汇总**：只读解析近期本地日志中的 Token 计数、模型名与时间戳（15 秒缓存、有界读取 `<40ms`），计算今日/7 日总 Tokens、当前速率 (`tok/min`)、24 小时柱状热力以及 API 等价估算费用（Ollama 本地模型计为 `$0`）。**绝对不采集、不存储任何用户提示词或源码正文** (`privacy_note: "metadata_only_no_prompts"`)。
+
+### 2. 模型能力画像与任务智能派单 (`src/router.mjs`)
+借鉴开源路由器 [`lm-sys/RouteLLM`](https://github.com/lm-sys/RouteLLM)（复杂度分层）与 [`BerriAI/litellm`](https://github.com/BerriAI/litellm) Router（状态/延迟/成本/冷却感知）思路，内置 10 类任务维度（`coding`, `security_audit`, `architecture`, `frontend_ui`, `copywriting`, `long_context`, `linux_ops`, `debugging`, `research`, `fast_cheap`）与 4 种路由策略（`balanced | quality | cost | speed`），并输出透明的决策理由 `routing_reasons[]`：
+
+```bash
+# 安全审计 / 底层攻防 -> 优先匹配 Codex (gpt-5-codex)
+collab-hub plan --prompt "审计 SSRF 与 Webhook HMAC 签名边界" --strategy quality
+
+# 双语旗舰文案 / 长上下文整理 -> 优先匹配 Antigravity / Claude，避开低配中继
+collab-hub plan --prompt "撰写双语 README 与产品首发推广文案"
+
+# Linux Docker / WSL 排障 -> 优先匹配 WSL DSH
+collab-hub plan --prompt "Fix Docker Linux bash CI failure"
+
+# 简单快速任务 + 成本优先 -> 自动路由给本机免费 Ollama 模型 ($0)
+collab-hub plan --prompt "quick format log summary" --strategy cost
 ```
 
 ---
 
-## 客观竞品对比
+## 四、53 个 MCP 工具 · 3 档按需 Profile · Streamable HTTP `/mcp`
 
-CollabHub 与主流开源多 Agent 编程编排项目的核心差异：
+不再一次性向大模型塞入几十个工具浪费上下文：
 
-| 维度 | **CollabHub** | **Vibe Kanban** | **Cline** | **Overstory** *(已归档)* | **OpenHands** |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **核心形态** | 本地 MCP 中枢 + Web 工作台 | Kanban Web 应用 | IDE 插件 | CLI 编排器 + `ov serve` 界面 | 云端/容器化全托管平台 |
-| **异构多 Agent 路由** | 内置（`auto` + 自动回退 + 429 冷却） | 单卡多 Agent | 单 IDE 循环 | CLI 多 Agent 蜂群 | 多 Agent SDK / Runtime |
-| **Live SVG DAG + 断点续跑** | **内置**（状态联动 + `workflow_plans`） | Kanban 卡片流 | Workflows / Hooks | Sling / Mail 波次 | SDK 流水线 |
-| **实时流式日志 + 进程中止** | **内置**（SSE 终端 + 进程中止） | 内置日志 | IDE 面板 | CLI 日志 | 容器日志 |
-| **Git Worktree 与测试合并闸门** | 内置（SHA 测试闸门 + 彩色 Diff） | 内置 Worktree | 工作区直接修改 | 内置 Worktree | 容器沙箱 |
-| **零 npm 运行时依赖** | **是**（`node:sqlite` + 原生内置模块） | 否（Rust/Node 栈） | 否（VS Code 插件） | 否（Bun/TS 栈） | 否（Python + Docker） |
-| **托管云端 / SaaS 沙箱** | **否**（严格本地优先） | 可选 | 自备 API / 云端 | 否 | **是** |
+| Profile 档位 | 工具数 | 适用场景 |
+| :--- | :---: | :--- |
+| `--profile core` | **13** | 极致省上下文：Cockpit、Roster、智能路由 Plan、派单/轮询/取消、Shared Room 租约、Handoff 交接包、Worktree 创建/验证/合并、实时用量 |
+| `--profile cockpit` | **23** | **推荐默认档**：包含 `core` + 共识投票、产物库、预算护栏、安全触发器、Webhook 通知、MCP Hub/Meta-MCP 发现、Skills 同步、合并队列与自检自愈 |
+| `--profile full` | **53** | 完整工程编排：全部工具 + FTS5 记忆、`ast-grep`/`repomix`/`markitdown`/`beads`/`cass` 工具箱、多阶段 DAG 流水线与动态 Agent 注册中心 |
 
-> **哪些场景*不适合* CollabHub？** 如果你需要云端 SaaS 多人托管、容器化远程执行沙箱或嵌入单一编辑器的侧边栏补全，**OpenHands**、**Cline** 或 **Vibe Kanban** 会更契合。CollabHub 专为本地已运行多种编程 Agent/CLI 的工程师打造：轻量、可审计、零外部依赖，完整保留你原有的账号体系、权限边界与本地 Git 工作流。
+支持标准 **stdio** 与 **Streamable HTTP**（`http://127.0.0.1:5290/mcp?profile=cockpit`，带回环 `Host` / `Origin` 防重绑定保护与 `Mcp-Session-Id` 会话管理）。
 
 ---
 
-## 34 个统一 MCP 工具一览
+## 五、环境变量与开源借鉴清单
 
-<details>
-<summary><strong>点击展开全部 34 个 MCP 工具清单</strong></summary>
+| 环境变量 | 默认值 | 用途 |
+| :--- | :--- | :--- |
+| `COLLAB_HUB_HOME` | `~/.collab-hub` | 运行时数据目录（SQLite、共享室、热备份、日志、`integrations.json`） |
+| `COLLAB_HUB_WORKSPACE` | 当前目录 / `~/workspace` | 工作区根目录（用于发现 Git 仓库、创建 Worktree 与规则同步） |
+| `COLLAB_HUB_PORT` | `5290` | 仅限 `127.0.0.1` 的控制台、SSE 与 `/mcp` 监听端口 |
+| `COLLAB_HUB_MCP_PROFILE` | `full`（向导默认写 `cockpit`） | MCP 工具暴露档位（`core` \| `cockpit` \| `full`） |
+| `AGENT_MAIL_URL` | `http://127.0.0.1:5291` | 可选配套的 MCP Agent Mail 服务端地址 |
 
-| 分类 | 工具列表 |
-| :--- | :--- |
-| **舰队与智能路由** | `collab_roster`, `collab_plan`, `collab_metrics`, `collab_cooldown` |
-| **动态扩展注册表** | `collab_agent_discover`, `collab_agent_register`, `collab_agent_list`, `collab_agent_remove` |
-| **派发、中止与回执账本** | `collab_dispatch`, `collab_poll`, `collab_poll_batch`, `collab_cancel`, `collab_task_reconcile`, `collab_record_handoff`, `collab_tasks`, `collab_batch_report` |
-| **DAG、断点续跑、流水线与模板** | `collab_workflow_run`, `collab_workflow_resume`, `collab_playbook_run`, `collab_recipes` |
-| **Git Worktree 隔离与闸门** | `collab_worktree_create`, `collab_worktree_review`, `collab_worktree_verify`, `collab_worktree_merge`, `collab_worktree_cleanup` |
-| **SQLite FTS5 共享记忆** | `collab_memory_write`, `collab_memory_search`, `collab_memory_list` |
-| **可选开源工程工具链** | `collab_session_search` (`cass`), `collab_ast_search` (`ast-grep`), `collab_repo_pack` (`repomix`), `collab_beads` (`bd`), `collab_doc_to_md` (`markitdown`) |
-| **运维体检与热备份** | `collab_doctor`（8 项系统体检 + SQLite `VACUUM INTO` 热备份） |
-
-</details>
+> 完整开源项目借鉴与版本/许可证溯源：[`docs/UPSTREAM-REUSE.md`](./docs/UPSTREAM-REUSE.md)  
+> 多平台推广文案与目录提交清单：[`docs/LAUNCH-KIT.md`](./docs/LAUNCH-KIT.md)
 
 ---
 
-## 自举实践：4 路真并发构建 `v1.2.0`
+## 开源许可证
 
-本次 `v1.2.0` 组合拳由 CollabHub 自举的 4 Agent 团队并发完成（`batch_id: v12_combo_team`）：
-1. **前端双语与交互升级（`wt_v12_ui`）** —— 在独立 Git Worktree 中并行开发，经 `collab_worktree_verify` 测试闸门与 23 项静态包浏览器检查通过后零冲突合入。
-2. **对抗式安全与边界审计** —— 由独立审查 Agent 并行用内存库复现并提前拦下 6 项 P1 风险（跨进程取消确认语义、`workflow_plans` 持久化、SSE 背压上限、HTTP 响应上限、Pages CSP 与 Demo 模板隔离），全部修复并写入回归测试。
-3. **发布文案与在线 Demo 策略** —— 并行产出首屏在线演示 CTA 与版本发布大纲，提升访问者即点即玩转化率。
-
----
-
-## 开源协议
-
-MIT License — 详见 [LICENSE](LICENSE)。
+[MIT](./LICENSE)

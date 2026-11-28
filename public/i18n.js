@@ -4,9 +4,9 @@
 /* I18N-TABLE-BEGIN — every CJK literal in this file lives inside this block. */
 export const I18N = {
   en: {
-    'app.title': 'CollabHub v2.2 · Host-Native Multi-Agent Mission Control',
-    'app.titleDemo': 'CollabHub v2.2 · Interactive Demo Preview',
-    'app.titleStatic': 'CollabHub v2.2 · Interactive Demo · GitHub Pages',
+    'app.title': 'CollabHub v3.0 · Host-Native Multi-Agent Mission Control',
+    'app.titleDemo': 'CollabHub v3.0 · Interactive Demo Preview',
+    'app.titleStatic': 'CollabHub v3.0 · Interactive Demo · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': 'Switch language / 切换语言',
@@ -22,9 +22,9 @@ export const I18N = {
     'common.copyFail': 'Copy failed: the browser denied clipboard access.',
     'common.dismiss': 'Dismiss',
 
-    'brand.foot': 'CollabHub v2.2',
+    'brand.foot': 'CollabHub v3.0',
     'brand.deps': '0 npm deps',
-    'brand.upgrade': '4-Host Native Cockpit · 51 MCP tools',
+    'brand.upgrade': 'Resident IDE + MCP App + TUI · 53 MCP tools',
 
     'nav.workspace': 'Workspace',
     'nav.system': 'System',
@@ -802,9 +802,9 @@ export const I18N = {
   },
 
   zh: {
-    'app.title': 'CollabHub v2.2 · 四端原生多 Agent 动效指挥舱',
-    'app.titleDemo': 'CollabHub v2.2 · 交互式演示预览',
-    'app.titleStatic': 'CollabHub v2.2 · 静态交互式演示 · GitHub Pages',
+    'app.title': 'CollabHub v3.0 · 全端原生常驻多 Agent 指挥舱',
+    'app.titleDemo': 'CollabHub v3.0 · 交互式演示预览',
+    'app.titleStatic': 'CollabHub v3.0 · 静态交互式演示 · GitHub Pages',
 
     'lang.glyphZh': '中',
     'lang.switch': '切换语言 / Switch language',
@@ -820,9 +820,9 @@ export const I18N = {
     'common.copyFail': '复制失败：浏览器未授予剪贴板权限。',
     'common.dismiss': '关闭提示',
 
-    'brand.foot': 'CollabHub v2.2',
+    'brand.foot': 'CollabHub v3.0',
     'brand.deps': '0 个 npm 依赖',
-    'brand.upgrade': '四端原生动效驾驶舱 · 45 个 MCP 工具',
+    'brand.upgrade': '全端原生常驻插件 · 53 个 MCP 工具',
 
     'nav.workspace': '工作区',
     'nav.system': '系统',

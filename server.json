@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mortal7520/collab-hub",
+  "title": "CollabHub — Multi-Agent Mission Control & Live Usage HUD",
+  "description": "Zero-dependency local-first multi-agent coordinator: 53 MCP tools across 3 profiles (core/cockpit/full), Streamable HTTP /mcp, Sticky IDE/Desktop/CLI native plugins, Real-Time Cross-Agent Usage & Cost Ledger (14 clients), Capability & Model-Strength Smart Router, Skills Sync, Git Worktree Merge Queue, Living Shared Rooms, Consensus, Budgets & Outbound Webhooks.",
+  "version": "3.0.0",
+  "repository": {
+    "url": "https://github.com/mortal7520/collab-hub",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "collab-hub",
+      "version": "3.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "Start CollabHub MCP server over stdio"
+        },
+        {
+          "type": "named",
+          "name": "--profile",
+          "description": "Tool surface profile: core (13), cockpit (23), or full (53)",
+          "isRequired": false,
+          "default": "cockpit"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:5290/mcp"
+    }
+  ]
+}

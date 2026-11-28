@@ -1,32 +1,17 @@
-name: Feature Request
-description: Propose a new agent driver, playbook, UI improvement, or MCP tool
-title: "[Feat]: "
+name: Feature / Client Adapter Request
+description: Request support for a new AI coding agent, MCP client, or workflow capability
 labels: ["enhancement"]
 body:
-  - type: textarea
-    id: problem
+  - type: input
+    id: client
     attributes:
-      label: What problem does this solve?
-      description: Describe the real multi-agent workflow pain point.
+      label: Target AI Agent / Client or Capability
+      placeholder: "e.g. Zed ACP, JetBrains AI, OpenTelemetry export"
     validations:
       required: true
   - type: textarea
-    id: proposal
+    id: details
     attributes:
-      label: Proposed solution
-      description: How should it work while staying zero-dependency and local-first?
-    validations:
-      required: true
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area
-      options:
-        - Web Workbench UI
-        - MCP Tools / CLI
-        - Agent Drivers & Discovery
-        - Git Worktrees & Verification
-        - DAG Workflows & Playbooks
-        - Documentation / Other
+      label: Problem & proposed workflow
     validations:
       required: true

@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-label="CollabHub v3.0 — Sticky Native IDE Sidebar, 6-Tab SEP-1865 Cockpit & Live Usage">
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070910"/>
+      <stop offset="100%" stop-color="#0e1426"/>
+    </linearGradient>
+    <linearGradient id="bar1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="680" rx="16" fill="url(#bg2)" stroke="#1e293b"/>
+
+  <!-- Left Panel: VS Code / Cursor / Windsurf / AGY Native Sticky Sidebar -->
+  <g transform="translate(24,24)">
+    <rect x="0" y="0" width="320" height="632" rx="14" fill="#0b101d" stroke="#334155"/>
+    <text x="18" y="28" fill="#94a3b8" font-family="ui-sans-serif, sans-serif" font-size="11.5" font-weight="700" letter-spacing="0.8">IDE NATIVE SIDEBAR (VS CODE / CURSOR / AGY)</text>
+
+    <!-- Sticky Header inside IDE -->
+    <rect x="14" y="42" width="292" height="106" rx="10" fill="#131b30" stroke="#6366f1" stroke-opacity="0.7"/>
+    <text x="26" y="66" fill="#f8fafc" font-family="ui-sans-serif, sans-serif" font-size="14" font-weight="700">⚡ CollabHub Live HUD</text>
+    <rect x="218" y="50" width="76" height="22" rx="11" fill="#0f2924" stroke="#34d399"/>
+    <text x="228" y="65" fill="#34d399" font-family="ui-monospace, monospace" font-size="11" font-weight="700">♥98 · 5/5</text>
+
+    <g transform="translate(24,82)" font-family="ui-monospace, monospace">
+      <rect x="0" y="0" width="84" height="52" rx="7" fill="#0b101d" stroke="#1e293b"/>
+      <text x="8" y="18" fill="#64748b" font-size="10">TODAY</text>
+      <text x="8" y="38" fill="#e2e8f0" font-size="14" font-weight="700">412.8k</text>
+
+      <rect x="92" y="0" width="84" height="52" rx="7" fill="#0b101d" stroke="#1e293b"/>
+      <text x="100" y="18" fill="#64748b" font-size="10">COST</text>
+      <text x="100" y="38" fill="#34d399" font-size="14" font-weight="700">$2.18</text>
+
+      <rect x="184" y="0" width="84" height="52" rx="7" fill="#0b101d" stroke="#1e293b"/>
+      <text x="192" y="18" fill="#64748b" font-size="10">MCP</text>
+      <text x="192" y="38" fill="#38bdf8" font-size="14" font-weight="700">186c</text>
+    </g>
+
+    <!-- Scrollable Connected Agents List -->
+    <text x="16" y="176" fill="#64748b" font-family="ui-sans-serif, sans-serif" font-size="11" font-weight="700">CONNECTED MARKET CLIENTS</text>
+    <g transform="translate(14,188)" font-family="ui-sans-serif, sans-serif">
+      <rect x="0" y="0" width="292" height="62" rx="9" fill="#101729" stroke="#1e293b"/>
+      <circle cx="16" cy="20" r="4.5" fill="#34d399"/>
+      <text x="28" y="24" fill="#f8fafc" font-size="13" font-weight="700">Claude Code</text>
+      <text x="210" y="24" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12">168k · $0.92</text>
+      <rect x="14" y="36" width="264" height="5" rx="2.5" fill="#1e293b"/>
+      <rect x="14" y="36" width="215" height="5" rx="2.5" fill="url(#bar1)"/>
+      <text x="14" y="54" fill="#64748b" font-family="ui-monospace, monospace" font-size="10.5">stdio · cockpit · claude-sonnet-4</text>
+
+      <rect x="0" y="72" width="292" height="62" rx="9" fill="#101729" stroke="#1e293b"/>
+      <circle cx="16" cy="92" r="4.5" fill="#34d399"/>
+      <text x="28" y="96" fill="#f8fafc" font-size="13" font-weight="700">Codex</text>
+      <text x="210" y="96" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12">124k · $0.74</text>
+      <rect x="14" y="108" width="264" height="5" rx="2.5" fill="#1e293b"/>
+      <rect x="14" y="108" width="160" height="5" rx="2.5" fill="url(#bar1)"/>
+      <text x="14" y="126" fill="#64748b" font-family="ui-monospace, monospace" font-size="10.5">stdio · full · gpt-5-codex</text>
+
+      <rect x="0" y="144" width="292" height="62" rx="9" fill="#101729" stroke="#1e293b"/>
+      <circle cx="16" cy="164" r="4.5" fill="#34d399"/>
+      <text x="28" y="168" fill="#f8fafc" font-size="13" font-weight="700">Antigravity (AGY)</text>
+      <text x="216" y="168" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12">68k · $0.31</text>
+      <rect x="14" y="180" width="264" height="5" rx="2.5" fill="#1e293b"/>
+      <rect x="14" y="180" width="102" height="5" rx="2.5" fill="url(#bar1)"/>
+      <text x="14" y="198" fill="#64748b" font-family="ui-monospace, monospace" font-size="10.5">aux_pane · gemini-2.5-pro</text>
+
+      <rect x="0" y="216" width="292" height="62" rx="9" fill="#101729" stroke="#1e293b"/>
+      <circle cx="16" cy="236" r="4.5" fill="#38bdf8"/>
+      <text x="28" y="240" fill="#f8fafc" font-size="13" font-weight="700">Cursor / Windsurf / Cline</text>
+      <text x="216" y="240" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12">52k · $0.21</text>
+      <rect x="14" y="252" width="264" height="5" rx="2.5" fill="#1e293b"/>
+      <rect x="14" y="252" width="76" height="5" rx="2.5" fill="url(#bar1)"/>
+      <text x="14" y="270" fill="#64748b" font-family="ui-monospace, monospace" font-size="10.5">http /mcp · core · 35 calls</text>
+    </g>
+
+    <!-- Bottom Always-On IDE StatusBar -->
+    <rect x="0" y="596" width="320" height="36" rx="8" fill="#312e81"/>
+    <text x="14" y="619" fill="#eef2ff" font-family="ui-monospace, monospace" font-size="11.5" font-weight="700">$(pulse) CollabHub ♥98 · 6 agents · 412k ($2.18)</text>
+  </g>
+
+  <!-- Right Panel: Full 6-Tab SEP-1865 Cockpit & Rooms/Router -->
+  <g transform="translate(364,24)">
+    <rect x="0" y="0" width="812" height="632" rx="14" fill="#0b101d" stroke="#334155"/>
+
+    <!-- Top Sticky Bar -->
+    <rect x="16" y="16" width="780" height="48" rx="11" fill="#131b30" stroke="#4f46e5" stroke-opacity="0.65"/>
+    <circle cx="38" cy="40" r="6" fill="#34d399"/>
+    <text x="54" y="45" fill="#f8fafc" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700">SEP-1865 MCP App Cockpit + Floating Dock (?mode=dock)</text>
+    <rect x="646" y="25" width="136" height="30" rx="8" fill="#4f46e5"/>
+    <text x="664" y="45" fill="#fff" font-family="ui-sans-serif, sans-serif" font-size="12.5" font-weight="700">↻ Sync · Live</text>
+
+    <!-- Tabs -->
+    <g transform="translate(16,76)" font-family="ui-sans-serif, sans-serif" font-size="12.5" font-weight="600">
+      <rect x="0" y="0" width="122" height="34" rx="8" fill="#1e2744" stroke="#6366f1"/>
+      <text x="16" y="22" fill="#f8fafc">1. Fleet Radar</text>
+      <text x="142" y="22" fill="#94a3b8">2. Kanban &amp; Logs</text>
+      <text x="274" y="22" fill="#94a3b8">3. MCP Hub (14)</text>
+      <text x="396" y="22" fill="#94a3b8">4. Skills &amp; Rules</text>
+      <text x="524" y="22" fill="#94a3b8">5. Merge Queue</text>
+      <text x="646" y="22" fill="#38bdf8">6. Rooms &amp; Router</text>
+    </g>
+
+    <!-- Sticky Cross-Agent Usage Strip -->
+    <rect x="16" y="122" width="780" height="40" rx="10" fill="#11182c" stroke="#1e293b"/>
+    <text x="30" y="147" fill="#34d399" font-family="ui-monospace, monospace" font-size="12" font-weight="700">● LIVE</text>
+    <text x="92" y="147" fill="#e2e8f0" font-family="ui-monospace, monospace" font-size="12">Claude 168k · Codex 124k · AGY 68k · Cursor 29k · Windsurf 15k</text>
+    <text x="608" y="147" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="12" font-weight="700">1.4k/m · $2.18 · 186c</text>
+
+    <!-- Bottom Grid: Model-Strength Smart Router + Merge Queue & Rooms -->
+    <g transform="translate(16,178)">
+      <rect x="0" y="0" width="382" height="436" rx="12" fill="#0f1526" stroke="#1e293b"/>
+      <text x="18" y="30" fill="#f8fafc" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700">Model-Strength Smart Router</text>
+      <text x="18" y="50" fill="#64748b" font-family="ui-sans-serif, sans-serif" font-size="12">Matches prompt intent &amp; complexity to agent strength</text>
+
+      <g transform="translate(16,70)" font-family="ui-monospace, monospace" font-size="12">
+        <rect x="0" y="0" width="350" height="72" rx="9" fill="#151d34" stroke="#4f46e5"/>
+        <text x="14" y="24" fill="#34d399" font-weight="700">RECOMMENDED: Codex (gpt-5-codex)</text>
+        <text x="14" y="44" fill="#e2e8f0">Task: "Audit SSRF &amp; HMAC boundaries"</text>
+        <text x="14" y="61" fill="#94a3b8" font-size="11">security_audit=96/100 · flagship (+8) · closed</text>
+
+        <rect x="0" y="84" width="350" height="72" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="108" fill="#38bdf8" font-weight="700">RECOMMENDED: Antigravity (gemini-2.5-pro)</text>
+        <text x="14" y="128" fill="#e2e8f0">Task: "双语 README 与产品发布文案"</text>
+        <text x="14" y="145" fill="#94a3b8" font-size="11">copywriting=96/100 · long_context=98/100</text>
+
+        <rect x="0" y="168" width="350" height="72" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="192" fill="#a78bfa" font-weight="700">RECOMMENDED: WSL DSH (linux runtime)</text>
+        <text x="14" y="212" fill="#e2e8f0">Task: "Fix Docker / Ubuntu CI workflow"</text>
+        <text x="14" y="229" fill="#94a3b8" font-size="11">linux_ops=99/100 · direct POSIX execution</text>
+
+        <rect x="0" y="252" width="350" height="72" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="276" fill="#fbbf24" font-weight="700">COST-OPT: Ollama Qwen2.5 ($0 Free)</text>
+        <text x="14" y="296" fill="#e2e8f0">Task: "Quick log summary" (strategy=cost)</text>
+        <text x="14" y="313" fill="#94a3b8" font-size="11">fast_cheap=99/100 · local (+24 cost bonus)</text>
+      </g>
+    </g>
+
+    <g transform="translate(414,178)">
+      <rect x="0" y="0" width="382" height="436" rx="12" fill="#0f1526" stroke="#1e293b"/>
+      <text x="18" y="30" fill="#f8fafc" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700">Rooms, Worktrees, Hooks &amp; /mcp</text>
+      <text x="18" y="50" fill="#64748b" font-family="ui-sans-serif, sans-serif" font-size="12">Conflict-free parallel editing &amp; safety guardrails</text>
+
+      <g transform="translate(16,70)" font-family="ui-monospace, monospace" font-size="12">
+        <rect x="0" y="0" width="350" height="76" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="24" fill="#f8fafc" font-weight="700">Shared Room · v3-launch</text>
+        <text x="14" y="45" fill="#34d399">● lease: src/routes-v3.mjs → codex (24m TTL)</text>
+        <text x="14" y="63" fill="#38bdf8">● lease: public/ops-studio.js → agy (28m TTL)</text>
+
+        <rect x="0" y="88" width="350" height="76" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="112" fill="#f8fafc" font-weight="700">Speculative Merge Queue (git merge-tree)</text>
+        <text x="14" y="133" fill="#34d399">#1 collab/v3/router [READY · verified pass]</text>
+        <text x="14" y="151" fill="#fb7185">#2 collab/v3/hooks  [CONFLICT detected early]</text>
+
+        <rect x="0" y="176" width="350" height="76" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="200" fill="#f8fafc" font-weight="700">SSRF-Safe Signed Webhooks (HMAC-SHA256)</text>
+        <text x="14" y="221" fill="#94a3b8">Slack · Discord · Feishu · DingTalk · Telegram</text>
+        <text x="14" y="239" fill="#34d399">HTTPS + private/loopback IP blocked · Dry-Run OK</text>
+
+        <rect x="0" y="264" width="350" height="76" rx="9" fill="#13192b" stroke="#1e293b"/>
+        <text x="14" y="288" fill="#f8fafc" font-weight="700">Streamable HTTP /mcp &amp; Profiles</text>
+        <text x="14" y="309" fill="#c7d2fe">--profile core (13) · cockpit (23) · full (53)</text>
+        <text x="14" y="327" fill="#94a3b8">POST/GET/DELETE /mcp + Origin/Host guards</text>
+      </g>
+    </g>
+  </g>
+</svg>

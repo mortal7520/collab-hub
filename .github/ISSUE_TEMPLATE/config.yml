@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: CollabHub Live Interactive Demo
+    url: https://mortal7520.github.io/collab-hub/
+    about: Try the live UI and 6-tab Cockpit right in your browser (zero install)

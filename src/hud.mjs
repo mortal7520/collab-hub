@@ -538,6 +538,19 @@ export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
     health = { score: null, overall: 'unknown', findings: 0, healable: 0, active_lessons: lessons.active, last_heal_at: null };
   }
 
+  /* ------------------------ client usage telemetry --------------------- */
+  const usageAgg = safeGet(db, `
+    SELECT COUNT(*) AS clients,
+           COALESCE(SUM(mcp_calls), 0) AS calls,
+           COALESCE(SUM(est_mcp_tokens), 0) AS mcp_tokens
+    FROM client_usage_telemetry
+  `) || {};
+  const usage = {
+    connected_clients: toInt(usageAgg.clients),
+    mcp_calls: toInt(usageAgg.calls),
+    est_mcp_tokens: toInt(usageAgg.mcp_tokens),
+  };
+
   const durationMs = Number(process.hrtime.bigint() - startedNs) / 1e6;
 
   return {
@@ -550,6 +563,7 @@ export function collectHudSnapshot(db, { worktreeDir, now } = {}) {
     rooms,
     mcp,
     lessons,
+    usage,
     health,
     duration_ms: Math.round(durationMs * 100) / 100,
   };
@@ -620,10 +634,15 @@ function renderOneLine(snap, { width, level, frame }) {
     s(`${toInt(queue.conflict)}⚠`, queue.conflict ? P.rose : P.slate),
   ].join(' ');
   const mcpSeg = `${s('MCP', P.slate)}${s(String(toInt(mcp.registered)), P.indigo)}`;
+  const usage = snap.usage || {};
+  const usageSeg = (usage.connected_clients > 0 || usage.mcp_calls > 0)
+    ? `${s('CLI', P.slate)}${s(String(toInt(usage.connected_clients)), P.emerald)}/${s(`${toInt(usage.mcp_calls)}c`, P.cyan)}`
+    : null;
   const ageSeg = s(tasks.latest_age_human || '—', P.slate);
 
+  const wideSegs = [brand, healthSeg, agentSeg, taskSeg, wtSeg, mqSeg, mcpSeg, ...(usageSeg ? [usageSeg] : []), ageSeg];
   const tiers = [
-    { min: 108, segs: [brand, healthSeg, agentSeg, taskSeg, wtSeg, mqSeg, mcpSeg, ageSeg] },
+    { min: 108, segs: wideSegs },
     { min: 88, segs: [brand, healthSeg, agentSeg, taskSeg, wtSeg, mqSeg, mcpSeg] },
     { min: 70, segs: [shortBrand, healthSeg, agentSeg, taskSeg, mqSeg, mcpSeg] },
     { min: 54, segs: [shortBrand, healthSeg, agentSeg, taskSeg, mqSeg] },
@@ -749,6 +768,7 @@ function renderJson(snap) {
     worktrees: { active: toInt(wt.active) },
     merge_queue: { ready: toInt(queue.ready), conflict: toInt(queue.conflict), queued: toInt(queue.queued) },
     mcp: { registered: toInt(mcp.registered), tools: toInt(mcp.tools) },
+    usage: snap.usage || { connected_clients: 0, mcp_calls: 0, est_mcp_tokens: 0 },
   });
 }
 

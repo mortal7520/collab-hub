@@ -15,7 +15,7 @@ import {
 import { discoverLocalAgents } from './discovery.mjs';
 import { createHotBackup, listWorkspaceProjects, runSystemDoctor } from './doctor.mjs';
 import { postMailUpdate, releaseMailPaths, reserveMailPaths } from './mail-sync.mjs';
-import { COCKPIT_RESOURCE_URI, MCP_APP_MIME_TYPE, buildCockpitAppHtml, formatCyberHudCard } from './mcp-app-ui.mjs';
+import { CHAT_STRIP_RESOURCE_URI, COCKPIT_RESOURCE_URI, MCP_APP_MIME_TYPE, buildChatStripAppHtml, buildCockpitAppHtml, formatCyberHudCard } from './mcp-app-ui.mjs';
 import {
   buildMcpHubSnapshot, callMcpServerTool, findMcpTools, generateClientSnippet,
   getMcpHubSummary, importDiscoveredMcpServers, probeMcpServer, registerMcpServer, removeMcpServer, syncMcpToClient,
@@ -37,7 +37,9 @@ import { computeAgentTelemetry } from './telemetry.mjs';
 import {
   convertDocToMd, getToolkitStatus, packRepoRepomix, runBeads, searchAstGrep, searchSessionsCass,
 } from './toolkit.mjs';
+import { getLiveAgentUsage, recordMcpClientActivity } from './live-usage.mjs';
 import { deleteTrigger, listTriggers, runTriggerNow, saveTrigger } from './triggers.mjs';
+import { VALID_WEBHOOK_FORMATS, deleteWebhook, deliverWebhook, listWebhooks, saveWebhook } from './webhooks.mjs';
 import {
   appendRoomLog, claimRoomPath, createCollabRoom, getRoomStatus, listCollabRooms,
   promoteInboxFile, reconcileStaleClaimsInAllRooms, releaseRoomClaim, renewRoomClaim,
@@ -61,11 +63,23 @@ const INLINE_COCKPIT_META = Object.freeze({
   'ui/resourceUri': COCKPIT_RESOURCE_URI,
 });
 
+const INLINE_CHAT_STRIP_META = Object.freeze({
+  ui: { resourceUri: CHAT_STRIP_RESOURCE_URI },
+  'ui/resourceUri': CHAT_STRIP_RESOURCE_URI,
+});
+
 export const MCP_APP_RESOURCES = Object.freeze([
   {
     uri: COCKPIT_RESOURCE_URI,
     name: 'CollabHub Neural Mission Cockpit',
     description: 'Interactive 60fps animated multi-agent Mission Control UI (Fleet Radar, Kanban & Logs, MCP Hub, Skills & Rules, Merge Queue) for Antigravity, Claude Desktop, and Codex Desktop.',
+    mimeType: MCP_APP_MIME_TYPE,
+    _meta: { ui: { prefersBorder: false } },
+  },
+  {
+    uri: CHAT_STRIP_RESOURCE_URI,
+    name: 'CollabHub Inline In-Chat HUD Strip',
+    description: 'Compact embeddable in-conversation usage & smart-router strip with 1-click ui/update-model-context chat-box pill attachment.',
     mimeType: MCP_APP_MIME_TYPE,
     _meta: { ui: { prefersBorder: false } },
   },
@@ -110,7 +124,8 @@ export const TOOLS = Object.freeze([
   },
   {
     name: 'collab_plan',
-    description: 'Recommend the best currently fresh & online agent for a role across ALL registered agents, skipping offline, dormant, stale, unknown, or channel-cooldown agents.',
+    _meta: INLINE_CHAT_STRIP_META,
+    description: 'Recommend the best currently fresh & online agent for a role across ALL registered agents using model-strength capability profiles (coding, security_audit, architecture, frontend_ui, copywriting, long_context, linux_ops, debugging, research, fast_cheap), skipping offline/cooldown agents.',
     inputSchema: {
       type: 'object',
       required: ['role'],
@@ -118,6 +133,10 @@ export const TOOLS = Object.freeze([
         role: { type: 'string', enum: ['planner', 'researcher', 'implementer', 'tester', 'reviewer', 'synthesizer'] },
         prefer: { type: 'array', items: { type: 'string' } },
         exclude: { type: 'array', items: { type: 'string' } },
+        prompt: { type: 'string', description: 'Optional task prompt/description for capability-aware & complexity-stratified model routing.' },
+        task_category: { type: 'string', enum: ['coding', 'security_audit', 'architecture', 'frontend_ui', 'copywriting', 'long_context', 'linux_ops', 'debugging', 'research', 'fast_cheap'] },
+        complexity: { type: 'string', enum: ['low', 'medium', 'high'] },
+        strategy: { type: 'string', enum: ['balanced', 'quality', 'cost', 'speed'] },
         require_local_files: { type: 'boolean' },
         require_linux: { type: 'boolean' },
         require_background_auto: { type: 'boolean' },
@@ -867,7 +886,71 @@ export const TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'collab_webhooks',
+    description: `Manage SSRF-guarded, HMAC-SHA256 signed outbound webhooks (${[...VALID_WEBHOOK_FORMATS].join(' | ')}) triggered by hub lifecycle events: list, save, delete, or test delivery.`,
+    inputSchema: {
+      type: 'object',
+      required: ['action'],
+      properties: {
+        action: { type: 'string', enum: ['list', 'save', 'delete', 'test'] },
+        webhook_id: { type: 'string' },
+        name: { type: 'string' },
+        format: { type: 'string', enum: ['generic', 'slack', 'discord', 'feishu', 'dingtalk', 'telegram'] },
+        url: { type: 'string' },
+        secret_env: { type: 'string', description: 'Env variable name (*_SECRET | *_TOKEN | *_KEY) for X-CollabHub-Signature-256 HMAC.' },
+        events: { type: 'array', items: { type: 'string' } },
+        enabled: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 'collab_usage',
+    _meta: INLINE_CHAT_STRIP_META,
+    description: 'Real-time cross-agent usage, token burn-rate, cost & MCP client activity ledger across all connected market agents (Claude Code, Codex, Antigravity, Cursor, Windsurf, Cline, OpenCode, Zed, etc.; strictly metadata-only, zero prompts).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['live', 'summary'] },
+        include_local_scan: { type: 'boolean', description: 'Scan local CLI token telemetry metadata (default true).' },
+      },
+    },
+  },
 ]);
+
+export const MCP_PROFILES = Object.freeze({
+  core: [
+    'collab_cockpit', 'collab_roster', 'collab_plan', 'collab_dispatch',
+    'collab_poll', 'collab_cancel', 'collab_tasks', 'collab_room',
+    'collab_handoff_pack', 'collab_worktree_create', 'collab_worktree_verify',
+    'collab_worktree_merge', 'collab_usage',
+  ],
+  cockpit: [
+    'collab_cockpit', 'collab_cockpit_state', 'collab_roster', 'collab_plan',
+    'collab_dispatch', 'collab_poll', 'collab_cancel', 'collab_tasks',
+    'collab_room', 'collab_handoff_pack', 'collab_consensus', 'collab_artifacts',
+    'collab_budget', 'collab_triggers', 'collab_webhooks', 'collab_usage',
+    'collab_mcp_hub', 'collab_mcp_find_tools', 'collab_skills_hub',
+    'collab_merge_queue', 'collab_worktree_create', 'collab_self_check', 'collab_self_heal',
+  ],
+  full: null,
+});
+
+export function getToolsForProfile(profile = 'full', allowlist = null) {
+  let list = TOOLS;
+  const pName = String(profile || 'full').trim().toLowerCase();
+  if (pName !== 'full') {
+    const names = MCP_PROFILES[pName];
+    if (!names) throw new Error(`Unknown MCP profile "${profile}". Use: core | cockpit | full`);
+    const set = new Set(names);
+    list = TOOLS.filter((t) => set.has(t.name));
+  }
+  if (Array.isArray(allowlist) && allowlist.length > 0) {
+    const allow = new Set(allowlist.map((s) => String(s).trim()).filter(Boolean));
+    list = list.filter((t) => allow.has(t.name));
+  }
+  return list;
+}
 
 function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT } = {}) {
   const members = getMemberStatuses(db);
@@ -883,6 +966,8 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
   const budget_summary = evaluateBudget(db, { projectDir: projectDir || WORKSPACE_ROOT });
   const triggers = listTriggers(db);
   const consensus = listConsensusRounds(db, { limit: 12 });
+  const webhooks = listWebhooks(db);
+  const live_usage = getLiveAgentUsage(db, { includeLocalScan: true });
   return {
     version: APP_VERSION,
     initial_tab: tab || 'radar',
@@ -902,6 +987,8 @@ function buildCockpitSnapshot(db, { tab = 'radar', projectDir = WORKSPACE_ROOT }
     budget_summary,
     triggers,
     consensus,
+    webhooks,
+    live_usage,
   };
 }
 
@@ -928,6 +1015,10 @@ export async function handleToolCall(db, name, args = {}, opts = {}) {
         role: args.role,
         prefer: args.prefer,
         exclude: args.exclude,
+        prompt: args.prompt || '',
+        taskCategory: args.task_category || null,
+        complexity: args.complexity || null,
+        strategy: args.strategy || 'balanced',
         requireLocalFiles: Boolean(args.require_local_files),
         requireLinux: Boolean(args.require_linux),
         requireBackgroundAuto: Boolean(args.require_background_auto),
@@ -1363,6 +1454,36 @@ export async function handleToolCall(db, name, args = {}, opts = {}) {
       if (act === 'run') return runTriggerNow(db, args.trigger_id);
       throw new Error(`Unsupported collab_triggers action: ${act}`);
     }
+    case 'collab_webhooks': {
+      const act = args.action;
+      if (act === 'list') return { webhooks: listWebhooks(db), formats: [...VALID_WEBHOOK_FORMATS] };
+      if (act === 'save') {
+        return {
+          webhook: await saveWebhook(db, {
+            webhookId: args.webhook_id || null,
+            name: args.name,
+            format: args.format || 'generic',
+            url: args.url,
+            secretEnv: args.secret_env || null,
+            events: args.events || ['*'],
+            enabled: args.enabled !== false,
+          }),
+        };
+      }
+      if (act === 'delete') return deleteWebhook(db, args.webhook_id);
+      if (act === 'test') {
+        return deliverWebhook(db, args.webhook_id, {
+          event_type: 'webhook.test',
+          actor: 'collab-hub',
+          payload: { message: 'CollabHub v3.0 webhook test via MCP' },
+        });
+      }
+      throw new Error(`Unsupported collab_webhooks action: ${act}`);
+    }
+    case 'collab_usage': {
+      const snap = getLiveAgentUsage(db, { includeLocalScan: args.include_local_scan !== false });
+      return args.action === 'summary' ? { scanned_at: snap.scanned_at, totals: snap.totals, privacy_note: snap.privacy_note } : snap;
+    }
     default:
       throw new Error(`Unknown collab-hub tool: ${name}`);
   }
@@ -1378,14 +1499,192 @@ function inferDesktopMemberFromClientName(clientName) {
   return null;
 }
 
-export function startMcpStdioServer() {
+/**
+ * Shared protocol-agnostic JSON-RPC 2.0 MCP message dispatcher (used by both stdio and Streamable HTTP `/mcp`).
+ */
+export async function handleMcpJsonRpcMessage(db, msg, {
+  profile = 'full',
+  allowlist = null,
+  transport = 'stdio',
+  signal = null,
+  sessionState = {},
+  activeControllers = null,
+} = {}) {
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
+    return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
+  }
+  const hasId = Object.prototype.hasOwnProperty.call(msg, 'id') && msg.id !== undefined;
+  const { id, method, params } = msg;
+  const cancelledIds = sessionState.cancelledIds || (sessionState.cancelledIds = new Set());
+
+  if (!hasId) {
+    if (method === 'notifications/cancelled' && params?.requestId !== undefined) {
+      const key = String(params.requestId);
+      cancelledIds.add(key);
+      const ctrl = activeControllers?.get(key);
+      if (ctrl) {
+        try { ctrl.abort(params.reason || 'client_cancelled'); } catch {}
+      }
+      if (cancelledIds.size > 200) {
+        const oldest = cancelledIds.values().next().value;
+        if (oldest !== undefined) cancelledIds.delete(oldest);
+      }
+    }
+    return null;
+  }
+
+  try {
+    if (method === 'initialize') {
+      const reqVer = params?.protocolVersion;
+      const negotiated = SUPPORTED_MCP_VERSIONS.includes(reqVer) ? reqVer : '2025-06-18';
+      sessionState.detectedClientName = String(params?.clientInfo?.name || '');
+      sessionState.detectedClientVersion = String(params?.clientInfo?.version || '');
+      sessionState.detectedHostMember = inferDesktopMemberFromClientName(sessionState.detectedClientName);
+      if (sessionState.detectedHostMember) {
+        try { touchPassiveDesktopHeartbeat(db, sessionState.detectedHostMember, sessionState.detectedClientName); } catch {}
+      }
+      recordMcpClientActivity(db, {
+        clientId: sessionState.detectedClientName || (transport === 'http' ? 'http-mcp-client' : 'stdio-mcp-client'),
+        clientName: sessionState.detectedClientName || (transport === 'http' ? 'HTTP MCP Client' : 'Stdio MCP Client'),
+        clientVersion: sessionState.detectedClientVersion,
+        transport,
+        profile,
+      });
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: negotiated,
+          capabilities: {
+            tools: {},
+            resources: { subscribe: false, listChanged: false },
+          },
+          serverInfo: { name: 'collab-hub', version: APP_VERSION },
+        },
+      };
+    }
+    if (method === 'ping') {
+      return { jsonrpc: '2.0', id, result: {} };
+    }
+    if (method === 'tools/list') {
+      return { jsonrpc: '2.0', id, result: { tools: getToolsForProfile(profile, allowlist) } };
+    }
+    if (method === 'resources/list') {
+      return { jsonrpc: '2.0', id, result: { resources: MCP_APP_RESOURCES } };
+    }
+    if (method === 'resources/read') {
+      const uri = params?.uri;
+      let html = null;
+      if (uri === COCKPIT_RESOURCE_URI) html = buildCockpitAppHtml();
+      else if (uri === CHAT_STRIP_RESOURCE_URI) html = buildChatStripAppHtml();
+      if (!html) {
+        return { jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown resource URI: ${uri}` } };
+      }
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          contents: [{
+            uri,
+            mimeType: MCP_APP_MIME_TYPE,
+            text: html,
+            _meta: { ui: { prefersBorder: false } },
+          }],
+        },
+      };
+    }
+    if (method === 'tools/call') {
+      const reqKey = String(id);
+      const ac = new AbortController();
+      activeControllers?.set(reqKey, ac);
+      const onOuterAbort = () => {
+        try { ac.abort('outer_signal_aborted'); } catch {}
+      };
+      signal?.addEventListener?.('abort', onOuterAbort, { once: true });
+      const bytesIn = Buffer.byteLength(JSON.stringify(params?.arguments || {}), 'utf8');
+      try {
+        if (cancelledIds.delete(reqKey)) return null;
+        if (sessionState.detectedHostMember) {
+          try { touchPassiveDesktopHeartbeat(db, sessionState.detectedHostMember, sessionState.detectedClientName); } catch {}
+        }
+        const effectiveSignal = signal?.aborted ? signal : ac.signal;
+        const result = await handleToolCall(db, params?.name, params?.arguments || {}, { signal: effectiveSignal });
+        if (ac.signal.aborted || cancelledIds.delete(reqKey)) return null;
+        const textContent = params?.name === 'collab_cockpit'
+          ? `${formatCyberHudCard(result)}\n\nTip: Interactive 60fps MCP App Cockpit attached (${COCKPIT_RESOURCE_URI}).`
+          : JSON.stringify(result, null, 2);
+        recordMcpClientActivity(db, {
+          clientId: sessionState.detectedClientName || (transport === 'http' ? 'http-mcp-client' : 'stdio-mcp-client'),
+          clientName: sessionState.detectedClientName || (transport === 'http' ? 'HTTP MCP Client' : 'Stdio MCP Client'),
+          clientVersion: sessionState.detectedClientVersion || '',
+          transport,
+          profile,
+          toolName: params?.name,
+          bytesIn,
+          bytesOut: Buffer.byteLength(textContent, 'utf8'),
+          isError: false,
+        });
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            content: [{ type: 'text', text: textContent }],
+            structuredContent: result,
+          },
+        };
+      } catch (toolErr) {
+        if (ac.signal.aborted || cancelledIds.delete(reqKey)) return null;
+        const errMsg = String(toolErr.message || toolErr);
+        recordMcpClientActivity(db, {
+          clientId: sessionState.detectedClientName || (transport === 'http' ? 'http-mcp-client' : 'stdio-mcp-client'),
+          clientName: sessionState.detectedClientName || (transport === 'http' ? 'HTTP MCP Client' : 'Stdio MCP Client'),
+          clientVersion: sessionState.detectedClientVersion || '',
+          transport,
+          profile,
+          toolName: params?.name || 'unknown',
+          bytesIn,
+          bytesOut: Buffer.byteLength(errMsg, 'utf8'),
+          isError: true,
+        });
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: errMsg }],
+          },
+        };
+      } finally {
+        signal?.removeEventListener?.('abort', onOuterAbort);
+        activeControllers?.delete(reqKey);
+      }
+    }
+    return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
+  } catch (err) {
+    return { jsonrpc: '2.0', id, error: { code: -32603, message: String(err.message || err) } };
+  }
+}
+
+export function startMcpStdioServer({ profile = null, allowlist = null } = {}) {
   ensureRuntimeDirs();
+  const argv = process.argv.slice(2);
+  let resolvedProfile = profile;
+  let resolvedAllow = allowlist;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--profile' && argv[i + 1]) {
+      resolvedProfile = argv[i + 1];
+      i += 1;
+    } else if (argv[i] === '--tools' && argv[i + 1]) {
+      resolvedAllow = argv[i + 1].split(',').map((s) => s.trim()).filter(Boolean);
+      i += 1;
+    }
+  }
+  resolvedProfile = resolvedProfile || process.env.COLLAB_HUB_MCP_PROFILE || 'full';
+
   const db = openHubDb();
-  let detectedHostMember = null;
-  let detectedClientName = '';
+  const sessionState = { detectedHostMember: null, detectedClientName: '', cancelledIds: new Set() };
   const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const cancelledIds = new Set();
   const activeControllers = new Map();
 
   const shutdown = () => {
@@ -1407,114 +1706,13 @@ export function startMcpStdioServer() {
       send({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
       return;
     }
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) {
-      send({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
-      return;
-    }
-    const hasId = Object.prototype.hasOwnProperty.call(msg, 'id') && msg.id !== undefined;
-    const { id, method, params } = msg;
-    if (!hasId) {
-      if (method === 'notifications/cancelled' && params?.requestId !== undefined) {
-        const key = String(params.requestId);
-        cancelledIds.add(key);
-        const ctrl = activeControllers.get(key);
-        if (ctrl) {
-          try { ctrl.abort(params.reason || 'client_cancelled'); } catch {}
-        }
-        if (cancelledIds.size > 200) {
-          const oldest = cancelledIds.values().next().value;
-          if (oldest !== undefined) cancelledIds.delete(oldest);
-        }
-      }
-      return;
-    }
-
-    try {
-      if (method === 'initialize') {
-        const reqVer = params?.protocolVersion;
-        const negotiated = SUPPORTED_MCP_VERSIONS.includes(reqVer) ? reqVer : '2025-06-18';
-        detectedClientName = String(params?.clientInfo?.name || '');
-        detectedHostMember = inferDesktopMemberFromClientName(detectedClientName);
-        if (detectedHostMember) {
-          try { touchPassiveDesktopHeartbeat(db, detectedHostMember, detectedClientName); } catch {}
-        }
-        send({
-          jsonrpc: '2.0',
-          id,
-          result: {
-            protocolVersion: negotiated,
-            capabilities: {
-              tools: {},
-              resources: { subscribe: false, listChanged: false },
-            },
-            serverInfo: { name: 'collab-hub', version: APP_VERSION },
-          },
-        });
-      } else if (method === 'ping') {
-        send({ jsonrpc: '2.0', id, result: {} });
-      } else if (method === 'tools/list') {
-        send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
-      } else if (method === 'resources/list') {
-        send({ jsonrpc: '2.0', id, result: { resources: MCP_APP_RESOURCES } });
-      } else if (method === 'resources/read') {
-        const uri = params?.uri;
-        if (uri !== COCKPIT_RESOURCE_URI) {
-          send({ jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown resource URI: ${uri}` } });
-        } else {
-          send({
-            jsonrpc: '2.0',
-            id,
-            result: {
-              contents: [{
-                uri: COCKPIT_RESOURCE_URI,
-                mimeType: MCP_APP_MIME_TYPE,
-                text: buildCockpitAppHtml(),
-                _meta: { ui: { prefersBorder: false } },
-              }],
-            },
-          });
-        }
-      } else if (method === 'tools/call') {
-        const reqKey = String(id);
-        const ac = new AbortController();
-        activeControllers.set(reqKey, ac);
-        try {
-          if (cancelledIds.delete(reqKey)) return;
-          if (detectedHostMember) {
-            try { touchPassiveDesktopHeartbeat(db, detectedHostMember, detectedClientName); } catch {}
-          }
-          const result = await handleToolCall(db, params?.name, params?.arguments || {}, { signal: ac.signal });
-          if (ac.signal.aborted || cancelledIds.delete(reqKey)) return;
-          const textContent = params?.name === 'collab_cockpit'
-            ? `${formatCyberHudCard(result)}\n\nTip: Interactive 60fps MCP App Cockpit attached (${COCKPIT_RESOURCE_URI}).`
-            : JSON.stringify(result, null, 2);
-          send({
-            jsonrpc: '2.0',
-            id,
-            result: {
-              content: [{ type: 'text', text: textContent }],
-              structuredContent: result,
-            },
-          });
-        } catch (toolErr) {
-          if (ac.signal.aborted || cancelledIds.delete(reqKey)) return;
-          send({
-            jsonrpc: '2.0',
-            id,
-            result: {
-              isError: true,
-              content: [{ type: 'text', text: String(toolErr.message || toolErr) }],
-            },
-          });
-        } finally {
-          activeControllers.delete(reqKey);
-        }
-      } else {
-        send({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });
-      }
-    } catch (err) {
-      send({ jsonrpc: '2.0', id, error: { code: -32603, message: String(err.message || err) } });
-    }
+    const resp = await handleMcpJsonRpcMessage(db, msg, {
+      profile: resolvedProfile,
+      allowlist: resolvedAllow,
+      sessionState,
+      activeControllers,
+    });
+    if (resp !== null && resp !== undefined) send(resp);
   });
 }
 

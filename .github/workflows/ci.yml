@@ -19,30 +19,42 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
+      - name: Syntax check CLI & modules
+        run: node --check bin/collab-hub.mjs && node --check extensions/collab-hub-vscode/extension.js
       - name: Run zero-dependency test suite
-        run: node --test test/collab-hub.test.mjs
-      - name: Verify MCP stdio handshake (51 tools + SEP-1865 MCP App resource)
+        run: node --test test/*.test.mjs
+      - name: Verify MCP stdio handshake (53 tools + core/cockpit profiles + SEP-1865 MCP App resource)
         run: |
           node --input-type=module -e "
           import { spawn } from 'node:child_process';
           import readline from 'node:readline';
-          const c = spawn(process.execPath, ['src/mcp-server.mjs'], { stdio: ['pipe', 'pipe', 'pipe'] });
-          const rl = readline.createInterface({ input: c.stdout });
-          const out = [];
-          rl.on('line', (l) => {
-            out.push(JSON.parse(l));
-            if (out.length === 4) {
-              if (out[1].result.tools.length !== 51) process.exit(1);
-              if (!out[2].result.resources.some((r) => r.uri === 'ui://collab-hub/cockpit.html')) process.exit(1);
-              if (out[3].result.contents[0].mimeType !== 'text/html;profile=mcp-app') process.exit(1);
-              console.log('MCP v2 verified:', out[0].result.serverInfo, out[1].result.tools.length, 'tools,', out[2].result.resources.length, 'MCP App resource(s)');
-              c.kill();
-              process.exit(0);
-            }
-          });
-          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'ci', version: '1' } } }) + '\n');
-          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
-          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'resources/list', params: {} }) + '\n');
-          c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'resources/read', params: { uri: 'ui://collab-hub/cockpit.html' } }) + '\n');
-          setTimeout(() => process.exit(1), 8000);
+          function verify(args, expectedCount) {
+            return new Promise((resolve, reject) => {
+              const c = spawn(process.execPath, ['src/mcp-server.mjs', ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+              const rl = readline.createInterface({ input: c.stdout });
+              const out = [];
+              const timer = setTimeout(() => { try { c.kill(); } catch {} reject(new Error('timeout ' + args.join(' '))); }, 8000);
+              rl.on('line', (l) => {
+                out.push(JSON.parse(l));
+                if (out.length === 4) {
+                  clearTimeout(timer);
+                  try {
+                    if (out[1].result.tools.length !== expectedCount) throw new Error('expected ' + expectedCount + ', got ' + out[1].result.tools.length);
+                    if (!out[2].result.resources.some((r) => r.uri === 'ui://collab-hub/cockpit.html')) throw new Error('missing cockpit resource');
+                    if (out[3].result.contents[0].mimeType !== 'text/html;profile=mcp-app') throw new Error('bad mimeType');
+                    c.kill();
+                    resolve({ server: out[0].result.serverInfo, count: out[1].result.tools.length });
+                  } catch (e) { c.kill(); reject(e); }
+                }
+              });
+              c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'ci', version: '1' } } }) + '\n');
+              c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }) + '\n');
+              c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'resources/list', params: {} }) + '\n');
+              c.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'resources/read', params: { uri: 'ui://collab-hub/cockpit.html' } }) + '\n');
+            });
+          }
+          const full = await verify([], 53);
+          const core = await verify(['--profile', 'core'], 13);
+          const cockpit = await verify(['--profile', 'cockpit'], 23);
+          console.log('MCP v3 verified:', { full, core, cockpit });
           "

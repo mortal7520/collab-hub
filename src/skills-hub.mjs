@@ -59,6 +59,19 @@ export function getDefaultSkillAdapters({ homedir = os.homedir() } = {}) {
       name: 'Cursor',
       dirs: [path.join(homedir, '.cursor', 'skills')],
     },
+    {
+      id: 'windsurf',
+      name: 'Windsurf',
+      dirs: [
+        path.join(homedir, '.windsurf', 'skills'),
+        path.join(homedir, '.codeium', 'windsurf', 'skills'),
+      ],
+    },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      dirs: [path.join(homedir, '.config', 'opencode', 'skills')],
+    },
   ];
 }
 
@@ -71,6 +84,8 @@ export const RULE_TARGETS = Object.freeze([
   { id: 'gemini-md', name: 'GEMINI.md (Gemini CLI / AGY)', relPath: 'GEMINI.md', dialect: 'markdown' },
   { id: 'cursor-rules', name: '.cursor/rules/project.mdc (Cursor)', relPath: '.cursor/rules/project.mdc', dialect: 'mdc' },
   { id: 'windsurf-rules', name: '.windsurfrules (Windsurf)', relPath: '.windsurfrules', dialect: 'markdown' },
+  { id: 'cline-rules', name: '.clinerules (Cline / Roo Code)', relPath: '.clinerules', dialect: 'markdown' },
+  { id: 'copilot-instructions', name: '.github/copilot-instructions.md (VS Code Copilot)', relPath: '.github/copilot-instructions.md', dialect: 'markdown' },
 ]);
 
 /**

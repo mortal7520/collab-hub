@@ -2,6 +2,13 @@
 
 CollabHub adheres to a strict **zero-npm-runtime-dependency** core (`node >= 22.13.0` built-ins only) while standing on the shoulders of verified, maintained open-source projects. Every reused design or ported core algorithm is recorded below with its exact upstream repository, commit SHA / version, license, and local adaptation rationale.
 
+## Model-Strength Routing, Live Telemetry & Always-On Distribution (`v3.0.0`)
+
+| CollabHub Module | Upstream Inspiration | License | What Was Adapted & Why |
+| :--- | :--- | :--- | :--- |
+| [`src/router.mjs`](../src/router.mjs) | **[lm-sys/RouteLLM](https://github.com/lm-sys/RouteLLM)** · **[BerriAI/litellm](https://github.com/BerriAI/litellm)** | Apache-2.0 / MIT | Adapted RouteLLM's complexity & model-strength tier stratification (routing high-complexity coding/security/copywriting to flagship models and quick/low-complexity tasks to fast/local open-weights) + LiteLLM Router's cooldown/latency/cost-aware selection into a zero-dep deterministic bilingual router with transparent `routing_reasons[]`. |
+| [`src/routes-v3.mjs`](../src/routes-v3.mjs) (`/mcp`) | **[modelcontextprotocol/specification](https://github.com/modelcontextprotocol/modelcontextprotocol)** (`Streamable HTTP`) | MIT | Exposed standards-compliant Streamable HTTP `/mcp` (`POST`, `GET`, `DELETE`, `Mcp-Session-Id`) sharing the exact same JSON-RPC 2.0 dispatcher as stdio MCP with loopback Origin & DNS-rebinding guards and `--profile core|cockpit|full`. |
+
 ## Host-Native Animated Cockpit & TUI Adaptations (`v2.0.0`)
 
 | CollabHub Module | Upstream Project | Exact Commit / Tag | License | What Was Adapted & Why |
@@ -32,3 +39,9 @@ These standalone open-source tools are invoked safely via allowlisted paths and 
 - **[steveyegge/beads](https://github.com/steveyegge/beads)** (`bd v1.3.4`, MIT) — Dependency-aware issue tracker.
 - **[yamadashy/repomix](https://github.com/yamadashy/repomix)** (`1.19.0`, MIT) — Repository context packing.
 - **[microsoft/markitdown](https://github.com/microsoft/markitdown)** (`0.1.9`, MIT) — Document-to-Markdown conversion.
+
+### Chat-Adjacent & In-Conversation Overlay Inspirations (`extensions/collab-hub-browser`, `extensions/collab-hub-vscode`, `extensions/terminal-hud`)
+
+- **[cupcakedev/ai-usage-extension](https://github.com/cupcakedev/ai-usage-extension)** (Open Source) — Inspired our Shadow DOM floating usage pill and collapsible chat-composer companion inside Web AI hosts (`claude.ai`, `chatgpt.com`, `gemini.google.com`, `muse.ai`, `chat.deepseek.com`, `grok.com`, `perplexity.ai`). Zero shared code; strict loopback-only telemetry and zero cookie access.
+- **[hiroppy/tmux-agent-sidebar](https://github.com/hiroppy/tmux-agent-sidebar)** (Open Source) — Inspired our 36-column tmux chat-adjacent live sidebar (`extensions/terminal-hud/tmux-sidebar.sh` & `collab-hub cockpit --split`).
+- **[MaheshBhushan/agent-overlay](https://github.com/MaheshBhushan/agent-overlay)** & **[cheapbutsimilar/Agent-Meter](https://github.com/cheapbutsimilar/Agent-Meter)** (Open Source) — Inspired the always-on-top compact dock (`--dock --pin`) and live cross-agent burn-rate card beside Desktop AI conversations.

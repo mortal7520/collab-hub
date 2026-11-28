@@ -36,8 +36,8 @@ function normalizeCrossOsPath(p) {
 
 const LOCAL_BOOT = loadLocalBootstrap();
 
-export const APP_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_APP_ROOT || LOCAL_BOOT.appRoot) || path.join(os.homedir(), '.collab-hub');
-export const WORKSPACE_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_WORKSPACE_ROOT || LOCAL_BOOT.workspaceRoot) || process.cwd();
+export const APP_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_APP_ROOT || process.env.COLLAB_HUB_HOME || LOCAL_BOOT.appRoot) || path.join(os.homedir(), '.collab-hub');
+export const WORKSPACE_ROOT = normalizeCrossOsPath(process.env.COLLAB_HUB_WORKSPACE_ROOT || process.env.COLLAB_HUB_WORKSPACE || LOCAL_BOOT.workspaceRoot) || process.cwd();
 export const DATA_DIR = path.join(APP_ROOT, 'data');
 export const DB_PATH = normalizeCrossOsPath(process.env.COLLAB_HUB_DB_PATH) || path.join(DATA_DIR, 'hub.db');
 export const MEMORY_DIR = normalizeCrossOsPath(process.env.COLLAB_HUB_MEMORY_DIR) || path.join(DATA_DIR, 'memory');
@@ -87,7 +87,26 @@ export const INTEGRATIONS = Object.freeze({
   claudeWorkerClient: process.env.COLLAB_HUB_CLAUDE_WORKER_CLIENT || LOCAL_INT.claudeWorkerClient || '',
   claudeWorkerRelayDir: process.env.COLLAB_HUB_CLAUDE_RELAY_DIR || LOCAL_INT.claudeWorkerRelayDir || '',
   claudeCooldownSeconds: Number(process.env.COLLAB_HUB_CLAUDE_COOLDOWN_S || LOCAL_INT.claudeCooldownSeconds || 1800),
+  customHealthProbes: Array.isArray(LOCAL_INT.customHealthProbes) ? LOCAL_INT.customHealthProbes : [],
 });
+
+/**
+ * Determine whether an optional built-in external bridge (`dsh`, `muse`) is configured on this host.
+ * Fresh external installs without Windows/WSL DSH or Tailscale Muse stay cleanly `unconfigured`
+ * instead of showing false `offline` errors or degrading initial health score.
+ */
+export function isOptionalIntegrationConfigured(memberId) {
+  if (memberId === 'dsh') {
+    return Boolean(
+      INTEGRATIONS.batonLauncher
+      || (process.platform === 'win32' && INTEGRATIONS.wslDistro && INTEGRATIONS.wslUser && INTEGRATIONS.dshSocket),
+    );
+  }
+  if (memberId === 'muse') {
+    return Boolean(INTEGRATIONS.museOperatorClient && INTEGRATIONS.musePublisherSocket && INTEGRATIONS.musePeerIp);
+  }
+  return true;
+}
 
 const EXE = process.platform === 'win32' ? '.exe' : '';
 const VENV_BIN = process.platform === 'win32' ? 'Scripts' : 'bin';

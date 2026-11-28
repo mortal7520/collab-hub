@@ -153,7 +153,7 @@ export async function assertSafeRemoteUrl(rawUrl) {
  * Prevents DNS-rebinding TOCTOU by connecting directly to the exact IP validated by
  * `assertSafeRemoteUrl()` while preserving TLS SNI (`servername`) & certificate verification.
  */
-function pinnedHttpJsonPost(target, { headers = {}, body = '', timeoutMs = 10000 } = {}) {
+export function pinnedHttpJsonPost(target, { headers = {}, body = '', timeoutMs = 10000 } = {}) {
   const { parsed, host, pinnedAddress, pinnedFamily } = target;
   const isHttps = parsed.protocol === 'https:';
   const transport = isHttps ? https : http;
@@ -334,12 +334,17 @@ export function validateMcpServerSpec({
 }
 
 /**
- * Default local AI client MCP configuration paths across Windows / macOS / Linux.
+ * Default local AI client MCP configuration paths across Windows / macOS / Linux (14 mainstream clients).
  */
 export function getDefaultClientSpecs({ homedir = os.homedir(), platform = process.platform, env = process.env } = {}) {
   const appData = env.APPDATA || path.join(homedir, 'AppData', 'Roaming');
   const macAppSupport = path.join(homedir, 'Library', 'Application Support');
   const xdgConfig = env.XDG_CONFIG_HOME || path.join(homedir, '.config');
+  const codeUserDir = platform === 'win32'
+    ? path.join(appData, 'Code', 'User')
+    : (platform === 'darwin'
+      ? path.join(macAppSupport, 'Code', 'User')
+      : path.join(xdgConfig, 'Code', 'User'));
 
   const claudeDesktopPath = platform === 'win32'
     ? path.join(appData, 'Claude', 'claude_desktop_config.json')
@@ -347,11 +352,9 @@ export function getDefaultClientSpecs({ homedir = os.homedir(), platform = proce
       ? path.join(macAppSupport, 'Claude', 'claude_desktop_config.json')
       : path.join(xdgConfig, 'Claude', 'claude_desktop_config.json'));
 
-  const vscodePath = platform === 'win32'
-    ? path.join(appData, 'Code', 'User', 'mcp.json')
-    : (platform === 'darwin'
-      ? path.join(macAppSupport, 'Code', 'User', 'mcp.json')
-      : path.join(xdgConfig, 'Code', 'User', 'mcp.json'));
+  const zedConfigPath = platform === 'win32'
+    ? path.join(appData, 'Zed', 'settings.json')
+    : path.join(xdgConfig, 'zed', 'settings.json');
 
   const agyPrimary = path.join(homedir, '.gemini', 'config', 'mcp_config.json');
   const agyLegacy = path.join(homedir, '.gemini', 'antigravity', 'mcp_config.json');
@@ -361,10 +364,16 @@ export function getDefaultClientSpecs({ homedir = os.homedir(), platform = proce
     { id: 'codex', name: 'Codex', format: 'toml', rootKey: 'mcp_servers', paths: [path.join(homedir, '.codex', 'config.toml')] },
     { id: 'claude-code', name: 'Claude Code', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.claude.json')] },
     { id: 'claude-desktop', name: 'Claude Desktop', format: 'json', rootKey: 'mcpServers', paths: [claudeDesktopPath] },
-    { id: 'gemini-cli', name: 'Gemini CLI', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.gemini', 'settings.json')] },
     { id: 'cursor', name: 'Cursor', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.cursor', 'mcp.json')] },
     { id: 'windsurf', name: 'Windsurf', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.codeium', 'windsurf', 'mcp_config.json')] },
-    { id: 'vscode', name: 'VS Code', format: 'json', rootKey: 'servers', paths: [vscodePath] },
+    { id: 'vscode', name: 'VS Code', format: 'json', rootKey: 'servers', paths: [path.join(codeUserDir, 'mcp.json')] },
+    { id: 'gemini-cli', name: 'Gemini CLI', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.gemini', 'settings.json')] },
+    { id: 'cline', name: 'Cline', format: 'json', rootKey: 'mcpServers', paths: [path.join(codeUserDir, 'globalStorage', 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json')] },
+    { id: 'roo-code', name: 'Roo Code', format: 'json', rootKey: 'mcpServers', paths: [path.join(codeUserDir, 'globalStorage', 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json')] },
+    { id: 'opencode', name: 'OpenCode', format: 'json', rootKey: 'mcp', paths: [path.join(xdgConfig, 'opencode', 'opencode.json'), path.join(homedir, '.opencode.json')] },
+    { id: 'zed', name: 'Zed', format: 'json', rootKey: 'context_servers', paths: [zedConfigPath] },
+    { id: 'continue', name: 'Continue', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.continue', 'config.json')] },
+    { id: 'kiro', name: 'Kiro', format: 'json', rootKey: 'mcpServers', paths: [path.join(homedir, '.kiro', 'settings', 'mcp.json')] },
   ];
 }
 
@@ -481,7 +490,12 @@ function parseJsonMcpServers(jsonText, preferredRootKey = 'mcpServers') {
   let parsed;
   try { parsed = JSON.parse(jsonText); } catch { return {}; }
   if (!parsed || typeof parsed !== 'object') return {};
-  const map = parsed[preferredRootKey] || parsed.mcpServers || parsed.servers || null;
+  const map = parsed[preferredRootKey]
+    || parsed.mcpServers
+    || parsed.servers
+    || parsed.mcp
+    || parsed.context_servers
+    || null;
   if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
   const out = {};
   for (const [id, cfg] of Object.entries(map)) {
@@ -492,11 +506,25 @@ function parseJsonMcpServers(jsonText, preferredRootKey = 'mcpServers') {
     const transport = cleanUrl
       ? (rawType === 'sse' || /\/sse\b/i.test(cleanUrl) ? 'sse' : 'http')
       : 'stdio';
-    const envObj = cfg.env && typeof cfg.env === 'object' ? cfg.env : {};
+    const envObj = (cfg.env && typeof cfg.env === 'object' ? cfg.env : null)
+      || (cfg.environment && typeof cfg.environment === 'object' ? cfg.environment : null)
+      || (cfg.command && typeof cfg.command === 'object' && !Array.isArray(cfg.command) && cfg.command.env && typeof cfg.command.env === 'object' ? cfg.command.env : null)
+      || {};
     const headerObj = cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {};
     const envKeys = Object.keys(envObj).sort();
     const headerKeys = Object.keys(headerObj).sort();
-    const args = Array.isArray(cfg.args) ? cfg.args.map(String) : [];
+    let parsedCmd = null;
+    let args = [];
+    if (Array.isArray(cfg.command)) {
+      parsedCmd = typeof cfg.command[0] === 'string' ? cfg.command[0] : null;
+      args = cfg.command.slice(1).map(String);
+    } else if (cfg.command && typeof cfg.command === 'object') {
+      parsedCmd = typeof cfg.command.path === 'string' ? cfg.command.path : null;
+      args = Array.isArray(cfg.command.args) ? cfg.command.args.map(String) : [];
+    } else {
+      parsedCmd = typeof cfg.command === 'string' ? cfg.command : null;
+      args = Array.isArray(cfg.args) ? cfg.args.map(String) : [];
+    }
     const secretInline = Object.values(envObj).some((v) => detectInlineSecret(String(v)))
       || Object.values(headerObj).some((v) => detectInlineSecret(String(v)))
       || args.some(detectInlineSecret)
@@ -504,7 +532,7 @@ function parseJsonMcpServers(jsonText, preferredRootKey = 'mcpServers') {
     out[id] = {
       id,
       transport,
-      command: typeof cfg.command === 'string' ? cfg.command : null,
+      command: parsedCmd,
       args,
       url: cleanUrl,
       env_keys: envKeys,
@@ -1136,6 +1164,30 @@ export function generateClientSnippet(db, { clientId = 'antigravity', serverIds 
 }
 
 function buildJsonServerEntry(s, clientId) {
+  if (clientId === 'opencode') {
+    if (s.transport === 'stdio') {
+      const entry = { type: 'local', command: [s.command || '', ...(s.args || [])], enabled: true };
+      if (s.env_keys?.length) {
+        entry.environment = Object.fromEntries(s.env_keys.map((k) => [k, `\${${k}}`]));
+      }
+      return entry;
+    }
+    const entry = { type: 'remote', url: s.url, enabled: true };
+    if (s.header_keys?.length) {
+      entry.headers = Object.fromEntries(s.header_keys.map((k) => [k, `\${${k.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}}`]));
+    }
+    return entry;
+  }
+  if (clientId === 'zed') {
+    if (s.transport === 'stdio') {
+      const entry = { source: 'custom', command: s.command || '', args: s.args || [] };
+      if (s.env_keys?.length) {
+        entry.env = Object.fromEntries(s.env_keys.map((k) => [k, `\${${k}}`]));
+      }
+      return entry;
+    }
+    return { url: s.url };
+  }
   if (s.transport === 'stdio') {
     const entry = { command: s.command || '', args: s.args || [] };
     if (s.env_keys?.length) {

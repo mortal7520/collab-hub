@@ -70,7 +70,7 @@ function ensureColumn(db, table, column, definition) {
   }
 }
 
-const SCHEMA_VERSION = 220;
+const SCHEMA_VERSION = 300;
 
 function initSchema(db) {
   db.exec('BEGIN IMMEDIATE;');
@@ -355,6 +355,38 @@ function initSchema(db) {
       status TEXT NOT NULL DEFAULT 'open',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS webhooks (
+      webhook_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      format TEXT NOT NULL DEFAULT 'generic',
+      url TEXT NOT NULL,
+      secret_env TEXT,
+      events_json TEXT NOT NULL DEFAULT '["*"]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_status INTEGER,
+      last_error TEXT,
+      last_sent_at TEXT,
+      delivery_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS client_usage_telemetry (
+      client_id TEXT PRIMARY KEY,
+      client_name TEXT NOT NULL,
+      client_version TEXT,
+      transport TEXT NOT NULL DEFAULT 'stdio',
+      profile TEXT NOT NULL DEFAULT 'full',
+      mcp_calls INTEGER NOT NULL DEFAULT 0,
+      mcp_errors INTEGER NOT NULL DEFAULT 0,
+      mcp_bytes_in INTEGER NOT NULL DEFAULT 0,
+      mcp_bytes_out INTEGER NOT NULL DEFAULT 0,
+      est_mcp_tokens INTEGER NOT NULL DEFAULT 0,
+      last_tool TEXT,
+      last_seen_at TEXT NOT NULL,
+      first_seen_at TEXT NOT NULL
     );
   `);
 

@@ -1,10 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { APP_ROOT, DB_PATH, WORKSPACE_ROOT, WORKTREE_DIR } from './config.mjs';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
+import { APP_ROOT, DB_PATH, INTEGRATIONS, WORKSPACE_ROOT, WORKTREE_DIR } from './config.mjs';
 import { getMemberStatuses, logEvent } from './db.mjs';
 import { probeMailHub } from './prober.mjs';
 import { getCassStats, getToolkitStatus } from './toolkit.mjs';
 import { listWorktrees } from './worktree.mjs';
+
+const execFileAsync = promisify(execFile);
 
 /**
  * List 1-level project subdirectories under WORKSPACE_ROOT (identifying Git repos) for UI/CLI convenience.
@@ -130,6 +134,33 @@ export async function runSystemDoctor(db, { dbPath = DB_PATH, worktreeDir = WORK
     status: hasProv ? 'pass' : 'warn',
     detail: hasProv ? `${Object.keys(tk.provenance.components).length} upstream components tracked with SHA-256` : 'provenance.json incomplete',
   });
+
+  // 9. Optional host-local custom health probes configured in integrations.json
+  for (const probe of INTEGRATIONS.customHealthProbes || []) {
+    if (!probe || typeof probe.id !== 'string' || typeof probe.file !== 'string') continue;
+    const timeoutMs = Math.min(Math.max(Number(probe.timeoutMs) || 8000, 1000), 15000);
+    try {
+      const { stdout } = await execFileAsync(
+        probe.file,
+        Array.isArray(probe.args) ? probe.args.map(String) : [],
+        { timeout: timeoutMs, windowsHide: true, maxBuffer: 256 * 1024 },
+      );
+      const parsed = JSON.parse(String(stdout || '').trim() || '{}');
+      const status = ['pass', 'warn', 'fail'].includes(parsed.status)
+        ? parsed.status
+        : (parsed.ok === false ? 'fail' : 'pass');
+      const detail = typeof parsed.detail === 'string' && parsed.detail
+        ? parsed.detail
+        : JSON.stringify(parsed).slice(0, 200);
+      checks.push({ id: probe.id, status, detail });
+    } catch (err) {
+      checks.push({
+        id: probe.id,
+        status: probe.required ? 'fail' : 'warn',
+        detail: `${probe.label || probe.id} unavailable: ${err.message}`,
+      });
+    }
+  }
 
   const overall = checks.some((c) => c.status === 'fail')
     ? 'unhealthy'

@@ -1,233 +1,178 @@
 <div align="center">
 
-<img src="docs/assets/banner.svg" alt="CollabHub — Local-First Multi-Agent Engineering Workbench" width="100%" />
+# ⚡ CollabHub v3.0
 
-<h3>Coordinate every AI coding agent you already use — in one local-first MCP hub with live streaming logs, live SVG DAGs, checkpoint resume, Git worktree gates, and zero npm dependencies.</h3>
+**One Always-On Brain for Every AI Coding Agent — Live Usage HUD, Smart Model Routing, 14-Client MCP Hub & Sticky Native IDE/Desktop/CLI Plugins.**
 
-<p>
-  <a href="https://mortal7520.github.io/collab-hub/"><img src="https://img.shields.io/badge/Live%20Demo-Try%20in%20Browser-5e6ad2?style=for-the-badge" alt="Live Interactive Demo" /></a>
-</p>
+[![CI Matrix (Ubuntu + Windows · Node 22/24)](https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml)
+[![Interactive Live Demo](https://img.shields.io/badge/Live_Demo-GitHub_Pages-6366f1?style=flat&logo=githubpages)](https://mortal7520.github.io/collab-hub/)
+[![Cockpit Preview](https://img.shields.io/badge/Cockpit_Demo-SEP--1865_MCP_App-38bdf8?style=flat)](https://mortal7520.github.io/collab-hub/cockpit.html)
+[![Zero Dependencies](https://img.shields.io/badge/npm_runtime_deps-0-34d399?style=flat)](./package.json)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.13-34d399?style=flat&logo=nodedotjs)](./package.json)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](./LICENSE)
 
-<p>
-  <a href="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml"><img src="https://github.com/mortal7520/collab-hub/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/mortal7520/collab-hub/releases/latest"><img src="https://img.shields.io/github/v/release/mortal7520/collab-hub?color=5e6ad2" alt="Latest Release" /></a>
-  <a href="https://github.com/mortal7520/collab-hub/stargazers"><img src="https://img.shields.io/github/stars/mortal7520/collab-hub?color=38bdf8" alt="GitHub Stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-22c55e" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node >=22.13" />
-  <img src="https://img.shields.io/badge/MCP-51%20Tools%20%2B%20Apps-8b5cf6" alt="MCP 51 Tools + SEP-1865 Apps" />
-  <img src="https://img.shields.io/badge/npm%20deps-0-14b8a6" alt="Zero npm runtime deps" />
-</p>
+[English](./README.md) · [**简体中文**](./README.zh-CN.md) · [**Live Interactive Demo →**](https://mortal7520.github.io/collab-hub/) · [**Standalone Cockpit Demo →**](https://mortal7520.github.io/collab-hub/cockpit.html)
 
-<p>
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="https://mortal7520.github.io/collab-hub/">Live Demo</a> · <a href="docs/UPSTREAM-REUSE.md">Upstream Reuse</a> · <a href="CHANGELOG.md">Changelog</a> · <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+<br/>
+
+<img src="./docs/assets/social-preview.svg" alt="CollabHub v3.0 — One Always-On Brain for Every AI Coding Agent" width="100%" />
 
 </div>
 
 ---
 
-> **No browser required — Host-Native Cockpits Everywhere (`v2.2.0`):**
-> - **Antigravity (AGY) · Claude Desktop · Codex Desktop**: Call `collab_cockpit` (or open **CollabHub** from Antigravity's left sidebar / `+` side pane) to launch our **6-Tab 60fps SEP-1865 MCP App Neural Cockpit** (`ui://collab-hub/cockpit.html`) right inside your IDE/chat!
-> - **Claude Code CLI · Codex CLI · WSL DSH Terminal**: Run `node bin/collab-hub.mjs tui` for **Interactive Command TUI v2** (`Enter` log drawer, 2-step `x` cancel, `h`/`H` heal, `m` merge check, `reopenDb` snapshot swap), or wire `node bin/collab-hub.mjs hud --format statusline` into Claude Code's bottom `statusLine` (<10ms SQLite read)!
-> - **Browser Interactive Demo (zero install)**: [**Open Live Workbench Demo →**](https://mortal7520.github.io/collab-hub/)
+## Why CollabHub?
 
-- **Living Shared Rooms & 6 New Full-Loop Engines (`v2.2.0`)** — Dual-layer SQLite+Markdown Shared Rooms (`collab_room`: atomic path leases with TTL, `CLAIMS.md`, `ROOM-LOG.md`, safe `inbox/<agent>/` promotion), redacted **Artifact Vault** (`collab_artifacts`), workspace-jailed **Context Handoff Pack** (`collab_handoff_pack`), P0-veto **Multi-Agent Consensus** (`collab_consensus`), atomic **Budget Guardrails** (`collab_budget`), allowlisted **Safe Triggers** (`collab_triggers`), plus passive Desktop heartbeats & age-guarded stale task reconciliation.
-- **Host-Native 6-Tab 60fps SEP-1865 MCP App Cockpit (`v2.2.0`)** — Self-contained `ui://collab-hub/cockpit.html` (`text/html;profile=mcp-app`) with a 60fps Canvas Neural Fleet Constellation, 6 interactive tabs (Radar / Kanban & Logs / MCP Hub / Skills & Rules / Merge Queue / **Rooms & Ops**), one-click **Import All Local MCPs**, debounced 2-step Confirmations, bidirectional `tools/call` + `ui/message` + `com.google.antigravity/toggle-aux-pane`, and Cyber-HUD Unicode fallback (adapted from `modelcontextprotocol/ext-apps`).
-- **Command TUI v2 & Sub-100ms StatusLine HUD (`v2.2.0`)** — Keyboard-first interactive terminal cockpit (`collab-hub tui`) and sub-10ms live `statusLine` HUD (`collab-hub hud`) with OSC/CSI escape sanitization (`sanitizeTerminalText`), bracketed-paste safety, `NO_COLOR`/`TERM=dumb`/TTY degradation, and WSL `immutable=1` handle refresh (`inspired by asheshgoplani/agent-deck` and `sirmalloc/ccstatusline`).
-- **All-Agent MCP Hub & Meta-MCP Lazy Tool Router** — Zero-secret cross-client MCP matrix across Antigravity, Codex, Claude Code, Cursor, Windsurf, and VS Code, live JSON-RPC probing with fail-closed IPv6 SSRF guard, lazy `find_tools` + `call_tool` gateway, and **Dry-Run diff + automatic `.bak` backup** safe sync.
-- **Cross-Agent Skills & Rules Sync Center** — Full directory-tree hashing & secret scanning across `SKILL.md` directories and project rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, `.windsurfrules`) with atomic temp-dir swaps and `.bak` backups.
-- **Worktree Inline Diff Comments & Serialized Merge Queue** — Click any diff line to pin comments and dispatch rework directly into the owning worktree, then run side-effect-free speculative `git merge-tree` conflict checks with atomic queue claims before serially merging into `main`.
-- **Zero npm dependencies, 51 MCP tools, 42 end-to-end tests** — Built purely on Node.js `>=22.13` built-ins with full upstream provenance in [docs/UPSTREAM-REUSE.md](docs/UPSTREAM-REUSE.md).
+If you code with **Claude Code**, **Codex**, **Antigravity**, **Cursor**, **Windsurf**, **Cline**, or **Ollama** every day, you probably hit the same four walls:
 
-<p align="center">
-  <a href="https://mortal7520.github.io/collab-hub/">
-    <img src="docs/assets/workbench-overview-en.png" alt="CollabHub v1.2 Workbench Overview — Bilingual EN/ZH, Live Telemetry, KPI Strip & Agent Roster" width="100%" />
-  </a>
-</p>
+1. **You can't see what you're spending across tools in real time** — tokens, burn rate (`tok/min`), and active MCP calls are fragmented across apps.
+2. **Orchestration tools disappear the moment you close a browser tab** — instead of staying *inside* your IDE sidebar, Desktop chat pane, StatusBar, and terminal prompt.
+3. **Every client repeats the same mistakes** — duplicated `mcpServers` JSON/TOML configs with accidental plaintext API keys, drifting `SKILL.md` / `AGENTS.md` / `CLAUDE.md` rules, and parallel agents stomping on the same files.
+4. **Weak models get flagship tasks (and vice versa)** — nothing checks whether a task needs Codex/Claude/Gemini-Pro vs a fast free local Ollama model.
+
+**CollabHub v3.0 fixes all four in one local-first, zero-npm-dependency SQLite hub:**
+
+- **Always-On Resident UI Inside Every Major Agent** — sticky StatusBar + Sidebar Webview extension inside **VS Code / Cursor / Windsurf / Antigravity IDE / Kiro**, sticky SEP-1865 MCP App (`position: sticky`) inside **Antigravity (`aux_pane` + `global`) / Claude Desktop / Codex Desktop**, plus sub-30ms **Claude Code `statusLine`**, **tmux**, **Zsh/PowerShell** HUD hooks, **24-bit TUI**, and an installable floating **Dock Window** (`collab-hub cockpit --dock`).
+- **Real-Time Cross-Agent Usage & Cost Ledger (Metadata-Only)** — tracks every stdio and Streamable HTTP `/mcp` client in real time plus read-only token/cost counters from local CLI sessions. **Zero prompts, code, or secrets are ever extracted or stored.**
+- **Model-Strength Smart Task Router** — bilingual (EN + 中文) classifier across 10 task categories (`coding`, `security_audit`, `architecture`, `frontend_ui`, `copywriting`, `long_context`, `linux_ops`, `debugging`, `research`, `fast_cheap`) and 4 strategies (`balanced`, `quality`, `cost`, `speed`) with transparent `routing_reasons[]`.
+- **53 MCP Tools (`core` 13 / `cockpit` 23 / `full` 53) + Streamable HTTP `/mcp`** — plug in without blowing your LLM context window.
 
 ---
 
-## What You'll See in the Demo
+## 60-Second Quickstart
 
-### All-Agent MCP Hub, Meta-MCP Router & Safe Dry-Run `.bak` Sync (`v1.5`)
-Compare Antigravity (`JSON`), Codex (`TOML`), Claude Code (`JSON`), Cursor, Windsurf, and VS Code MCP configurations in one drift matrix, search and invoke probed tools lazily through the Meta-MCP gateway, and preview colorized Dry-Run diffs before applying `.bak`-backed syncs.
-
-<p align="center">
-  <img src="docs/assets/workbench-mcphub.png" alt="CollabHub v1.5 — All-Agent MCP Hub, Cross-Client Drift Matrix & Meta-MCP Lazy Tool Router" width="100%" />
-</p>
-
-### Live SVG DAG Execution Overlay & Checkpoint Resume
-Watch multi-stage workflows light up on the interactive `Flow Canvas` (`Completed · 2.2s ✓`, pulsing `Running` ring, dashed dependency curves), save your own reusable DAG templates, or resume failed runs from their last checkpoint without re-running completed upstream stages.
-
-<p align="center">
-  <img src="docs/assets/workbench-dag-live.png" alt="CollabHub v1.2 — Live SVG DAG Execution Overlay and Custom Templates" width="100%" />
-</p>
-
-### Live Streaming Output & Process Cancel/Abort
-Click any running task in the Kanban board or DAG canvas to watch stdout/stderr chunks stream in real time over SSE, copy output in one click, or terminate a runaway CLI/HTTP process cleanly via **Cancel** (`collab_cancel`).
-
-<p align="center">
-  <img src="docs/assets/workbench-live-logs.png" alt="CollabHub v1.2 — Task Detail Drawer with Real-Time Streaming Logs and Cancel Action" width="100%" />
-</p>
-
-### Dual Table + 4-Column Kanban & Batch Receipts
-Track every delegated task across `Queued`, `Running`, `Needs Attention / Stalled`, and `Done` lanes with instant filtering, colorized Worktree unified diffs, and one-click Markdown batch reports.
-
-<p align="center">
-  <img src="docs/assets/workbench-kanban.png" alt="CollabHub v1.2 — 4-Column Kanban Board and Batch Ledger" width="100%" />
-</p>
-
----
-
-## Quick Start
-
-### 1. Launch Locally in 10 Seconds (Zero `npm install`)
-
-Requires **Node.js `>=22.13.0`** (uses built-in `node:sqlite`) and `git`.
+Requires **Node.js >= 22.13.0** (uses built-in `node:sqlite` — **zero** runtime `npm` dependencies).
 
 ```bash
-git clone https://github.com/mortal7520/collab-hub.git
-cd collab-hub
-npm start
+# Install globally (stable persistent paths for autostart & IDE extensions)
+npm install -g collab-hub
+# Or run from a local clone before npm publish: git clone https://github.com/mortal7520/collab-hub.git && cd collab-hub
+
+# 1. Detect all 14 local AI clients & configure zero-secret MCP + Claude Code StatusLine (.bak backup first)
+collab-hub setup --profile cockpit --confirm
+
+# 2. Install the Sticky Always-On Native Extension into VS Code / Cursor / Windsurf / Antigravity / Kiro
+collab-hub install-plugins --confirm
+
+# 3. Auto-start the local hub & pop out the Always-On Resident Floating Cockpit
+collab-hub cockpit --dock
 ```
 
-- **Local safe demo preview (zero personal data, in-memory fixture)**: `http://127.0.0.1:5290/?demo=1`
-- **Your live local workbench**: `http://127.0.0.1:5290`
-- Press `Ctrl+K` / `Cmd+K` for the Command Palette, click `EN / 中` to switch languages, or toggle **Obsidian Dark** / **Alabaster Light**.
-
-### 2. Connect Your MCP Client
-
-Add CollabHub to Claude Code, Codex, Antigravity, Cursor, or any MCP-compatible host:
-
-```json
-{
-  "mcpServers": {
-    "collab-hub": {
-      "command": "node",
-      "args": ["/absolute/path/to/collab-hub/bin/collab-hub.mjs", "mcp"]
-    }
-  }
-}
-```
-
-### 3. Discover Installed Agents & Verify Locally
+Or preview instantly with zero global setup via TUI demo / Docker / autostart:
 
 ```bash
-# Auto-detect installed local coding CLIs & OpenAI-compatible endpoints (Ollama, LM Studio, etc.)
-node bin/collab-hub.mjs discover
+# 24-bit TrueColor interactive terminal cockpit (`--demo` works on any fresh machine)
+npx -y collab-hub tui --demo
 
-# Run the full automated test suite (29 tests, zero external deps)
-npm test
+# Enable zero-admin OS autostart (macOS LaunchAgent / Linux systemd --user / Windows Task Scheduler)
+collab-hub autostart install --confirm
+
+# Run via Docker (Streamable HTTP /mcp + Web Workbench on port 5290)
+docker build -t collab-hub . && docker run --rm -p 5290:5290 -v collabhub-data:/data collab-hub
 ```
 
 ---
 
-## Architecture
+## 1. Always-On Resident UI Inside Every Agent
 
-```mermaid
-flowchart LR
-  Host["Active Coordinator\n(Claude / Codex / AGY / Cursor)"] -->|MCP stdio · 34 tools| MCP["CollabHub MCP Server"]
-  User["Engineer"] -->|HTTP + SSE · :5290| UI["Bilingual Web Workbench\n(EN/ZH · Dark/Light · Kanban · Live SVG DAG)"]
+<img src="./docs/assets/cockpit-v3-showcase.svg" alt="CollabHub v3.0 Native IDE Sidebar, SEP-1865 Cockpit & Smart Router" width="100%" />
 
-  MCP --> Core["CollabHub Core\n(Router · DAG & Resume · Cancel · Logs · Doctor)"]
-  UI --> Core
+| Surface | Host Agents Supported | Always-On & Chat-Adjacent Behavior |
+| :--- | :--- | :--- |
+| **In-Chat MCP App Strip & Pill** (`ui://collab-hub/chat-strip.html`, `cockpit.html`) | **Antigravity (`inline` / `aux_pane` / `global`), Claude Desktop, Codex Desktop, VS Code Chat** | `collab_plan` & `collab_usage` render an interactive inline strip inside chat with 1-click **`ui/update-model-context`** (`Attach to Chat` pill) and sticky side-pane toggle. |
+| **Web AI Browser Companion** (`extensions/collab-hub-browser/`) | **claude.ai, chatgpt.com, gemini.google.com, muse.ai, DeepSeek, Grok, Perplexity** | Zero-dep Chrome/Edge MV3 **Shadow DOM** pill anchored beside the chat box: live usage, `"Route Draft"`, and `"Insert Context into Chat"` (zero cookies touched). |
+| **Native IDE Extension** (`extensions/collab-hub-vscode/`) | **VS Code, Cursor, Windsurf, Antigravity IDE, Kiro** | Pinned StatusBar + Activity Bar & Panel views (`retainContextWhenHidden`) + **`@collabhub`** Chat Participant (`/route`, `/usage`, `/roster`) + `Pin Beside Chat` (`Ctrl+Alt+C`) & `Copy Ctx`. |
+| **Terminal Native HUD & Split** (`extensions/terminal-hud/`) | **Claude Code CLI (`statusLine`), Codex CLI, Gemini CLI, OpenCode, tmux, Zsh, PowerShell, WSL** | `<30ms` SQLite `statusLine`, 36-col tmux/Windows Terminal side split (`collab-hub cockpit --split`), and 24-bit TUI (`collab-hub tui`). |
+| **Pinned Floating Dock & PWA** (`?mode=dock`, `manifest.webmanifest`) | **macOS, Windows, Linux Desktops** | Frameless always-on-top compact dock (`collab-hub cockpit --dock --pin`) sitting cleanly beside Claude/Codex Desktop + installable PWA. |
+| **Web Workbench** (`http://127.0.0.1:5290`) | **Any Browser (+ GitHub Pages Demo)** | Sticky Live Usage Dock Bar across all 9 views, Light/Dark themes, EN/中文 toggle, `Ctrl+K` Command Palette. |
 
-  Core --> DB[("SQLite + FTS5\nReceipts · Workflow Plans · Memory · Telemetry")]
-  Core --> WT["Git Worktree Manager\n(.worktreeinclude · Test Gate · Colorized Diff · Merge)"]
-  Core --> TK["Optional CLI Toolkit\n(cass · ast-grep · repomix · beads · markitdown)"]
+<img src="./docs/assets/tui-v2-showcase.svg" alt="CollabHub v3.0 24-bit Command TUI & Live Terminal StatusLine HUD" width="100%" />
 
-  Core -->|generic-cli| CLI["Gemini CLI / Aider / OpenCode / Scripts"]
-  Core -->|openai-http| HTTP["Ollama / LM Studio / DeepSeek / OpenRouter"]
-  Core -->|desktop-native| Native["Local IDE / Desktop Peer Sessions"]
+---
+
+## 2. Supported Market Clients & Ecosystem (14 Clients)
+
+CollabHub detects, imports, probes, and safely syncs configurations (with automatic `.bak` backups and inline-secret blocking) across **14 mainstream AI clients**, handling their exact JSON/TOML schemas (`mcpServers`, `mcp_servers`, `servers`, `mcp`, `context_servers`):
+
+`Antigravity` · `Claude Code` · `Claude Desktop` · `Codex` · `Cursor` · `Windsurf` · `VS Code Copilot` · `Gemini CLI` · `Cline` · `Roo Code` · `OpenCode` · `Zed` · `Continue` · `Kiro`
+
+Plus auto-discovery for **Ollama**, **LM Studio**, **vLLM**, **Aider**, **Qwen CLI**, and environment-ready **OpenAI / DeepSeek / OpenRouter / SiliconFlow** gateways — **never reading or echoing raw API keys**.
+
+---
+
+## 3. Real-Time Cross-Agent Usage & Smart Capability Router
+
+### Live Cross-Agent Usage (`collab_usage` / `GET /api/usage/live` / `collab-hub usage`)
+- **Every MCP Call Counted**: Both stdio and Streamable HTTP `/mcp` automatically record `client_id`, `transport`, `profile`, call count, errors, and last tool in `client_usage_telemetry`.
+- **Metadata-Only Local Session Aggregation**: Bounded, cached scans compute today/7-day tokens, `tok/min` burn rate, 24h hourly throughput sparklines, and API-equivalent USD cost estimates (`$0` for Ollama/local models) with a hard privacy guarantee (`privacy_note: "metadata_only_no_prompts"`).
+
+### Capability & Model-Strength Smart Router (`collab_plan` / `POST /api/route/recommend` / `collab-hub plan`)
+Inspired by [`lm-sys/RouteLLM`](https://github.com/lm-sys/RouteLLM) (complexity stratification) and [`BerriAI/litellm`](https://github.com/BerriAI/litellm) Router (cooldown/latency/cost awareness), CollabHub scores every online agent on 10 bilingual task categories (`coding`, `security_audit`, `architecture`, `frontend_ui`, `copywriting`, `long_context`, `linux_ops`, `debugging`, `research`, `fast_cheap`) and returns transparent `routing_reasons[]`:
+
+```bash
+$ collab-hub plan --prompt "Security audit of SSRF and HMAC webhook boundaries" --strategy quality
+# -> Illustrative summary from JSON output: Codex (gpt-5-codex, flagship) · security_audit=96/100 · flagship_boost_for_high_complexity(+8)
+
+$ collab-hub plan --prompt "Quick log formatting summary" --strategy cost
+# -> Illustrative summary from JSON output: Ollama Qwen (local, free) · fast_cheap=99/100 · strategy=cost(free:+24)
 ```
 
 ---
 
-## Honest Comparison
+## 4. Streamable HTTP `/mcp` & Context-Budget Profiles (53 Tools)
 
-How CollabHub compares with popular open-source coding-agent orchestrators:
+Don't waste 20k context tokens on tool definitions you aren't using. Pick your profile:
 
-| Capability | **CollabHub** | **Vibe Kanban** | **Cline** | **Overstory** *(archived)* | **OpenHands** |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Primary form factor** | Local MCP hub + Web Workbench | Kanban web app | IDE extension | CLI orchestrator + `ov serve` UI | Full autonomous cloud/Docker platform |
-| **Multi-agent heterogeneous routing** | Built-in (`auto` + fallback + 429 cooldown) | Multiple agents per card | Single IDE loop | Multi-agent CLI swarm | Multi-agent SDK / runtime |
-| **Live SVG DAG + Checkpoint Resume** | **Built-in** (live overlay + `workflow_plans`) | Kanban cards | Workflows / hooks | Sling / mail waves | SDK pipelines |
-| **Live streaming logs + Cancel** | **Built-in** (SSE tail + process abort) | Built-in logs | IDE panel | CLI logs | Container logs |
-| **Git worktree + test-gated merge** | Built-in (`verify` SHA gate + colorized diff) | Built-in worktrees | Workspace edits | Built-in worktrees | Containerized sandboxes |
-| **Zero npm runtime dependencies** | **Yes** (`node:sqlite` + built-ins) | No (Rust/Node stack) | No (VS Code ext) | No (Bun/TS stack) | No (Python + Docker) |
-| **Hosted SaaS / Cloud sandboxes** | **No** (strictly local-first) | Optional | BYO API / cloud | No | **Yes** |
+| Profile | Tools | Designed For |
+| :--- | :---: | :--- |
+| `--profile core` | **13** | Tight context budgets: Cockpit, Roster, Smart Plan, Dispatch, Poll, Cancel, Tasks, Shared Rooms, Handoff Pack, Worktrees (`create`/`verify`/`merge`), Live Usage |
+| `--profile cockpit` | **23** | **Recommended default**: `core` + Consensus, Artifacts, Budgets, Triggers, Webhooks, MCP Hub, Meta-MCP Lazy Finder, Skills Sync, Merge Queue, Self-Check & Auto-Heal |
+| `--profile full` | **53** | Power orchestrators: everything above + FTS5 Memory, Code Toolkit (`ast-grep`, `repomix`, `markitdown`, `beads`, `cass`), Multi-Stage DAG Workflows, Playbooks & Dynamic Agent Registry |
 
-> **When *not* to choose CollabHub:** If you want a hosted cloud team SaaS, containerized remote execution sandboxes, or an embedded single-editor autocomplete sidebar, tools like **OpenHands**, **Cline**, or **Vibe Kanban** may fit better. CollabHub is intentionally built for engineers who already run multiple local coding agents/CLIs and want a lightweight, auditable, zero-dependency control plane that respects their existing accounts, permissions, and local Git workflow.
+Connect over **stdio** (`npx collab-hub mcp --profile cockpit`) OR **Streamable HTTP** (`POST/GET/DELETE http://127.0.0.1:5290/mcp?profile=cockpit` with strict loopback `Host` & `Origin` protection).
 
 ---
 
-## Pluggable Agent Adapters
+## 5. Full Engineering & Safety Architecture
 
-Register any additional agent dynamically via the UI (`+ Add agent`) or `collab_agent_register` — persisted in `<dataDir>/agents.json`:
+- **Zero-Secret All-Agent MCP Hub & Meta-MCP Lazy Router**: Blocks inline API keys (`sk-`, `ghp_`, `AIza`, UTF-16LE/BE checks) on read/write; only allows safe `${ENV_VAR}` placeholders (explicitly banning `${cmd:...}` shell injection); DNS-resolving SSRF guard blocks private/CGNAT/link-local metadata IPs.
+- **Cross-Agent Skills & Rules Sync**: Syncs `SKILL.md` directories and project rules (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/project.mdc`, `.windsurfrules`, `.clinerules`, `.github/copilot-instructions.md`) with Dry-Run unified diffs and `.bak` backups.
+- **Worktree Isolation, Inline Diff Comments & Speculative Merge Queue**: Parallel agents work in isolated Git worktrees; pre-flight checks use side-effect-free `git merge-tree --write-tree` to detect semantic collisions before touching `main`.
+- **Living Shared Rooms, Consensus, Artifact Vault & Budgets**: Path-glob leases with TTLs, per-agent `/inbox/` staging with confirmed promotion, arbitration rounds, redacted artifacts, daily token/call policies (`warn`/`downgrade`/`block`), and **SSRF-guarded HMAC-SHA256 Signed Webhooks** for Slack, Discord, Feishu, DingTalk, and Telegram.
+- **Programmatic ESM SDK** (`package.json` `"exports"`):
+  ```js
+  import { createCollabHub, classifyTaskIntent, getLiveAgentUsage } from 'collab-hub';
+  const hub = await createCollabHub({ port: 5290 });
+  ```
 
-| Adapter Type | Examples | Security Model |
+---
+
+## Configuration (Environment Variables)
+
+| Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `generic-cli` | Gemini CLI, Aider, OpenCode, Qwen Code, custom shell/Python scripts | Executed via argv array (`shell: false`), strict timeout, live log ring buffer & process-tree abort |
-| `openai-http` | Ollama (`localhost:11434/v1`), LM Studio, vLLM, DeepSeek, OpenRouter | **`api_key_env` only** — never stores plaintext keys; 2 MiB response cap & `AbortController` cancel |
-| `desktop-native` | Active IDE / Desktop agent conversations | Coordinator-attested handoff ledger; never silently spoofs or replaces a Desktop session with CLI |
+| `COLLAB_HUB_HOME` | `~/.collab-hub` | Runtime directory (`hub.db`, shared rooms, hot backups, logs, `integrations.json`) |
+| `COLLAB_HUB_WORKSPACE` | Current working directory / `~/workspace` | Root workspace scanned for Git repos, worktrees & project rules |
+| `COLLAB_HUB_PORT` | `5290` | Loopback dashboard, SSE & Streamable HTTP `/mcp` port (`127.0.0.1` only) |
+| `COLLAB_HUB_MCP_PROFILE` | `full` (setup defaults to `cockpit`) | Default MCP tool profile (`core` \| `cockpit` \| `full`) |
+| `AGENT_MAIL_URL` | `http://127.0.0.1:5291` | Optional companion MCP Agent Mail endpoint |
 
-Optional local integrations (such as custom bridges or [mcp_agent_mail_rust](https://github.com/Dicklesworthstone/mcp_agent_mail_rust) for advisory file leases) can be configured outside Git via `<dataDir>/integrations.json` or environment variables.
-
----
-
-## MCP Tool Reference (34 Tools)
-
-<details>
-<summary><strong>Click to expand all 34 unified MCP tools</strong></summary>
-
-| Category | Tools |
-| :--- | :--- |
-| **Fleet & Routing** | `collab_roster`, `collab_plan`, `collab_metrics`, `collab_cooldown` |
-| **Dynamic Agent Registry** | `collab_agent_discover`, `collab_agent_register`, `collab_agent_list`, `collab_agent_remove` |
-| **Dispatch, Cancel & Receipt Ledger** | `collab_dispatch`, `collab_poll`, `collab_poll_batch`, `collab_cancel`, `collab_task_reconcile`, `collab_record_handoff`, `collab_tasks`, `collab_batch_report` |
-| **DAGs, Resume, Playbooks & Recipes** | `collab_workflow_run`, `collab_workflow_resume`, `collab_playbook_run`, `collab_recipes` |
-| **Git Worktree Isolation & Gates** | `collab_worktree_create`, `collab_worktree_review`, `collab_worktree_verify`, `collab_worktree_merge`, `collab_worktree_cleanup` |
-| **Shared FTS5 Memory** | `collab_memory_write`, `collab_memory_search`, `collab_memory_list` |
-| **Optional Open-Source Toolkit** | `collab_session_search` (`cass`), `collab_ast_search` (`ast-grep`), `collab_repo_pack` (`repomix`), `collab_beads` (`bd`), `collab_doc_to_md` (`markitdown`) |
-| **Ops & Diagnostics** | `collab_doctor` (8-point health check + SQLite `VACUUM INTO` hot backups) |
-
-</details>
+> Full documentation of upstream open-source inspirations & provenance: [`docs/UPSTREAM-REUSE.md`](./docs/UPSTREAM-REUSE.md).  
+> Ready-to-use launch posts & directory checklist: [`docs/LAUNCH-KIT.md`](./docs/LAUNCH-KIT.md) · Machine-readable index: [`/llms.txt`](./public/llms.txt).
 
 ---
 
-## Configuration & Storage
+## Comparison
 
-By default, CollabHub stores all runtime data inside the OS standard user directory (`~/.collab-hub` on macOS/Linux, `%LOCALAPPDATA%\CollabHub` on Windows) — never inside your Git repository.
-
-| Environment Variable | Default | Purpose |
-| :--- | :--- | :--- |
-| `COLLAB_HUB_HOME` | `~/.collab-hub` / `%LOCALAPPDATA%\CollabHub` | Override runtime root (`data/`, `backups/`, `logs/`, `worktrees/`) |
-| `COLLAB_HUB_WORKSPACE` | Current directory | Default workspace root for worktrees and project autocomplete |
-| `COLLAB_HUB_PORT` | `5290` | Web Workbench HTTP + SSE port (bound strictly to `127.0.0.1`) |
-| `COLLAB_HUB_MAIL_PORT` | `5291` | Optional Agent Mail port for advisory file leases |
-
-You may also place a gitignored `.collab-hub.local.json` file in the repository root to pin `appRoot` or `workspaceRoot` locally without touching tracked files.
-
----
-
-## Security & Hardening
-
-- **Loopback-only binding & SSE backpressure guard**: HTTP/SSE server binds strictly to `127.0.0.1` with a 512 KiB per-client SSE backpressure cutoff and 2 MiB HTTP agent response cap.
-- **Hardened static serving & CSP**: `public/` assets are served through a flat exact-filename allowlist with strict `Content-Security-Policy`; GitHub Pages builds also inject `<meta http-equiv="Content-Security-Policy">` and skip same-origin `localStorage` templates in demo mode.
-- **Confirmed cancellation & safe checkpoint resume**: `collab_cancel` refuses unconfirmed out-of-process cancellations unless `force: true` is explicitly set; `collab_workflow_resume` preserves original `workflow_plans` parameters and never blindly retries `uncertain` or `stalled` tasks.
-- **SHA-pinned worktree verification gate**: `collab_worktree_verify` records the tested commit SHA; `collab_worktree_merge` blocks merges if verification failed or new unverified commits landed.
-
----
-
-## Dogfooding: Built with CollabHub
-
-`v1.2.0` was built and audited concurrently using CollabHub's own 4-agent team (`batch_id: v12_combo_team`):
-1. **Frontend Combo (`wt_v12_ui`)** — Built inside an isolated Git worktree, gated by `collab_worktree_verify`, and merged with zero conflicts via `collab_worktree_merge`.
-2. **Adversarial P0/P1 Audit** — Independently audited in parallel with live in-memory reproduction, surfacing and fixing 6 edge cases across cross-process cancellation, `workflow_plans` persistence, SSE backpressure, and Pages CSP before tagging.
-3. **Launch Positioning & Copy** — Reviewed concurrently to elevate the interactive browser demo above the fold and tighten release notes.
-
----
+| Feature | Single-Client Dashboards | Cloud Router Proxies | Raw MCP Config Files | **CollabHub v3.0** |
+| :--- | :---: | :---: | :---: | :---: |
+| **Zero runtime npm dependencies (local-first)** | Rarely | No | N/A | **Yes (Node 22+ built-ins)** |
+| **Sticky Always-On UI *inside* IDE / Desktop / CLI** | IDE-locked | Web only | No | **Yes (VS Code/Cursor/Windsurf/AGY/Kiro/Claude/Codex/TUI/Dock)** |
+| **Real-time usage across 14 clients (zero prompt leak)** | 1 client | Proxy-only | No | **Yes (stdio + `/mcp` + local sessions)** |
+| **Capability & model-strength task router** | No | API-only | No | **Yes (10 categories × 4 strategies + explainable reasons)** |
+| **Zero-secret multi-client MCP & Skills/Rules sync** | No | No | Manual copy | **Yes (Dry-Run diff + `.bak` + secret scanner)** |
+| **Speculative Git Merge Queue & Shared Rooms** | Partial | No | No | **Yes (`git merge-tree` + TTL file leases)** |
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](./LICENSE) — Built with zero runtime bloat for engineers orchestrating real multi-agent workflows.

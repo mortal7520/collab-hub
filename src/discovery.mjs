@@ -92,7 +92,10 @@ function getDesktopAppCandidates(envObj = process.env) {
       { id: 'claude-desktop', name: 'Claude Desktop', paths: [path.join(localApp, 'AnthropicClaude', 'claude.exe'), path.join(localApp, 'Programs', 'Claude', 'Claude.exe')], launch_args: () => [] },
       { id: 'codex-desktop', name: 'Codex Desktop', paths: [path.join(localApp, 'Programs', 'Codex', 'Codex.exe'), path.join(localApp, 'Codex', 'Codex.exe')], launch_args: (dir) => [dir] },
       { id: 'cursor', name: 'Cursor IDE', paths: [path.join(localApp, 'Programs', 'cursor', 'Cursor.exe')], launch_args: (dir) => [dir] },
+      { id: 'windsurf', name: 'Windsurf IDE', paths: [path.join(localApp, 'Programs', 'Windsurf', 'Windsurf.exe')], launch_args: (dir) => [dir] },
       { id: 'vscode', name: 'VS Code', paths: [path.join(localApp, 'Programs', 'Microsoft VS Code', 'Code.exe'), path.join(progFiles, 'Microsoft VS Code', 'Code.exe')], launch_args: (dir) => [dir] },
+      { id: 'zed', name: 'Zed Editor', paths: [path.join(localApp, 'Programs', 'Zed', 'Zed.exe')], launch_args: (dir) => [dir] },
+      { id: 'kiro', name: 'Kiro IDE', paths: [path.join(localApp, 'Programs', 'Kiro', 'Kiro.exe')], launch_args: (dir) => [dir] },
       { id: 'windows-terminal', name: 'Windows Terminal', paths: [path.join(localApp, 'Microsoft', 'WindowsApps', 'wt.exe')], launch_args: (dir) => ['-d', dir] },
     ];
   }
@@ -100,7 +103,11 @@ function getDesktopAppCandidates(envObj = process.env) {
     return [
       { id: 'antigravity', name: 'Antigravity Desktop', paths: ['/Applications/Antigravity.app'], launch_args: (dir) => [dir] },
       { id: 'claude-desktop', name: 'Claude Desktop', paths: ['/Applications/Claude.app'], launch_args: () => [] },
+      { id: 'codex-desktop', name: 'Codex Desktop', paths: ['/Applications/Codex.app'], launch_args: (dir) => [dir] },
       { id: 'cursor', name: 'Cursor IDE', paths: ['/Applications/Cursor.app'], launch_args: (dir) => [dir] },
+      { id: 'windsurf', name: 'Windsurf IDE', paths: ['/Applications/Windsurf.app'], launch_args: (dir) => [dir] },
+      { id: 'zed', name: 'Zed Editor', paths: ['/Applications/Zed.app'], launch_args: (dir) => [dir] },
+      { id: 'kiro', name: 'Kiro IDE', paths: ['/Applications/Kiro.app'], launch_args: (dir) => [dir] },
       { id: 'vscode', name: 'VS Code', paths: ['/Applications/Visual Studio Code.app'], launch_args: (dir) => [dir] },
     ];
   }
@@ -108,6 +115,7 @@ function getDesktopAppCandidates(envObj = process.env) {
     { id: 'antigravity', name: 'Antigravity CLI', paths: [path.join(home, '.local', 'bin', 'agy')], launch_args: (dir) => [dir] },
     { id: 'codex-cli', name: 'Codex CLI', paths: [path.join(home, '.local', 'bin', 'codex')], launch_args: (dir) => [dir] },
     { id: 'claude-cli', name: 'Claude Code CLI', paths: [path.join(home, '.local', 'bin', 'claude')], launch_args: (dir) => ['--add-dir', dir] },
+    { id: 'zed', name: 'Zed Editor', paths: ['/usr/bin/zed', path.join(home, '.local', 'bin', 'zed')], launch_args: (dir) => [dir] },
     { id: 'vscode', name: 'VS Code', paths: ['/usr/bin/code', '/usr/local/bin/code'], launch_args: (dir) => [dir] },
   ];
 }

@@ -520,7 +520,7 @@ export function createStudiosController(ctx) {
   function renderOverviewBento(overviewData) {
     startOverviewConstellation();
     const standaloneLink = $('#btnOpenStandaloneCockpit');
-    if (standaloneLink) standaloneLink.hidden = Boolean(state.static);
+    if (standaloneLink) standaloneLink.hidden = false;
     const host = $('#studioBento');
     if (!host) return;
     const mcpSum = overviewData?.mcp_hub_summary || sState.mcp?.summary || { servers_count: 0, clients_detected: 0, drift_count: 0, cached_tools_total: 0 };

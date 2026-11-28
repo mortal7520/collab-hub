@@ -1,0 +1,115 @@
+{
+  "name": "collab-hub",
+  "displayName": "CollabHub — Always-On Multi-Agent Cockpit & Usage HUD",
+  "description": "Always-on sticky StatusBar & Sidebar Cockpit inside VS Code, Cursor, Windsurf, Antigravity, and Kiro: real-time cross-agent token/cost ledger, 60fps fleet radar, smart model router & 53-tool MCP control.",
+  "version": "3.0.0",
+  "publisher": "mortal7520",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mortal7520/collab-hub.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "collabhub",
+          "title": "CollabHub",
+          "icon": "media/icon.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "collabhub-panel",
+          "title": "CollabHub HUD",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "collabhub": [
+        {
+          "type": "webview",
+          "id": "collabHub.sidebar",
+          "name": "Mission Control & Live Usage"
+        }
+      ],
+      "collabhub-panel": [
+        {
+          "type": "webview",
+          "id": "collabHub.panel",
+          "name": "Chat-Adjacent Live HUD"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "collabhub.assistant",
+        "name": "collabhub",
+        "fullName": "CollabHub Fleet & Router",
+        "description": "Query live multi-agent usage, fleet health, and model-strength task routing directly inside chat.",
+        "isSticky": true,
+        "commands": [
+          { "name": "route", "description": "Recommend strongest agent/model for a task" },
+          { "name": "usage", "description": "Show live cross-agent token & cost usage" },
+          { "name": "roster", "description": "Inspect online/cooldown status across agents" }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "collabHub.openCockpit",
+        "title": "CollabHub: Open Resident Cockpit Panel"
+      },
+      {
+        "command": "collabHub.pinBesideChat",
+        "title": "CollabHub: Pin Beside Chat"
+      },
+      {
+        "command": "collabHub.openWorkbench",
+        "title": "CollabHub: Open Full Web Workbench"
+      },
+      {
+        "command": "collabHub.refresh",
+        "title": "CollabHub: Refresh Live Telemetry"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "collabHub.pinBesideChat",
+        "key": "ctrl+alt+c",
+        "mac": "cmd+alt+c"
+      }
+    ],
+    "configuration": {
+      "title": "CollabHub Resident Extension",
+      "properties": {
+        "collabHub.port": {
+          "type": "number",
+          "default": 5290,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Local CollabHub daemon port (loopback 127.0.0.1 only)."
+        },
+        "collabHub.pollIntervalSec": {
+          "type": "number",
+          "default": 6,
+          "minimum": 3,
+          "maximum": 60,
+          "description": "Live telemetry polling interval in seconds."
+        }
+      }
+    }
+  }
+}

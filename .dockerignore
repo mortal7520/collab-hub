@@ -1,0 +1,10 @@
+.git
+.github
+_site
+node_modules
+test
+docs/assets
+extensions
+*.db
+*.log
+.collab-hub.local.json
